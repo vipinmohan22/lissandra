@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/vipinmohan22/layalogs/internal/classify"
 	"github.com/vipinmohan22/layalogs/internal/config"
@@ -447,5 +449,112 @@ func TestRegistryByteBudget(t *testing.T) {
 	newest, _ := reg.Get(ids[2])
 	if newest.Report(false).EventsEvicted {
 		t.Error("newest import should keep its events")
+	}
+}
+
+func TestRetainedStringsOwnTheirBytes(t *testing.T) {
+	big := strings.Repeat("e", 1<<20)
+	ev := model.Event{Message: big[:20], Level: big[:5], Summary: big[:7]}
+	c := compact(ev)
+	for name, s := range map[string]string{"message": c.Message, "level": c.Level, "summary": c.Summary} {
+		if unsafe.StringData(s) == unsafe.StringData(big) {
+			t.Errorf("compacted %s still points into the original record", name)
+		}
+	}
+	im := New("x", DefaultLimits, start)
+	pe := model.Event{Message: big[:30] + "\n" + big[30:], Fingerprint: "f", Severity: model.SeverityError}
+	im.add(&pe, true, nil)
+	if p := im.patterns["f"]; unsafe.StringData(p.Sample) == unsafe.StringData(pe.Message) {
+		t.Error("pattern sample pins the full message")
+	}
+
+	// Levels and numbers count toward the budget.
+	huge := strings.Repeat("9", 100<<10)
+	if n := cost(&model.Event{Level: huge}); n < 100<<10 {
+		t.Errorf("level not counted: %d", n)
+	}
+	if n := cost(&model.Event{Fields: map[string]any{"n": json.Number(huge)}}); n < 100<<10 {
+		t.Errorf("json.Number not counted: %d", n)
+	}
+}
+
+func TestOutputErrorDoesNotReplayEvents(t *testing.T) {
+	var calls int
+	im, err := runImport(t, strings.NewReader(logLines(1000, func(i int) string { return fmt.Sprintf("2026-10-11T10:00:00Z INFO line %d", i) })), Limits{}, Options{}, Deps{
+		OnEvent: func(model.Event) error {
+			if calls++; calls == 50 {
+				return errors.New("disk full")
+			}
+			return nil
+		},
+	})
+	r := im.Report(false)
+	if err != nil || calls != 50 || r.Events != 50 || r.StopReason != StopOutput || !strings.Contains(r.Error, "disk full") {
+		t.Errorf("err=%v calls=%d events=%d reason=%s error=%q", err, calls, r.Events, r.StopReason, r.Error)
+	}
+}
+
+func TestWorkerPanicLeavesTerminalState(t *testing.T) {
+	im := New("x", DefaultLimits, start)
+	input := logLines(600, func(i int) string { return fmt.Sprint("line ", i) })
+	err := Run(context.Background(), im, strings.NewReader(input), Options{Source: src(), Workers: 4}, Deps{Classify: func(*model.Event) bool { panic("boom") }})
+	if r := im.Report(false); err == nil || r.Status != StatusFailed || r.StopReason != StopInternal || !strings.Contains(r.Error, "boom") {
+		t.Errorf("worker panic: %v %+v", err, r)
+	}
+}
+
+func TestTruncatedGzipJSONIsReportedAsTruncated(t *testing.T) {
+	var doc strings.Builder
+	doc.WriteString("[\n")
+	for i := 0; i < 2000; i++ {
+		if i > 0 {
+			doc.WriteString(",\n")
+		}
+		fmt.Fprintf(&doc, `{"level":"error","message":"request %d failed","trace":"%064d"}`, i, i*7919)
+	}
+	doc.WriteString("\n]\n")
+	var gz bytes.Buffer
+	w := gzip.NewWriter(&gz)
+	w.Write([]byte(doc.String()))
+	w.Close()
+	cut := gz.Bytes()[:gz.Len()/2]
+	im, err := runImport(t, bytes.NewReader(cut), Limits{}, Options{}, Deps{})
+	if r := im.Report(false); err != nil || r.StopReason != StopGzipTruncated || r.Events == 0 {
+		t.Errorf("err=%v reason=%s events=%d error=%q", err, r.StopReason, r.Events, r.Error)
+	}
+}
+
+func TestInputExactlyAtTheLimit(t *testing.T) {
+	input := logLines(1000, func(i int) string { return fmt.Sprintf("2026-10-11T10:00:00Z INFO line %d", i) })
+	for _, max := range []int64{int64(len(input)), int64(len(input)) + 1} {
+		im, err := runImport(t, strings.NewReader(input), Limits{}, Options{MaxBytes: max}, Deps{})
+		if r := im.Report(false); err != nil || r.Truncated || r.Events != 1000 {
+			t.Errorf("max=%d: err=%v truncated=%v reason=%s events=%d", max, err, r.Truncated, r.StopReason, r.Events)
+		}
+	}
+	im, _ := runImport(t, strings.NewReader(input), Limits{}, Options{MaxBytes: int64(len(input)) - 1}, Deps{})
+	if r := im.Report(false); !r.Truncated || r.StopReason != StopDecompressedLimit {
+		t.Errorf("one byte over: %+v", r)
+	}
+	// Tiny input exactly at the limit.
+	im, _ = runImport(t, strings.NewReader("tiny\n"), Limits{}, Options{MaxBytes: 5}, Deps{})
+	if r := im.Report(false); r.Truncated || r.Events != 1 {
+		t.Errorf("tiny: truncated=%v events=%d", r.Truncated, r.Events)
+	}
+}
+
+func TestTimelineKeepsContiguousTail(t *testing.T) {
+	agg := newTimeAgg()
+	base := time.Date(2026, 10, 11, 10, 0, 0, 0, time.UTC).Unix()
+	for i := 0; i < 10000; i++ {
+		agg.add(base+int64(i%60), 2)
+	}
+	for m := 1; m <= 40; m++ {
+		agg.add(base+int64(m)*60, 5) // a crash loop's tail, once a minute
+	}
+	agg.add(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).Unix(), 5)
+	tl := agg.snapshot()
+	if tl.After != 0 || tl.Before != 1 || !tl.End.After(time.Unix(base+40*60, 0)) {
+		t.Errorf("tail cut: before=%d after=%d end=%v", tl.Before, tl.After, tl.End)
 	}
 }

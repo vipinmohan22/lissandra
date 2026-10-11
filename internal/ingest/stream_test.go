@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -356,5 +357,250 @@ func TestHTTPParseUnchangedForTimestampedTraces(t *testing.T) {
 	}
 	if evs[0].Line != 0 || evs[0].TimeSource != "" {
 		t.Errorf("HTTP events must not carry file fields: %+v", evs[0])
+	}
+}
+
+// errAfter returns data, then err.
+type errAfter struct {
+	data []byte
+	err  error
+}
+
+func (e *errAfter) Read(p []byte) (int, error) {
+	if len(e.data) == 0 {
+		return 0, e.err
+	}
+	n := copy(p, e.data)
+	e.data = e.data[n:]
+	return n, nil
+}
+
+func TestStreamJSONWrapperPriority(t *testing.T) {
+	// Splunk results export: an empty "messages" array comes first, but
+	// "results" ranks higher, as in HTTP ingest.
+	splunk := `{"preview":false,"init_offset":0,"messages":[],"fields":[{"name":"message"}],"results":[{"message":"disk full"},{"message":"oom"}]}`
+	evs, _, err := streamAll(t, splunk, StreamOptions{})
+	if err != nil || strings.Join(messages(evs), ",") != "disk full,oom" {
+		t.Errorf("splunk export: %v %q", err, messages(evs))
+	}
+	warned := `{"messages":[{"type":"WARN","text":"search truncated"}],"results":[{"message":"a"}]}`
+	evs, _, _ = streamAll(t, warned, StreamOptions{})
+	if strings.Join(messages(evs), ",") != "a" {
+		t.Errorf("lower-ranked array chosen: %q", messages(evs))
+	}
+	// HTTP ingest picks the same arrays.
+	for body, want := range map[string]string{splunk: "disk full,oom", warned: "a"} {
+		src := &config.Source{Parse: config.Parse{Format: config.FormatJSON}}
+		hevs, err := Parse([]byte(body), "", src, streamNow)
+		if err != nil || strings.Join(messages(hevs), ",") != want {
+			t.Errorf("HTTP parse: %v %q, want %q", err, messages(hevs), want)
+		}
+	}
+
+	// A large records array is streamed even if a preferred key follows.
+	var b strings.Builder
+	b.WriteString(`{"messages":[`)
+	for i := 0; i < 5000; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"message":"row ` + strings.Repeat("x", 80) + `"}`)
+	}
+	b.WriteString(`],"records":[{"message":"late"}]}`)
+	evs, _, err = streamAll(t, b.String(), StreamOptions{MaxRecordBytes: 64 << 10})
+	if err != nil || len(evs) != 5000 {
+		t.Errorf("large array: %v %d", err, len(evs))
+	}
+}
+
+func TestStreamJSONRecordCapCoversWholeObject(t *testing.T) {
+	// An object keyed by id is one record: its size is capped as a whole,
+	// not per key.
+	var b strings.Builder
+	b.WriteString(`{`)
+	for i := 0; i < 40; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`"evt-` + strings.Repeat("9", i+1) + `":{"msg":"` + strings.Repeat("y", 50<<10) + `"}`)
+	}
+	b.WriteString(`}`)
+	_, _, err := streamAll(t, b.String(), StreamOptions{Format: config.FormatJSON, MaxRecordBytes: 1 << 20})
+	if !errors.Is(err, ErrRecordTooLarge) {
+		t.Errorf("keyed object over the cap: %v", err)
+	}
+	// "hits" holding an array (not an object with "hits") is envelope, capped too.
+	arr := `{"hits":[` + strings.TrimSuffix(strings.Repeat(`{"msg":"`+strings.Repeat("z", 50<<10)+`"},`, 40), ",") + `]}`
+	_, _, err = streamAll(t, arr, StreamOptions{Format: config.FormatJSON, MaxRecordBytes: 1 << 20})
+	if !errors.Is(err, ErrRecordTooLarge) {
+		t.Errorf("non-records array over the cap: %v", err)
+	}
+	// Streamed records don't count toward the envelope.
+	big := `{"meta":{"n":1},"records":[` + strings.TrimSuffix(strings.Repeat(`{"msg":"`+strings.Repeat("z", 50<<10)+`"},`, 40), ",") + `],"tail":"x"}`
+	evs, _, err := streamAll(t, big, StreamOptions{Format: config.FormatJSON, MaxRecordBytes: 1 << 20})
+	if err != nil || len(evs) != 40 {
+		t.Errorf("streamed records: %v %d", err, len(evs))
+	}
+}
+
+func TestStreamJSONRecordsPathLikeHTTP(t *testing.T) {
+	cases := []struct {
+		path, body string
+		want       []string
+	}{
+		{"data.result.0.values", `{"data":{"result":[{"values":[{"msg":"a"},{"msg":"b"}]},{"values":[{"msg":"c"}]}]}}`, []string{"a", "b"}},
+		{"data", `{"data":{"msg":"single"}}`, []string{"single"}},
+		{"data", `{"data":null}`, nil},
+		{"a.b", `{"a.b":[{"msg":"dotted"}]}`, []string{"dotted"}},
+	}
+	for _, c := range cases {
+		src := &config.Source{Parse: config.Parse{Format: config.FormatJSON, RecordsPath: c.path}}
+		var got []string
+		_, err := Stream(strings.NewReader(c.body), src, streamNow, StreamOptions{}, func(ev model.Event) error {
+			got = append(got, ev.Message)
+			return nil
+		})
+		if err != nil || strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("%s: %v %q", c.path, err, got)
+		}
+		hevs, err := Parse([]byte(c.body), "", src, streamNow)
+		if err != nil || strings.Join(messages(hevs), ",") != strings.Join(c.want, ",") {
+			t.Errorf("%s over HTTP: %v %q", c.path, err, messages(hevs))
+		}
+	}
+}
+
+func TestStreamJSONArrayLineNumbersAcrossBuffers(t *testing.T) {
+	// Element starts land on every position relative to the decoder's
+	// buffer refills, including right after a comma.
+	for _, shape := range []string{`{"msg":"m%d"}`, `  {"msg": "m%d"}`, "  {\n    \"msg\": \"m%d\"\n  }"} {
+		var b strings.Builder
+		b.WriteString("[\n")
+		var want []int
+		line := 2
+		for i := 0; i < 20000; i++ {
+			if i > 0 {
+				b.WriteString(",\n")
+			}
+			el := fmt.Sprintf(shape, i)
+			want = append(want, line)
+			line += strings.Count(el, "\n") + 1
+			b.WriteString(el)
+		}
+		b.WriteString("\n]\n")
+		evs, stats, err := streamAll(t, b.String(), StreamOptions{})
+		if err != nil || len(evs) != len(want) || stats.Lines != line {
+			t.Fatalf("%v events=%d lines=%d, want %d", err, len(evs), stats.Lines, line)
+		}
+		for i, ev := range evs {
+			if ev.Line != want[i] {
+				t.Errorf("%q: record %d at line %d, want %d", shape, i, ev.Line, want[i])
+				break
+			}
+		}
+	}
+}
+
+func TestStreamAutoDetectTextThatLooksLikeJSON(t *testing.T) {
+	dmesg := "[    0.000000] Linux version 5.15.0 (gcc)\n[    0.000000] Command line: ro quiet\n[    1.234567] usb 1-1: new device\n"
+	evs, stats, err := streamAll(t, dmesg, StreamOptions{})
+	if err != nil || stats.Mode == "json" || len(evs) != 3 {
+		t.Errorf("dmesg: %v mode=%s %q", err, stats.Mode, messages(evs))
+	}
+	pm2 := "[0] server listening\n[1] worker started\n"
+	if evs, stats, err := streamAll(t, pm2, StreamOptions{}); err != nil || stats.Mode == "json" || len(evs) != 2 {
+		t.Errorf("pm2: %v mode=%s %q", err, stats.Mode, messages(evs))
+	}
+	banner := "{\n  \"version\": 1\n}\n2026-10-11 10:15:02 INFO started\n2026-10-11 10:15:03 ERROR failed\n"
+	evs, stats, err = streamAll(t, banner, StreamOptions{})
+	if err != nil || stats.Mode == "json" || len(evs) < 2 || !strings.Contains(evs[len(evs)-1].Message, "ERROR failed") {
+		t.Errorf("JSON banner then text: %v mode=%s %q", err, stats.Mode, messages(evs))
+	}
+	// Real JSON still detected.
+	for _, doc := range []string{`[{"msg":"a"},{"msg":"b"}]`, "{\n \"msg\": \"a\"\n}\n{\n \"msg\": \"b\"\n}\n", `[]`} {
+		if _, stats, err := streamAll(t, doc, StreamOptions{}); err != nil || stats.Mode != "json" {
+			t.Errorf("%q: %v mode=%s", doc, err, stats.Mode)
+		}
+	}
+}
+
+func TestStreamCSVBoundedRecords(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("time,level,message\n2026-10-11T10:00:00Z,ERROR,\"quoted\" then text\n")
+	for i := 0; i < 3000; i++ {
+		b.WriteString("2026-10-11T10:00:01Z,INFO,row\n")
+	}
+	evs, _, err := streamAll(t, b.String(), StreamOptions{FileName: "x.csv", MaxRecordBytes: -1})
+	var syn *SyntaxError
+	if !errors.As(err, &syn) || syn.Line != 2 || len(evs) != 0 {
+		t.Errorf("unbalanced quote: %v %d", err, len(evs))
+	}
+	_, _, err = streamAll(t, b.String(), StreamOptions{FileName: "x.csv", MaxRecordBytes: 16 << 10})
+	if !errors.Is(err, ErrRecordTooLarge) {
+		t.Errorf("csv record cap: %v", err)
+	}
+	// Gzipped CSV keeps its type (the importer passes the original name).
+	if _, stats, _ := streamAll(t, "a,message\n1,x\n", StreamOptions{FileName: "export.csv.gz"}); stats.Mode != "csv" {
+		t.Errorf(".csv.gz mode %s", stats.Mode)
+	}
+}
+
+func TestStreamMoreTimestampStyles(t *testing.T) {
+	cases := map[string]time.Time{
+		"2026-10-11 10:15:02 +0200 ERROR boom":     time.Date(2026, 10, 11, 8, 15, 2, 0, time.UTC),
+		"2026-10-11 10:15:02.123+0200 ERROR boom":  time.Date(2026, 10, 11, 8, 15, 2, 123e6, time.UTC),
+		"2026-10-11 10:15:02 -05:00 ERROR boom":    time.Date(2026, 10, 11, 15, 15, 2, 0, time.UTC),
+		"2026-10-11T10:15:02.5+05:30 ERROR boom":   time.Date(2026, 10, 11, 4, 45, 2, 5e8, time.UTC),
+		"[2026-10-11 10:15:02 +0000] ERROR boom":   time.Date(2026, 10, 11, 10, 15, 2, 0, time.UTC),
+		"2026-10-11 10:15:02 UTC ERROR boom":       time.Date(2026, 10, 11, 10, 15, 2, 0, time.UTC),
+		"2026-10-11 10:15:02,250 +0100 ERROR boom": time.Date(2026, 10, 11, 9, 15, 2, 25e7, time.UTC),
+	}
+	for line, want := range cases {
+		ts, ok := timeParser{extended: true}.textTime(line)
+		if !ok || !ts.Equal(want) {
+			t.Errorf("%q: %v %v, want %v", line, ok, ts.UTC(), want)
+		}
+	}
+	csv := "\"@timestamp\",message\n\"Oct 11, 2026 @ 10:15:02.123\",x\n"
+	evs, _, err := streamAll(t, csv, StreamOptions{FileName: "kibana.csv"})
+	if err != nil || len(evs) != 1 || !evs[0].Timestamp.Equal(time.Date(2026, 10, 11, 10, 15, 2, 123e6, time.UTC)) {
+		t.Errorf("kibana timestamp: %v %+v", err, evs)
+	}
+}
+
+func TestStreamKeepsPendingRecordOnReadError(t *testing.T) {
+	stop := errors.New("upload limit")
+	var b strings.Builder
+	for i := 0; i < 40; i++ {
+		b.WriteString("2026-10-11 10:00:00 INFO filler\n")
+	}
+	b.WriteString("2026-10-11 10:00:01 ERROR c\njava.lang.X: boom\n\tat a.b(C.java:1)\n")
+	src := &config.Source{Parse: config.Parse{Format: config.FormatAuto}}
+	var evs []model.Event
+	_, err := Stream(&errAfter{data: []byte(b.String()), err: stop}, src, streamNow, StreamOptions{}, func(ev model.Event) error {
+		evs = append(evs, ev)
+		return nil
+	})
+	if !errors.Is(err, stop) || len(evs) != 41 || !strings.Contains(evs[40].Message, "java.lang.X") {
+		t.Errorf("pending record lost: %v %d", err, len(evs))
+	}
+	// Under 512 bytes, then an error: the bytes that arrived are read.
+	evs = nil
+	_, err = Stream(&errAfter{data: []byte("2026-10-11 10:00:01 ERROR tiny\n"), err: stop}, src, streamNow, StreamOptions{}, func(ev model.Event) error {
+		evs = append(evs, ev)
+		return nil
+	})
+	if !errors.Is(err, stop) || len(evs) != 1 {
+		t.Errorf("short input: %v %d", err, len(evs))
+	}
+}
+
+func TestStreamNULPaddingOverWindow(t *testing.T) {
+	for _, pad := range []int{64, 65536, 65536 + 10, 3*65536 + 63} {
+		in := strings.Repeat("\x00", pad) + "2026-10-11 10:00:00 INFO a\n2026-10-11 10:00:01 INFO b\n"
+		evs, _, err := streamAll(t, in, StreamOptions{})
+		if err != nil || len(evs) != 2 || !strings.HasPrefix(evs[0].Message, "2026") || evs[0].TimeSource != "" {
+			t.Errorf("pad %d: %v %q", pad, err, messages(evs))
+		}
 	}
 }

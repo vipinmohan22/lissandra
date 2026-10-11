@@ -98,8 +98,8 @@ func floorDiv(a, b int64) int64 {
 // snapshot builds the chart. Outlier timestamps (a stray 2000-01-01 from a
 // device without a clock, a far-future epoch) would squash the real activity
 // into one bar, so buckets more than one "bulk span" away from the middle
-// 99% of events are left out and counted separately. Natural edges of the
-// data are never cut. It then picks a step so the range fits timelinePoints.
+// 99% of events, and cut off from it by a gap, are left out and counted
+// separately. It then picks a step so the range fits timelinePoints.
 func (t *timeAgg) snapshot() Timeline {
 	if len(t.buckets) == 0 {
 		return Timeline{}
@@ -133,7 +133,7 @@ func (t *timeAgg) snapshot() Timeline {
 				break
 			}
 		}
-		// …widened by its own span on each side; anything beyond is an outlier.
+		// …widened by its own span on each side…
 		margin := bhi - blo + res
 		lo, hi = keys[len(keys)-1], keys[0]
 		for _, k := range keys {
@@ -141,6 +141,19 @@ func (t *timeAgg) snapshot() Timeline {
 				lo, hi = min(lo, k), max(hi, k)
 			}
 		}
+		// …and by any activity that continues from there without a long
+		// gap. Only buckets cut off by a gap are outliers.
+		gap := max(margin, 60*res)
+		i := sort.Search(len(keys), func(i int) bool { return keys[i] >= hi })
+		for i+1 < len(keys) && keys[i+1]-keys[i] <= gap {
+			i++
+		}
+		hi = keys[i]
+		i = sort.Search(len(keys), func(i int) bool { return keys[i] >= lo })
+		for i > 0 && keys[i]-keys[i-1] <= gap {
+			i--
+		}
+		lo = keys[i]
 	}
 	span := hi + res - lo
 	step := int64(0)

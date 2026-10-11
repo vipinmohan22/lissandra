@@ -231,12 +231,14 @@ var timeLayouts = []string{
 	time.RFC3339Nano,
 	"2006-01-02T15:04:05.999999999Z0700",
 	"2006-01-02 15:04:05.999999999Z07:00",
+	"2006-01-02 15:04:05.999999999Z0700",
 	"2006-01-02 15:04:05.999999999",
 	"2006-01-02T15:04:05.999999999",
 	"02/Jan/2006:15:04:05 -0700",
 	time.RFC1123Z,
 	time.RFC1123,
 	time.UnixDate,
+	"Jan 2, 2006 @ 15:04:05.999999999", // Kibana CSV exports
 }
 
 // ParseTime parses common timestamp formats, including epoch numbers in

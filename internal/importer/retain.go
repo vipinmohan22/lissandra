@@ -1,7 +1,9 @@
 package importer
 
 import (
+	"encoding/json"
 	"sort"
+	"strings"
 
 	"github.com/vipinmohan22/layalogs/internal/model"
 )
@@ -128,9 +130,12 @@ func (r *retainer) ordered() []model.Event {
 }
 
 // compact shortens a copy of ev for retention: long messages are cut and
-// very large structured fields are dropped.
+// very large structured fields are dropped. Strings are copied so a kept
+// event never pins the larger record it was cut from.
 func compact(ev model.Event) model.Event {
-	ev.Message = model.Truncate(ev.Message, retainedMsgBytes)
+	ev.Message = strings.Clone(model.Truncate(ev.Message, retainedMsgBytes))
+	ev.Level = strings.Clone(model.Truncate(ev.Level, 64))
+	ev.Summary = strings.Clone(model.Truncate(ev.Summary, retainedMsgBytes))
 	if len(ev.Fields) > 0 && fieldsCost(ev.Fields, retainedFieldsBytes) > retainedFieldsBytes {
 		ev.Fields = map[string]any{"laya_fields_omitted": "structured fields were too large to keep for browsing"}
 	}
@@ -139,7 +144,7 @@ func compact(ev model.Event) model.Event {
 
 // cost approximates the memory a retained event holds.
 func cost(ev *model.Event) int64 {
-	n := int64(300 + len(ev.Message) + len(ev.Summary))
+	n := int64(300 + len(ev.Message) + len(ev.Summary) + len(ev.Level))
 	for _, t := range ev.Tags {
 		n += int64(len(t)) + 16
 	}
@@ -170,6 +175,8 @@ func fieldsCost(v any, limit int64) int64 {
 				walk(x)
 			}
 		case string:
+			n += int64(len(t)) + 16
+		case json.Number:
 			n += int64(len(t)) + 16
 		default:
 			n += 16

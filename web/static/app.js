@@ -1449,7 +1449,7 @@ const STOP_REASONS = {
   client_aborted: 'The upload was interrupted; results cover the part that arrived.',
   gzip_truncated: 'The gzip data ended early (truncated file?); results cover the part that decompressed.',
   syntax_error: 'The file has malformed data part-way through; results cover everything before it.',
-  record_too_large: 'A single JSON record exceeded the per-record limit; convert the file to NDJSON (one object per line).',
+  record_too_large: 'A single record exceeded the per-record limit: a very large JSON value (convert the file to NDJSON, one object per line), or a CSV row with an unbalanced quote.',
   read_error: 'Reading the file failed part-way through.',
 };
 

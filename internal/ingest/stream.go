@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,15 +50,16 @@ func (e *SyntaxError) Error() string {
 }
 func (e *SyntaxError) Unwrap() error { return e.Err }
 
-// ErrRecordTooLarge is returned when one JSON value exceeds the limit.
-var ErrRecordTooLarge = errors.New("a JSON record is larger than the per-record limit")
+// ErrRecordTooLarge is returned when one JSON value or CSV row exceeds the
+// limit.
+var ErrRecordTooLarge = errors.New("a single record is larger than the per-record limit")
 
 // StreamOptions configures Stream.
 type StreamOptions struct {
 	Format         string         // auto (default), text, ndjson, json or csv; overrides the source's
 	FileName       string         // used to recognise .csv files in auto mode
 	Location       *time.Location // zone for timestamps without one (default UTC)
-	MaxRecordBytes int64          // cap per JSON value in JSON mode: 0 means DefaultMaxRecordBytes, negative no cap
+	MaxRecordBytes int64          // cap per JSON value or CSV row: 0 means DefaultMaxRecordBytes, negative no cap
 }
 
 // StreamStats describes how the input was parsed.
@@ -103,7 +105,7 @@ func Stream(r io.Reader, src *config.Source, now time.Time, opts StreamOptions, 
 	st := &streamer{src: src, now: now, opts: opts, emit: emit,
 		tp: timeParser{loc: opts.Location, ref: now, extended: true}}
 
-	br, err := st.sniff(r)
+	br, err := st.sniff(&stickyReader{r: r})
 	if err != nil {
 		return st.stats, err
 	}
@@ -136,7 +138,11 @@ func (st *streamer) sniff(r io.Reader) (*bufio.Reader, error) {
 	br := bufio.NewReaderSize(r, peekSize)
 	head, err := br.Peek(512)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
-		return nil, err
+		if len(head) == 0 {
+			return nil, err
+		}
+		// Short input that then failed: what arrived is read first, and the
+		// sticky error comes back after it.
 	}
 	st.stats.Encoding = "utf-8"
 	switch {
@@ -169,17 +175,34 @@ func (st *streamer) sniff(r io.Reader) (*bufio.Reader, error) {
 	return br, nil
 }
 
+// stickyReader repeats the first error from r. bufio's Peek hands an error
+// to its caller once and forgets it; sniffing and auto-detection peek and
+// ignore errors, so without this a stop such as a size limit could be lost.
+type stickyReader struct {
+	r   io.Reader
+	err error
+}
+
+func (s *stickyReader) Read(p []byte) (int, error) {
+	if s.err != nil {
+		return 0, s.err
+	}
+	n, err := s.r.Read(p)
+	s.err = err
+	return n, err
+}
+
 // skipNULPadding discards a leading run of NUL bytes, which logrotate's
 // copytruncate leaves when a writer keeps its old file offset. Short runs
 // are kept: BOM-less UTF-16BE text starts with a single NUL.
 func skipNULPadding(br *bufio.Reader) {
-	for {
+	for skipped := false; ; skipped = true {
 		peek, _ := br.Peek(64 << 10)
 		n := 0
 		for n < len(peek) && peek[n] == 0 {
 			n++
 		}
-		if n < 64 {
+		if n == 0 || n < 64 && !skipped {
 			return
 		}
 		br.Discard(n)
@@ -246,7 +269,7 @@ func looksUTF16(head []byte) (littleEndian, ok bool) {
 // auto picks a mode from the first megabyte of input. It never fails on
 // content: anything that isn't clearly JSON is read as text lines.
 func (st *streamer) auto(br *bufio.Reader) error {
-	if strings.HasSuffix(strings.ToLower(st.opts.FileName), ".csv") {
+	if name := strings.TrimSuffix(strings.ToLower(st.opts.FileName), ".gz"); strings.HasSuffix(name, ".csv") {
 		return st.csv(br)
 	}
 	peek, _ := br.Peek(peekSize)
@@ -276,6 +299,11 @@ func probeJSON(body []byte, atEOF bool) string {
 		if !dec.More() {
 			return "json" // empty array
 		}
+		// Records are objects (or arrays). Anything else, such as the
+		// "[    0.000000]" of dmesg or "[2026-10-11 …]", is text.
+		if c := body[dec.InputOffset()]; c != '{' && c != '[' {
+			return ""
+		}
 	}
 	var first json.RawMessage
 	err := dec.Decode(&first)
@@ -299,7 +327,13 @@ func probeJSON(body []byte, atEOF bool) string {
 	}
 	end := int(dec.InputOffset())
 	rest := bytes.TrimLeft(body[end:], " \t\r")
-	if !bytes.Contains(body[:end], []byte{'\n'}) && len(rest) > 0 && rest[0] == '\n' && len(bytes.TrimSpace(rest)) > 0 {
+	next := bytes.TrimSpace(rest)
+	if len(next) > 0 && next[0] != '{' && next[0] != '[' {
+		// Something other than JSON follows the first value, such as text
+		// log lines after a JSON banner: read it all as text.
+		return ""
+	}
+	if !bytes.Contains(body[:end], []byte{'\n'}) && len(rest) > 0 && rest[0] == '\n' && len(next) > 0 {
 		return "ndjson"
 	}
 	return "json"
@@ -357,8 +391,10 @@ func (st *streamer) lines(br *bufio.Reader, sp lineSplitter) error {
 			return st.err
 		}
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				sp.flush(collect)
+			// Keep the record in progress: its lines were read in full
+			// even when the input then failed (size limit, truncation).
+			sp.flush(collect)
+			if errors.Is(err, io.EOF) || st.err != nil {
 				return st.err
 			}
 			return err
@@ -429,48 +465,44 @@ func (st *streamer) json(br *bufio.Reader) error {
 	cr := &jsonCounter{r: br, max: st.opts.MaxRecordBytes}
 	dec := json.NewDecoder(cr)
 	dec.UseNumber()
-	paths := wrapperPaths(st.src.Parse.RecordsPath)
-	emitted := 0
+	w := &jsonWalker{st: st, dec: dec, cr: cr, targets: recordTargets(st.src.Parse.RecordsPath)}
 	fail := func(err error) error {
-		if errors.Is(err, ErrRecordTooLarge) {
+		switch {
+		case st.err != nil:
+			return st.err
+		case errors.Is(err, ErrRecordTooLarge), errors.Is(err, errRecordsPath):
 			return err
-		}
-		if emitted > 0 {
+		case cr.rerr != nil:
+			return err // reading failed (size limit, truncated gzip, …), not the JSON
+		case w.emitted > 0:
 			return &SyntaxError{Line: max(cr.lineAt(dec.InputOffset()), st.jsonLine), Err: err}
 		}
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
-	defer func() { st.stats.Lines = cr.lineAt(cr.read) }()
+	defer func() {
+		st.stats.Lines = cr.lineAt(cr.read)
+		if cr.endsInNewline {
+			st.stats.Lines-- // count lines as text mode does
+		}
+	}()
 	for {
 		cr.window = dec.InputOffset()
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
+		if err == nil {
+			switch tok {
+			case json.Delim('['):
+				err = w.streamArray()
+			case json.Delim('{'):
+				err = w.object(cr.lineAt(dec.InputOffset()))
+			default:
+				w.emit(tok, cr.lineAt(dec.InputOffset()))
+			}
+		}
 		if err != nil {
 			return fail(err)
-		}
-		switch tok {
-		case json.Delim('['):
-			if err := st.streamArray(dec, cr, &emitted); err != nil {
-				return fail(err)
-			}
-		case json.Delim('{'):
-			line := cr.lineAt(dec.InputOffset())
-			obj, streamed, err := st.walkObject(dec, cr, paths, &emitted)
-			if err != nil {
-				return fail(err)
-			}
-			if !streamed && st.err == nil {
-				if st.src.Parse.RecordsPath != "" {
-					return fmt.Errorf("records path %q not found in the JSON", st.src.Parse.RecordsPath)
-				}
-				st.record(obj, line)
-				emitted++
-			}
-		default:
-			st.record(tok, cr.lineAt(dec.InputOffset()))
-			emitted++
 		}
 		if st.err != nil {
 			return st.err
@@ -478,132 +510,336 @@ func (st *streamer) json(br *bufio.Reader) error {
 	}
 }
 
-// streamArray emits each element of an array whose '[' was consumed.
-func (st *streamer) streamArray(dec *json.Decoder, cr *jsonCounter, emitted *int) error {
-	for dec.More() {
-		line := cr.lineAt(dec.InputOffset()) + leadingNewlines(dec)
-		st.jsonLine = line
-		cr.window = dec.InputOffset()
-		var v any
-		if err := dec.Decode(&v); err != nil {
-			return err
-		}
-		st.record(v, line)
-		*emitted++
-		if st.err != nil {
-			return nil
-		}
-	}
-	_, err := dec.Token() // closing ']'
-	return err
+var errRecordsPath = errors.New("records path not found")
+
+// candidateBytes is how much of a records array is held back while a
+// preferred wrapper key may still follow it in the same object. A larger
+// array is taken to be the records and streamed.
+const candidateBytes = 256 << 10
+
+// recordTarget is a path, relative to the current value, to a records
+// array. rank orders wrapper keys as HTTP ingest does: lower wins.
+type recordTarget struct {
+	path string
+	rank int
 }
 
-func wrapperPaths(recordsPath string) [][]string {
+func recordTargets(recordsPath string) []recordTarget {
 	if recordsPath != "" {
-		return [][]string{strings.Split(recordsPath, ".")}
+		return []recordTarget{{recordsPath, 0}}
 	}
-	out := make([][]string, len(wrapperKeys))
+	out := make([]recordTarget, len(wrapperKeys))
 	for i, k := range wrapperKeys {
-		out[i] = strings.Split(k, ".")
+		out[i] = recordTarget{k, i}
 	}
 	return out
 }
 
-// walkObject reads the rest of an object whose '{' was consumed. When a key
-// leads along one of paths to an array, the array's elements are emitted
-// as records (streamed=true); otherwise the object is returned whole.
-func (st *streamer) walkObject(dec *json.Decoder, cr *jsonCounter, paths [][]string, emitted *int) (map[string]any, bool, error) {
-	obj := map[string]any{}
-	streamed := false
-	for dec.More() {
-		t, err := dec.Token()
-		if err != nil {
-			return nil, false, err
-		}
-		key, _ := t.(string)
-		var sub [][]string
-		if !streamed {
-			for _, p := range paths {
-				if p[0] == key {
-					sub = append(sub, p[1:])
-				}
-			}
-		}
-		cr.window = dec.InputOffset()
-		if len(sub) == 0 {
-			var v any
-			if err := dec.Decode(&v); err != nil {
-				return nil, false, err
-			}
-			obj[key] = v
-			continue
-		}
-		atTarget := false
-		var deeper [][]string
-		for _, p := range sub {
-			if len(p) == 0 {
-				atTarget = true
-			} else {
-				deeper = append(deeper, p)
-			}
-		}
-		vt, err := dec.Token()
-		if err != nil {
-			return nil, false, err
-		}
-		switch vt {
-		case json.Delim('['):
-			if !atTarget {
-				arr, err := decodeRestOfArray(dec, cr)
-				if err != nil {
-					return nil, false, err
-				}
-				obj[key] = arr
-				continue
-			}
-			if err := st.streamArray(dec, cr, emitted); err != nil {
-				return nil, false, err
-			}
-			if st.err != nil {
-				return nil, true, nil
-			}
-			streamed = true
-		case json.Delim('{'):
-			inner, innerStreamed, err := st.walkObject(dec, cr, deeper, emitted)
-			if err != nil {
-				return nil, false, err
-			}
-			if innerStreamed {
-				streamed = true
-				if st.err != nil {
-					return nil, true, nil
-				}
-			} else {
-				obj[key] = inner
-			}
-		default:
-			obj[key] = vt
-		}
-	}
-	if _, err := dec.Token(); err != nil { // closing '}'
-		return nil, false, err
-	}
-	return obj, streamed, nil
+type jsonElem struct {
+	v    any
+	line int
 }
 
-// decodeRestOfArray decodes array elements after its '[' was consumed.
-func decodeRestOfArray(dec *json.Decoder, cr *jsonCounter) ([]any, error) {
-	arr := []any{}
-	for dec.More() {
-		cr.window = dec.InputOffset()
-		var v any
-		if err := dec.Decode(&v); err != nil {
+// jsonWalker finds the records inside one top-level object, choosing among
+// wrapper keys the way Records does for HTTP ingest while streaming large
+// arrays instead of holding them.
+type jsonWalker struct {
+	st      *streamer
+	dec     *json.Decoder
+	cr      *jsonCounter
+	targets []recordTarget
+	emitted int
+
+	// per top-level object
+	found     bool       // a records target was seen; the envelope is not needed
+	committed bool       // a records array is being or was streamed
+	best      []jsonElem // records of the preferred target held so far
+	bestRank  int
+	hasBest   bool
+}
+
+func (w *jsonWalker) emit(v any, line int) {
+	w.st.record(v, line)
+	w.emitted++
+}
+
+// object reads the rest of a top-level object whose '{' was consumed and
+// emits its records, or the object itself when it holds none.
+func (w *jsonWalker) object(line int) error {
+	w.found, w.committed, w.best, w.hasBest = false, false, nil, false
+	obj, err := w.walkObject(w.targets)
+	if err != nil {
+		return err
+	}
+	switch {
+	case w.committed:
+	case w.hasBest:
+		for _, e := range w.best {
+			if w.emit(e.v, e.line); w.st.err != nil {
+				break
+			}
+		}
+		w.best = nil
+	case w.st.src.Parse.RecordsPath != "":
+		return fmt.Errorf("%w: %q is not in the JSON", errRecordsPath, w.st.src.Parse.RecordsPath)
+	default:
+		w.emit(obj, line)
+	}
+	return nil
+}
+
+// streamArray emits each element of a top-level array whose '[' was
+// consumed as a record.
+func (w *jsonWalker) streamArray() error {
+	for w.dec.More() {
+		v, line, err := w.element()
+		if err != nil {
+			return err
+		}
+		if w.emit(v, line); w.st.err != nil {
+			return w.st.err
+		}
+	}
+	_, err := w.dec.Token() // closing ']'
+	return err
+}
+
+// element decodes one array element that is a record of its own: it gets
+// its own size budget and the line where it starts.
+func (w *jsonWalker) element() (any, int, error) {
+	w.cr.window = w.dec.InputOffset()
+	w.st.jsonLine = w.cr.lineAt(w.dec.InputOffset()) + leadingNewlines(w.dec)
+	var raw json.RawMessage
+	if err := w.dec.Decode(&raw); err != nil {
+		return nil, 0, err
+	}
+	line := w.cr.lineAt(w.dec.InputOffset() - int64(len(raw)))
+	var v any
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	err := d.Decode(&v)
+	return v, line, err
+}
+
+// walkObject reads the rest of an object whose '{' was consumed, following
+// keys that lead to targets. The object is returned for use as a record
+// when no target is found; values are skipped once one is.
+func (w *jsonWalker) walkObject(targets []recordTarget) (map[string]any, error) {
+	obj := map[string]any{}
+	for w.dec.More() {
+		t, err := w.dec.Token()
+		if err != nil {
 			return nil, err
 		}
-		arr = append(arr, v)
+		key, _ := t.(string)
+		var sub []recordTarget
+		if !w.committed {
+			for _, tg := range targets {
+				if tg.path == key {
+					sub = append(sub, recordTarget{"", tg.rank})
+				} else if strings.HasPrefix(tg.path, key+".") {
+					sub = append(sub, recordTarget{tg.path[len(key)+1:], tg.rank})
+				}
+			}
+		}
+		v, err := w.value(sub)
+		if err != nil {
+			return nil, err
+		}
+		if !w.found {
+			obj[key] = v
+		}
 	}
-	_, err := dec.Token()
+	_, err := w.dec.Token() // closing '}'
+	return obj, err
+}
+
+// walkArray reads the rest of an array whose '[' was consumed, following
+// numeric path segments.
+func (w *jsonWalker) walkArray(targets []recordTarget) ([]any, error) {
+	arr := []any{}
+	for i := 0; w.dec.More(); i++ {
+		idx := strconv.Itoa(i)
+		var sub []recordTarget
+		if !w.committed {
+			for _, tg := range targets {
+				if tg.path == idx {
+					sub = append(sub, recordTarget{"", tg.rank})
+				} else if strings.HasPrefix(tg.path, idx+".") {
+					sub = append(sub, recordTarget{tg.path[len(idx)+1:], tg.rank})
+				}
+			}
+		}
+		v, err := w.value(sub)
+		if err != nil {
+			return nil, err
+		}
+		if !w.found {
+			arr = append(arr, v)
+		}
+	}
+	_, err := w.dec.Token() // closing ']'
 	return arr, err
+}
+
+// value reads the next value, which leads to targets (possibly none).
+func (w *jsonWalker) value(targets []recordTarget) (any, error) {
+	if len(targets) == 0 {
+		if w.found {
+			return nil, w.skip()
+		}
+		var v any
+		err := w.dec.Decode(&v)
+		return v, err
+	}
+	rank, atTarget := 0, false
+	var deeper []recordTarget
+	for _, tg := range targets {
+		switch {
+		case tg.path != "":
+			deeper = append(deeper, tg)
+		case !atTarget || tg.rank < rank:
+			rank, atTarget = tg.rank, true
+		}
+	}
+	tok, err := w.dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case tok == json.Delim('[') && atTarget:
+		return nil, w.recordsArray(rank)
+	case tok == json.Delim('['):
+		return w.walkArray(deeper)
+	case tok == json.Delim('{') && len(deeper) > 0:
+		return w.walkObject(deeper)
+	case atTarget && w.st.src.Parse.RecordsPath != "":
+		// records_path naming a single object or value: one record, or
+		// none for null, as for HTTP ingest.
+		w.found = true
+		line := w.cr.lineAt(w.dec.InputOffset())
+		v, err := w.rest(tok)
+		if err == nil && !w.hasBest {
+			w.best, w.bestRank, w.hasBest = nil, rank, true
+			if v != nil {
+				w.best = []jsonElem{{v, line}}
+			}
+		}
+		return nil, err
+	case w.found:
+		return nil, w.cr.exclude(w.dec, func() error { return w.skipRest(tok) })
+	}
+	return w.rest(tok)
+}
+
+// recordsArray handles a target array whose '[' was consumed: small arrays
+// are held as candidates, the first large one is streamed.
+func (w *jsonWalker) recordsArray(rank int) error {
+	w.found = true
+	if w.hasBest && w.bestRank <= rank {
+		return w.cr.exclude(w.dec, func() error { return w.skipRest(json.Delim('[')) })
+	}
+	start := w.dec.InputOffset()
+	return w.cr.exclude(w.dec, func() error {
+		held := []jsonElem{}
+		streaming := false
+		for w.dec.More() {
+			v, line, err := w.element()
+			if err != nil {
+				return err
+			}
+			if streaming {
+				if w.emit(v, line); w.st.err != nil {
+					return w.st.err
+				}
+				continue
+			}
+			held = append(held, jsonElem{v, line})
+			if w.dec.InputOffset()-start > candidateBytes {
+				// Too large to hold back: these are the records.
+				streaming, w.committed, w.best, w.hasBest = true, true, nil, false
+				for _, e := range held {
+					if w.emit(e.v, e.line); w.st.err != nil {
+						return w.st.err
+					}
+				}
+				held = nil
+			}
+		}
+		if !streaming {
+			w.best, w.bestRank, w.hasBest = held, rank, true
+		}
+		_, err := w.dec.Token() // closing ']'
+		return err
+	})
+}
+
+// rest decodes the rest of a value whose first token was consumed.
+func (w *jsonWalker) rest(tok json.Token) (any, error) {
+	switch tok {
+	case json.Delim('{'):
+		obj := map[string]any{}
+		for w.dec.More() {
+			k, err := w.dec.Token()
+			if err != nil {
+				return nil, err
+			}
+			var v any
+			if err := w.dec.Decode(&v); err != nil {
+				return nil, err
+			}
+			key, _ := k.(string)
+			obj[key] = v
+		}
+		_, err := w.dec.Token()
+		return obj, err
+	case json.Delim('['):
+		arr := []any{}
+		for w.dec.More() {
+			var v any
+			if err := w.dec.Decode(&v); err != nil {
+				return nil, err
+			}
+			arr = append(arr, v)
+		}
+		_, err := w.dec.Token()
+		return arr, err
+	}
+	return tok, nil
+}
+
+// skip discards the next value without holding it in memory.
+func (w *jsonWalker) skip() error {
+	return w.cr.exclude(w.dec, func() error {
+		w.cr.window = w.dec.InputOffset()
+		tok, err := w.dec.Token()
+		if err != nil {
+			return err
+		}
+		return w.skipRest(tok)
+	})
+}
+
+// skipRest discards the rest of a value whose first token was consumed.
+// Only one token is held at a time.
+func (w *jsonWalker) skipRest(tok json.Token) error {
+	depth := 0
+	for {
+		switch tok {
+		case json.Delim('{'), json.Delim('['):
+			depth++
+		case json.Delim('}'), json.Delim(']'):
+			depth--
+		}
+		if depth == 0 {
+			return nil
+		}
+		w.cr.window = w.dec.InputOffset()
+		var err error
+		if tok, err = w.dec.Token(); err != nil {
+			return err
+		}
+	}
 }
 
 // leadingNewlines counts newlines in the whitespace (and commas) before the
@@ -633,6 +869,9 @@ type jsonCounter struct {
 	window int64   // offset where the current value started
 	nls    []int64 // offsets of newlines not yet passed by lineAt
 	passed int     // newlines before the last lineAt offset
+
+	endsInNewline bool
+	rerr          error // error from r other than io.EOF
 }
 
 func (c *jsonCounter) Read(p []byte) (int, error) {
@@ -640,13 +879,29 @@ func (c *jsonCounter) Read(p []byte) (int, error) {
 		return 0, ErrRecordTooLarge
 	}
 	n, err := c.r.Read(p)
+	if err != nil && err != io.EOF {
+		c.rerr = err
+	}
 	for i, b := range p[:n] {
 		if b == '\n' {
 			c.nls = append(c.nls, c.read+int64(i))
 		}
 	}
 	c.read += int64(n)
+	if n > 0 {
+		c.endsInNewline = p[n-1] == '\n'
+	}
 	return n, err
+}
+
+// exclude runs f over a span of input that does not count toward the size
+// of the record being read: the enclosing object's budget is restored
+// afterwards.
+func (c *jsonCounter) exclude(dec *json.Decoder, f func() error) error {
+	used := dec.InputOffset() - c.window
+	err := f()
+	c.window = dec.InputOffset() - used
+	return err
 }
 
 // lineAt returns the 1-based line containing byte offset off. Offsets must
@@ -665,7 +920,8 @@ func (c *jsonCounter) lineAt(off int64) int {
 // by the header names.
 func (st *streamer) csv(br *bufio.Reader) error {
 	st.stats.Mode = "csv"
-	cr := csv.NewReader(br)
+	cc := &csvCounter{r: br, max: st.opts.MaxRecordBytes}
+	cr := csv.NewReader(cc)
 	cr.FieldsPerRecord = -1
 	cr.LazyQuotes = true
 	cr.ReuseRecord = true
@@ -674,17 +930,33 @@ func (st *streamer) csv(br *bufio.Reader) error {
 		return nil
 	}
 	if err != nil {
+		if cc.rerr != nil {
+			return err
+		}
 		return fmt.Errorf("invalid CSV header: %w", err)
 	}
 	header = append([]string(nil), header...)
 	for {
+		cc.window = cr.InputOffset()
 		row, err := cr.Read()
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		line, _ := cr.FieldPos(0)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrRecordTooLarge), err != nil && cc.rerr != nil:
+			return err
+		case err != nil:
 			return &SyntaxError{Line: line, Err: err}
+		}
+		// With lazy quotes, a field that opens a quote and never closes it
+		// runs on through the rest of the file. Stop rather than merge rows.
+		nl := 0
+		for _, v := range row {
+			nl += strings.Count(v, "\n")
+		}
+		if nl > maxContinuationLines {
+			return &SyntaxError{Line: line, Err: fmt.Errorf("a quoted field spans more than %d lines; check for an unbalanced quote", maxContinuationLines)}
 		}
 		rec := make(map[string]any, len(header))
 		for i, v := range row {
@@ -698,6 +970,27 @@ func (st *streamer) csv(br *bufio.Reader) error {
 			return st.err
 		}
 	}
+}
+
+// csvCounter stops a single CSV record from growing past max bytes.
+type csvCounter struct {
+	r      io.Reader
+	max    int64
+	read   int64
+	window int64 // offset where the current record started
+	rerr   error // error from r other than io.EOF
+}
+
+func (c *csvCounter) Read(p []byte) (int, error) {
+	if c.max > 0 && c.read-c.window > c.max {
+		return 0, ErrRecordTooLarge
+	}
+	n, err := c.r.Read(p)
+	if err != nil && err != io.EOF {
+		c.rerr = err
+	}
+	c.read += int64(n)
+	return n, err
 }
 
 // stamp sets the identity fields every event carries.

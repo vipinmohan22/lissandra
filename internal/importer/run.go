@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vipinmohan22/layalogs/internal/config"
@@ -227,18 +228,27 @@ func (b *batcher) process() error {
 	kept := make([]bool, len(b.batch))
 	if b.workers > 1 && len(b.batch) > 1 {
 		var wg sync.WaitGroup
+		var panicked atomic.Pointer[any]
 		chunk := (len(b.batch) + b.workers - 1) / b.workers
 		for start := 0; start < len(b.batch); start += chunk {
 			end := min(start+chunk, len(b.batch))
 			wg.Add(1)
 			go func(lo, hi int) {
 				defer wg.Done()
+				defer func() {
+					if p := recover(); p != nil {
+						panicked.CompareAndSwap(nil, &p)
+					}
+				}()
 				for i := lo; i < hi; i++ {
 					kept[i] = b.deps.Classify(&b.batch[i])
 				}
 			}(start, end)
 		}
 		wg.Wait()
+		if p := panicked.Load(); p != nil {
+			panic(*p) // on the calling goroutine, where Run recovers it
+		}
 	} else {
 		for i := range b.batch {
 			kept[i] = b.deps.Classify(&b.batch[i])
@@ -253,14 +263,19 @@ func (b *batcher) process() error {
 		b.im.add(ev, kept[i], routes)
 		if kept[i] && b.deps.OnEvent != nil {
 			if err := b.deps.OnEvent(*ev); err != nil {
-				return err
+				b.reset() // these events were recorded; never replay them
+				return &StopError{Reason: StopOutput, Err: fmt.Errorf("writing the output failed: %w", err)}
 			}
 		}
 	}
 	b.pushed += len(b.batch)
+	b.reset()
+	return nil
+}
+
+func (b *batcher) reset() {
 	clear(b.batch)
 	b.batch = b.batch[:0]
-	return nil
 }
 
 // yield pauses while live ingest is backed up, so a large import never
@@ -321,6 +336,11 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	}
 	if c.limit > 0 {
 		if c.n >= c.limit {
+			// At the limit: it was only reached if more input follows.
+			var one [1]byte
+			if _, err := io.ReadFull(c.r, one[:]); err != nil {
+				return 0, err // io.EOF: the input ends exactly at the limit
+			}
 			return 0, errLimit
 		}
 		if rem := c.limit - c.n; int64(len(p)) > rem {

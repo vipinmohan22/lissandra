@@ -36,6 +36,7 @@ const (
 	StopUnsupported       = "unsupported"
 	StopInvalid           = "invalid_request"
 	StopInternal          = "internal"
+	StopOutput            = "output_error" // laya analyze could not write its output
 )
 
 const (
@@ -222,7 +223,7 @@ func (im *Import) add(ev *model.Event, kept bool, routes []string) {
 		if len(im.patterns) >= maxPatterns {
 			im.evictPatterns()
 		}
-		p = &Pattern{Fingerprint: ev.Fingerprint, Sample: model.Truncate(firstLine(ev.Message), 300), Category: ev.Category, FirstLine: ev.Line}
+		p = &Pattern{Fingerprint: ev.Fingerprint, Sample: strings.Clone(model.Truncate(firstLine(ev.Message), 300)), Category: ev.Category, FirstLine: ev.Line}
 		im.patterns[ev.Fingerprint] = p
 	}
 	p.Count++
