@@ -180,10 +180,14 @@ job "laya-engine" {
         timeout  = "5s"
 
         # The first start downloads and loads the checkpoint; restart only
-        # an instance that stops answering after that.
+        # an instance that stops answering after that. After a restart the
+        # grace period counts from the restart signal, and stopping the old
+        # process takes up to 2 minutes of it: shutdown_delay (5 s), the
+        # kill (kill_timeout, capped at 30 s by most clients, 60 s at most)
+        # and the restart delay (30 s, plus up to 25% jitter).
         check_restart {
           limit = 3
-          grace = "${var.startup_minutes}m"
+          grace = "${var.startup_minutes * 60 + 120}s"
         }
       }
     }

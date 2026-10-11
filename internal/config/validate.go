@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vipinmohan22/layalogs/internal/model"
 )
@@ -148,6 +149,12 @@ func Normalize(c *Config) error {
 			return fmt.Errorf("settings: a category with a description needs a name")
 		case cat.Name == model.Uncategorized:
 			return fmt.Errorf("settings: %q is reserved for events no category fits", model.Uncategorized)
+		case utf8.RuneCountInString(cat.Name) > 64 || utf8.RuneCountInString(cat.Description) > 300:
+			name := cat.Name
+			if len(name) > 200 {
+				name = model.Truncate(name, 64)
+			}
+			return fmt.Errorf("settings: category %q: names are limited to 64 characters and descriptions to 300", name)
 		}
 		if i := slices.IndexFunc(cats, func(c Category) bool { return c.Name == cat.Name }); i >= 0 {
 			if cat.Description != "" && cats[i].Description != "" && cat.Description != cats[i].Description {
@@ -157,9 +164,6 @@ func Normalize(c *Config) error {
 				cats[i].Description = cat.Description
 			}
 			continue // the same category again (names are case-insensitive)
-		}
-		if len(cat.Name) > 64 || len(cat.Description) > 300 {
-			return fmt.Errorf("settings: category %q: names are limited to 64 characters and descriptions to 300", model.Truncate(cat.Name, 64))
 		}
 		cats = append(cats, cat)
 	}
@@ -193,14 +197,15 @@ var engineModelAliases = map[string]string{
 	"convaiinnovations/laya-typed-decisions": "typed-decisions",
 }
 
-// NormalizeEngineModel trims name, resolves laya-serve aliases and checks
-// it is a plain checkpoint name ("" stays "").
+// NormalizeEngineModel trims and lowercases name (laya-serve's names are
+// lowercase), resolves its aliases and checks it is a plain checkpoint name
+// ("" stays "").
 func NormalizeEngineModel(name string) (string, error) {
-	name = strings.TrimSpace(name)
+	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
 		return "", nil
 	}
-	if a, ok := engineModelAliases[strings.ToLower(name)]; ok {
+	if a, ok := engineModelAliases[name]; ok {
 		return a, nil
 	}
 	if !engineModelName.MatchString(name) {
@@ -248,19 +253,30 @@ func normalizeEngine(e *EngineSettings) error {
 	return nil
 }
 
+// URLError reports an entry (counted from 1) of an engine URL list that
+// isn't an http(s) base URL.
+type URLError struct {
+	Entry int
+	URL   string
+}
+
+func (e *URLError) Error() string {
+	return fmt.Sprintf("%q is not an http(s) base URL", MaskURLs(e.URL))
+}
+
 // ParseEngineURLs splits a comma-separated list of laya-serve base URLs
 // (after ${env:...} expansion). An empty list is valid: the engine is then
-// not configured.
+// not configured. Errors are *URLError.
 func ParseEngineURLs(list string) ([]string, error) {
 	var out []string
-	for _, raw := range strings.Split(list, ",") {
+	for i, raw := range strings.Split(list, ",") {
 		raw = strings.TrimRight(strings.TrimSpace(raw), "/")
 		if raw == "" {
 			continue
 		}
 		u, err := url.Parse(raw)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
-			return nil, fmt.Errorf("%q is not an http(s) base URL", raw)
+			return nil, &URLError{Entry: i + 1, URL: raw}
 		}
 		out = append(out, raw)
 	}

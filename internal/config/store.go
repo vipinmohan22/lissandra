@@ -47,7 +47,7 @@ func initial(seedPath string) (*Config, error) {
 		data, err := os.ReadFile(seedPath)
 		if err == nil {
 			var c Config
-			if err := json.Unmarshal(data, &c); err != nil {
+			if err := Decode(data, &c); err != nil {
 				return nil, fmt.Errorf("parse seed %s: %w", seedPath, err)
 			}
 			if err := Normalize(&c); err != nil {
@@ -66,6 +66,27 @@ func initial(seedPath string) (*Config, error) {
 	return c, nil
 }
 
+// ErrSave marks an Update that failed to write the config file: a server
+// fault, not a problem with the change.
+var ErrSave = errors.New("saving the configuration failed")
+
+// Decode parses a config document into c. A document without engine
+// settings (written before the engine existed) gets the engine's defaults
+// rather than zero values, such as a confidence threshold of 0; one that has
+// them keeps exactly what it says.
+func Decode(data []byte, c *Config) error {
+	var probe struct {
+		Settings struct {
+			Engine json.RawMessage `json:"engine"`
+		} `json:"settings"`
+	}
+	*c = Config{}
+	if json.Unmarshal(data, &probe) == nil && (probe.Settings.Engine == nil || string(probe.Settings.Engine) == "null") {
+		c.Settings.Engine = Defaults().Settings.Engine
+	}
+	return json.Unmarshal(data, c)
+}
+
 // Load reads and validates the config at path without creating or
 // modifying anything. It is meant for offline tools such as `laya analyze`.
 func Load(path string) (*Config, error) {
@@ -74,7 +95,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	var c Config
-	if err := json.Unmarshal(data, &c); err != nil {
+	if err := Decode(data, &c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if err := Normalize(&c); err != nil {
@@ -104,10 +125,14 @@ func (s *Store) Update(fn func(c *Config) error) error {
 		s.mu.Unlock()
 		return err
 	}
+	if err := CheckNewRefs(s.cfg, next); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	next.Version = s.cfg.Version + 1
 	if err := s.save(next); err != nil {
 		s.mu.Unlock()
-		return err
+		return fmt.Errorf("%w: %v", ErrSave, err)
 	}
 	s.cfg = next
 	subs := append([]func(*Config){}, s.subs...)

@@ -12,8 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -41,6 +43,10 @@ type Request struct {
 	// Model pins the checkpoint. It is always sent: without it laya-serve
 	// routes each text by detected language and can load a second model.
 	Model string `json:"model"`
+	// Strict sends only to instances known to have Model loaded (asking
+	// one that hasn't would make it load the checkpoint). Otherwise an
+	// instance that hasn't said what it has may be asked too.
+	Strict bool `json:"-"`
 }
 
 // Answer is one question's answer. Probabilities are keyed by label for
@@ -126,11 +132,18 @@ var ErrWrongModel = errors.New("laya engine answered with a different checkpoint
 // Client calls one or more laya-serve instances, round-robin with failover.
 // It is safe for concurrent use.
 type Client struct {
-	urls  []string
-	key   string
-	http  *http.Client
-	next  atomic.Uint32
-	ready atomic.Pointer[map[string]bool]
+	urls   []string
+	key    string
+	http   *http.Client
+	next   atomic.Uint32
+	health atomic.Pointer[instances]
+}
+
+// instances is what the last health check learned: which instances answered
+// and, for those that said, which checkpoints each has loaded.
+type instances struct {
+	ready  map[string]bool
+	models map[string]map[string]bool // nil entry: the instance didn't say
 }
 
 // maxResponseBytes bounds a reply; real ones are a few KB.
@@ -158,74 +171,163 @@ func (c *Client) URLs() []string { return c.urls }
 // Close releases idle connections.
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 
-// Decide sends req and returns the answers. A 503 (engine busy) is retried
-// after its Retry-After for as long as ctx allows; connection errors and
-// 5xx move on to the next instance; a timeout or a 4xx is returned at once,
-// since retrying would only add to the engine's queue or fail again.
+// Decide sends req and returns the answers. Each instance that could
+// answer is tried at most once, ready ones that have the checkpoint first:
+// connection errors, 5xx and an answer from another checkpoint move on to
+// the next one. A 503 (engine busy) is retried after its Retry-After for as
+// long as ctx allows. A response timeout or a 4xx is returned at once:
+// retrying would only add to the engine's queue or fail again.
 func (c *Client) Decide(ctx context.Context, req Request) (Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return Response{}, err
 	}
+	order := c.order(req.Model, req.Strict)
+	if len(order) == 0 {
+		return Response{}, fmt.Errorf("%w: %q on any instance", ErrNotLoaded, req.Model)
+	}
 	start := time.Now()
-	failovers := len(c.urls)
 	var last error
-	for attempt := 0; attempt < 30; attempt++ {
-		base := c.pick()
+	for i, busy := 0, 0; i < len(order) && busy < 30; {
+		base := order[i]
 		attempt := time.Now()
 		resp, err := c.post(ctx, base, body)
 		if err == nil {
 			resp.Elapsed, resp.Attempt, resp.Endpoint = time.Since(start), time.Since(attempt), base
 			if want := req.Model; want != "" && resp.Routing.Model != want {
-				return resp, fmt.Errorf("%w: asked for %q, got %q (is the checkpoint configured on the engine?)", ErrWrongModel, want, resp.Routing.Model)
+				c.forget(base, want)
+				last = fmt.Errorf("%w: asked %s for %q, got %q (is the checkpoint configured on the engine?)", ErrWrongModel, redactURL(base), want, resp.Routing.Model)
+				i++
+				continue
 			}
 			return resp, nil
 		}
 		last = err
 		var apiErr *APIError
 		var netErr net.Error
+		var opErr *net.OpError
 		switch {
 		case ctx.Err() != nil:
 			return Response{}, err
+		case errors.As(err, &opErr) && opErr.Op == "dial":
+			i++ // unreachable (refused, or no answer to connect): next instance
 		case errors.As(err, &netErr) && netErr.Timeout():
 			return Response{}, err
 		case errors.As(err, &apiErr) && apiErr.Status == http.StatusServiceUnavailable:
+			busy++
 			if !sleep(ctx, apiErr.RetryAfter) {
 				return Response{}, err
 			}
-			continue
 		case errors.As(err, &apiErr) && apiErr.Status < 500:
 			return Response{}, err
-		}
-		if failovers--; failovers < 0 {
-			break
+		default:
+			i++
 		}
 	}
 	return Response{}, last
 }
 
-// SetReady records which instances passed their last health check.
-// Requests go to those, or to all of them when none did.
-func (c *Client) SetReady(ready map[string]bool) { c.ready.Store(&ready) }
+// SetHealth records what the last health check learned.
+func (c *Client) SetHealth(ready map[string]bool, models map[string]map[string]bool) {
+	c.health.Store(&instances{ready: ready, models: models})
+}
 
-// pick returns the next base URL, round-robin over ready instances.
-func (c *Client) pick() string {
+// SetReady records which instances passed their last health check.
+func (c *Client) SetReady(ready map[string]bool) { c.SetHealth(ready, nil) }
+
+// order lists the instances to try for checkpoint, best first: ready ones
+// that have it loaded (or didn't say, unless strict), round-robin; then
+// the others that may have it, in case one came up since the last check.
+func (c *Client) order(checkpoint string, strict bool) []string {
+	return c.candidates(checkpoint, strict, int(c.next.Add(1)-1))
+}
+
+// Has reports whether some instance may answer for checkpoint.
+func (c *Client) Has(checkpoint string, strict bool) bool {
+	return len(c.candidates(checkpoint, strict, 0)) > 0
+}
+
+func (c *Client) candidates(checkpoint string, strict bool, start int) []string {
 	n := len(c.urls)
-	start := int(c.next.Add(1) - 1)
-	if ready := c.ready.Load(); ready != nil {
-		for i := 0; i < n; i++ {
-			if u := c.urls[(start+i)%n]; (*ready)[u] {
-				return u
-			}
+	h := c.health.Load()
+	may := func(u string) bool {
+		if h == nil || h.models == nil {
+			return !strict
+		}
+		m, said := h.models[u]
+		if !said || m == nil {
+			return !strict
+		}
+		return m[checkpoint]
+	}
+	// An instance that answers but hides its checkpoints while another
+	// lists them has a different key (one still on the old key while the
+	// key rotates): asking it would only get a 401.
+	listed := false
+	if h != nil {
+		for u := range h.ready {
+			listed = listed || h.models[u] != nil
 		}
 	}
-	return c.urls[start%n]
+	var ready, rest []string
+	for i := 0; i < n; i++ {
+		u := c.urls[(start+i)%n]
+		switch {
+		case !may(u):
+		case h != nil && h.ready[u] && listed && h.models[u] == nil:
+		case h != nil && h.ready[u]:
+			ready = append(ready, u)
+		default:
+			rest = append(rest, u)
+		}
+	}
+	return append(ready, rest...)
+}
+
+// Hidden lists the instances that answer their health check but hide their
+// checkpoints while another lists them (a different key): candidates skips
+// them.
+func (c *Client) Hidden() []string {
+	h := c.health.Load()
+	if h == nil {
+		return nil
+	}
+	listed := false
+	for u := range h.ready {
+		listed = listed || h.models[u] != nil
+	}
+	var out []string
+	for _, u := range c.urls {
+		if listed && h.ready[u] && h.models[u] == nil {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// forget records that base answered checkpoint with another one.
+func (c *Client) forget(base, checkpoint string) {
+	h := c.health.Load()
+	if h == nil {
+		return
+	}
+	models := maps.Clone(h.models)
+	if models == nil {
+		models = map[string]map[string]bool{}
+	}
+	m := maps.Clone(models[base])
+	if m == nil {
+		m = map[string]bool{}
+	}
+	delete(m, checkpoint)
+	models[base] = m
+	c.health.Store(&instances{ready: h.ready, models: models})
 }
 
 func (c *Client) post(ctx context.Context, base string, body []byte) (Response, error) {
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/systemone", bytes.NewReader(body))
 	if err != nil {
-		return Response{}, err
+		return Response{}, hideCreds(err)
 	}
 	hreq.Header.Set("Content-Type", "application/json")
 	if c.key != "" {
@@ -233,19 +335,19 @@ func (c *Client) post(ctx context.Context, base string, body []byte) (Response, 
 	}
 	res, err := c.http.Do(hreq)
 	if err != nil {
-		return Response{}, fmt.Errorf("laya engine at %s: %w", base, err)
+		return Response{}, fmt.Errorf("laya engine at %s: %w", redactURL(base), hideCreds(err))
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
 	if err != nil {
-		return Response{}, fmt.Errorf("laya engine at %s: reading reply: %w", base, err)
+		return Response{}, fmt.Errorf("laya engine at %s: reading reply: %w", redactURL(base), err)
 	}
 	if res.StatusCode != http.StatusOK {
 		return Response{}, apiError(res, data)
 	}
 	var out Response
 	if err := json.Unmarshal(data, &out); err != nil {
-		return Response{}, fmt.Errorf("laya engine at %s: invalid reply: %w", base, err)
+		return Response{}, fmt.Errorf("laya engine at %s: invalid reply: %w", redactURL(base), err)
 	}
 	if ms, err := strconv.ParseFloat(res.Header.Get("X-Inference-Time-Ms"), 64); err == nil {
 		out.Inference = time.Duration(ms * float64(time.Millisecond))
@@ -291,14 +393,14 @@ func sleep(ctx context.Context, d time.Duration) bool {
 func (c *Client) Health(ctx context.Context, base string) (Health, error) {
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/health", nil)
 	if err != nil {
-		return Health{}, err
+		return Health{}, hideCreds(err)
 	}
 	if c.key != "" {
 		hreq.Header.Set("Authorization", "Bearer "+c.key)
 	}
 	res, err := c.http.Do(hreq)
 	if err != nil {
-		return Health{}, fmt.Errorf("laya engine at %s: %w", base, err)
+		return Health{}, fmt.Errorf("laya engine at %s: %w", redactURL(base), hideCreds(err))
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
@@ -310,7 +412,17 @@ func (c *Client) Health(ctx context.Context, base string) (Health, error) {
 	}
 	var h Health
 	if err := json.Unmarshal(data, &h); err != nil {
-		return Health{}, fmt.Errorf("laya engine at %s: invalid health reply: %w", base, err)
+		return Health{}, fmt.Errorf("laya engine at %s: invalid health reply: %w", redactURL(base), err)
 	}
 	return h, nil
+}
+
+// hideCreds hides credentials in the URL of an HTTP client error: net/http
+// hides a password, but not a user alone, which is often a token.
+func hideCreds(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		ue.URL = redactURL(ue.URL)
+	}
+	return err
 }

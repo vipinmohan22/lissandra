@@ -91,6 +91,9 @@ type Event struct {
 	File       string `json:"file,omitempty"`
 	Line       int    `json:"line,omitempty"`        // line the record starts on
 	TimeSource string `json:"time_source,omitempty"` // "" (from the record), TimeInferred or TimeNone
+	// Compacted is set when the message or fields were cut to keep the
+	// event for browsing.
+	Compacted bool `json:"compacted,omitempty"`
 }
 
 // EngineResult records what the Laya engine answered for an event.

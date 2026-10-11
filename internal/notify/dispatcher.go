@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	queueSize      = 1000
+	queueSize      = 10000
 	maxDeliveries  = 500
 	maxAttempts    = 3
 	attemptTimeout = 30 * time.Second
@@ -54,13 +54,20 @@ type job struct {
 	msg *Message
 }
 
+// lane is one notifier's queue with its own workers, so a slow, hung or
+// failing notifier only delays its own notifications.
+type lane struct {
+	queue chan job
+	quit  chan struct{} // closed when the notifier is gone and the queue is empty
+}
+
 type throttleState struct {
 	last       time.Time
 	suppressed int
 }
 
 // Dispatcher matches events against routes and delivers them to notifiers
-// through a bounded queue with retries.
+// through bounded per-notifier queues with retries.
 type Dispatcher struct {
 	log *slog.Logger
 
@@ -72,8 +79,16 @@ type Dispatcher struct {
 	tmu      sync.Mutex
 	throttle map[string]*throttleState
 
-	queue   chan job
+	lmu     sync.Mutex
+	lanes   map[string]*lane // by notifier ID
+	runCtx  context.Context  // set by Run; lanes made later start workers with it
+	workers int              // per lane
+	stopped bool             // Run is stopping: no new workers
+	wg      sync.WaitGroup
 	pending atomic.Int64 // queued or being delivered
+
+	draining  chan struct{} // closed by Drain: no more retry waits
+	drainOnce sync.Once
 
 	dmu        sync.Mutex
 	deliveries []Delivery
@@ -87,7 +102,68 @@ func NewDispatcher(log *slog.Logger) *Dispatcher {
 		log:      log,
 		channels: map[string]*channel{},
 		throttle: map[string]*throttleState{},
-		queue:    make(chan job, queueSize),
+		lanes:    map[string]*lane{},
+		draining: make(chan struct{}),
+	}
+}
+
+// enqueue queues j on notifier id's lane, creating the lane (and, once Run
+// has started, its workers). It reports false when the lane is full. Sends
+// happen under lmu so pruneLanes never strands a job on a stopped lane.
+func (d *Dispatcher) enqueue(id string, j job) bool {
+	d.lmu.Lock()
+	defer d.lmu.Unlock()
+	l, ok := d.lanes[id]
+	if !ok {
+		l = &lane{queue: make(chan job, queueSize), quit: make(chan struct{})}
+		d.lanes[id] = l
+		if d.runCtx != nil {
+			d.startLocked(l)
+		}
+	}
+	select {
+	case l.queue <- j:
+		return true
+	default:
+		return false
+	}
+}
+
+// pruneLanes stops the idle lanes of notifiers that no longer exist.
+func (d *Dispatcher) pruneLanes() {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	d.lmu.Lock()
+	defer d.lmu.Unlock()
+	for id, l := range d.lanes {
+		if _, ok := d.channels[id]; !ok && len(l.queue) == 0 {
+			delete(d.lanes, id)
+			close(l.quit)
+		}
+	}
+}
+
+func (d *Dispatcher) startLocked(l *lane) {
+	if d.stopped {
+		return
+	}
+	ctx := d.runCtx
+	for i := 0; i < d.workers; i++ {
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-l.quit:
+					return
+				case j := <-l.queue:
+					d.deliver(ctx, j.ch, j.msg)
+					d.pending.Add(-1)
+				}
+			}
+		}()
 	}
 }
 
@@ -201,11 +277,11 @@ func (d *Dispatcher) Handle(ev model.Event) {
 			}
 			msg := &Message{Event: ev, RouteName: r.Name, Suppressed: suppressed, Link: d.eventLink(ev.ID)}
 			d.pending.Add(1)
-			select {
-			case d.queue <- job{ch: ch, msg: msg}:
-			default:
+			if !d.enqueue(nid, job{ch: ch, msg: msg}) {
 				d.pending.Add(-1)
-				d.Dropped.Add(1)
+				if n := d.Dropped.Add(1); n == 1 || n%100 == 0 {
+					d.log.Warn("notification queue full: alerts dropped", "notifier", ch.n.Name, "dropped_total", n)
+				}
 				d.record(ch, msg, "dropped", "notification queue full", 0, 0)
 			}
 		}
@@ -241,10 +317,11 @@ func (d *Dispatcher) eventLink(id string) string {
 	return d.publicURL + "/#/events/" + id
 }
 
-// Run starts delivery workers and blocks until ctx is cancelled.
 // Drain waits until every queued notification has been delivered (or has
-// failed), or until ctx ends. Stop handing it events first.
+// failed), or until ctx ends. Failed attempts are no longer retried, so a
+// failing notifier doesn't hold up the rest. Stop handing it events first.
 func (d *Dispatcher) Drain(ctx context.Context) error {
+	d.drainOnce.Do(func() { close(d.draining) })
 	t := time.NewTicker(10 * time.Millisecond)
 	defer t.Stop()
 	for d.pending.Load() > 0 {
@@ -257,32 +334,28 @@ func (d *Dispatcher) Drain(ctx context.Context) error {
 	return nil
 }
 
+// Run delivers with workers per notifier and blocks until ctx is
+// cancelled.
 func (d *Dispatcher) Run(ctx context.Context, workers int) {
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case j := <-d.queue:
-					d.deliver(ctx, j.ch, j.msg)
-					d.pending.Add(-1)
-				}
-			}
-		}()
+	d.lmu.Lock()
+	d.runCtx, d.workers = ctx, max(workers, 1)
+	for _, l := range d.lanes {
+		d.startLocked(l)
 	}
+	d.lmu.Unlock()
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			wg.Wait()
+			d.lmu.Lock()
+			d.stopped = true // a lane made now must not add to wg while it is waited on
+			d.lmu.Unlock()
+			d.wg.Wait()
 			return
 		case now := <-t.C:
 			d.pruneThrottle(now)
+			d.pruneLanes()
 		}
 	}
 }
@@ -310,8 +383,8 @@ func (d *Dispatcher) deliver(ctx context.Context, ch *channel, msg *Message) err
 		actx, cancel := context.WithTimeout(ctx, attemptTimeout)
 		err = ch.sender.Send(actx, msg)
 		cancel()
-		// Back off 2s, then 8s, between attempts.
-		if err == nil || !retryable(err) || attempt == maxAttempts || !sleep(ctx, time.Duration(attempt*attempt)*2*time.Second) {
+		// Back off 2s, then 8s, between attempts (not while draining).
+		if err == nil || !retryable(err) || attempt == maxAttempts || !d.sleep(ctx, time.Duration(attempt*attempt)*2*time.Second) {
 			break
 		}
 	}
@@ -327,11 +400,14 @@ func (d *Dispatcher) deliver(ctx context.Context, ch *channel, msg *Message) err
 	return nil
 }
 
-func sleep(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
+// sleep waits for dur unless ctx ends or a drain starts.
+func (d *Dispatcher) sleep(ctx context.Context, dur time.Duration) bool {
+	t := time.NewTimer(dur)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
+		return false
+	case <-d.draining:
 		return false
 	case <-t.C:
 		return true
@@ -390,5 +466,13 @@ func (d *Dispatcher) Deliveries(limit int) []Delivery {
 	return out
 }
 
-// QueueDepth reports pending notifications.
-func (d *Dispatcher) QueueDepth() int { return len(d.queue) }
+// QueueDepth reports queued notifications.
+func (d *Dispatcher) QueueDepth() int {
+	d.lmu.Lock()
+	defer d.lmu.Unlock()
+	n := 0
+	for _, l := range d.lanes {
+		n += len(l.queue)
+	}
+	return n
+}

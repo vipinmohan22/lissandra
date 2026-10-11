@@ -190,13 +190,20 @@ func (c *Category) UnmarshalJSON(b []byte) error {
 		*c = Category{Name: name}
 		return nil
 	}
+	// A fresh value: decoding into an existing element (a partial settings
+	// update) must not keep fields the object leaves out.
 	type plain Category
-	return json.Unmarshal(b, (*plain)(c))
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*c = Category(p)
+	return nil
 }
 
 // EngineSettings configures classification by the Laya engine
 // (laya-serve, github.com/NandhaKishorM/laya). Rules run first; the engine
-// classifies what they leave, once per message pattern.
+// classifies what they leave, once per source and message pattern.
 type EngineSettings struct {
 	Enabled bool `json:"enabled"`
 	// URL of laya-serve, e.g. http://127.0.0.1:8000. Several URLs may be

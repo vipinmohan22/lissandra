@@ -91,6 +91,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	for _, w := range config.FileRefWarnings(cfg.Get()) {
+		log.Warn("config refers to a file Laya may not read", "detail", w)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -161,10 +164,12 @@ func run() error {
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
+	stopping := time.Now()
 	// Stop ingest (pollers stopped with ctx), then finish every accepted
-	// event, engine requests cancelled, and deliver its alerts. Each step
-	// has its own budget, so a slow upload can't use up the drain's; all
-	// together fit Nomad's kill_timeout (30 s).
+	// event, engine requests cancelled, and deliver its alerts. Requests
+	// and events have their own budgets, so a slow upload can't use up the
+	// drain's; notifications get what is left of 26 s, and stopping 2 s
+	// more, within Nomad's kill_timeout (30 s).
 	step := func(d time.Duration) (context.Context, context.CancelFunc) {
 		return context.WithTimeout(context.Background(), d)
 	}
@@ -178,7 +183,7 @@ func run() error {
 		log.Warn("events still queued at shutdown", "queued", pipe.QueueDepth()+pipe.EngineQueueDepth())
 	}
 	cancel()
-	notifyCtx, cancel := step(10 * time.Second)
+	notifyCtx, cancel := context.WithDeadline(context.Background(), stopping.Add(26*time.Second))
 	if err := dispatcher.Drain(notifyCtx); err != nil {
 		log.Warn("notifications still queued at shutdown", "queued", dispatcher.QueueDepth())
 	}

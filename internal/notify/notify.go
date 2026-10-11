@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -196,7 +197,7 @@ func postJSON(ctx context.Context, url string, payload any, headers map[string]s
 func doRequest(ctx context.Context, method, url, contentType string, body []byte, headers map[string]string) error {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return hideURL(err)
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", "laya-notifier/1")
@@ -205,7 +206,7 @@ func doRequest(ctx context.Context, method, url, contentType string, body []byte
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return hideURL(err)
 	}
 	defer resp.Body.Close()
 	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -213,6 +214,21 @@ func doRequest(ctx context.Context, method, url, contentType string, body []byte
 		return &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(snippet))}
 	}
 	return nil
+}
+
+// hideURL shows only the scheme and host of the URL in an HTTP client
+// error: a webhook URL's path is often its secret (Slack, Teams), and Go
+// hides only a password.
+func hideURL(err error) error {
+	var ue *neturl.Error
+	if errors.As(err, &ue) {
+		if u, perr := neturl.Parse(ue.URL); perr == nil && u.Host != "" {
+			ue.URL = u.Scheme + "://" + u.Host + "/…"
+		} else {
+			ue.URL = "(the notifier's URL)"
+		}
+	}
+	return err
 }
 
 // HTTPError is a non-2xx response from a notification endpoint.

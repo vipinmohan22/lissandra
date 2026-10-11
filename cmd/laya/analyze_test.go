@@ -244,3 +244,27 @@ func TestAnalyzeWithEngine(t *testing.T) {
 		t.Errorf("bad engine URL: %d", code)
 	}
 }
+
+// A file read as a source whose checkpoint the engine hasn't loaded fails,
+// rather than keeping every event's rules result without a word.
+func TestAnalyzeSourceCheckpointNotLoaded(t *testing.T) {
+	fake := enginetest.New()
+	defer fake.Close()
+	fake.Models = []string{"english"}
+	c := config.Defaults()
+	c.Sources = append(c.Sources, config.Source{Name: "intl", Type: config.SourcePush, Enabled: true, EngineModel: "multilingual"})
+	if err := config.Normalize(c); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(c)
+	dir := t.TempDir()
+	cfgPath := writeFile(t, dir, "config.json", string(data))
+	f := writeFile(t, dir, "app.log", "2026-10-11 10:00:00 ERROR replica lag\n")
+	code, _, errOut := analyze(t, "", "-config", cfgPath, "-source", "intl", "-engine", fake.URL, f)
+	if code != 1 || !strings.Contains(errOut, `"multilingual"`) {
+		t.Errorf("exit %d: %s", code, errOut)
+	}
+	if code, _, errOut := analyze(t, "", "-config", cfgPath, "-engine", fake.URL, f); code != 0 {
+		t.Errorf("without -source the default checkpoint is used: exit %d: %s", code, errOut)
+	}
+}

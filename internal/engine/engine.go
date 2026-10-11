@@ -2,13 +2,14 @@ package engine
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"net"
 	"net/http"
-	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -44,6 +45,9 @@ const (
 	qSeverity = "severity"
 )
 
+// healthTimeout bounds one instance's health check.
+var healthTimeout = 10 * time.Second
+
 // ampleTime is the least time left at the start of a request for its
 // timing out to count against the engine.
 var ampleTime = 5 * time.Second
@@ -58,7 +62,8 @@ var (
 // Result is the engine's classification of one event.
 type Result struct {
 	Model              string             `json:"model"`
-	Category           string             `json:"category"` // model.Uncategorized when none fits
+	Category           string             `json:"category"`       // model.Uncategorized when none fits
+	CategoryAsked      bool               `json:"category_asked"` // false when no categories are configured
 	CategoryConfidence float64            `json:"category_confidence"`
 	Probabilities      map[string]float64 `json:"probabilities,omitempty"`
 	Severity           model.Severity     `json:"severity,omitempty"` // only when asked
@@ -89,7 +94,7 @@ type Status struct {
 	Model         string    `json:"model"`
 	ModelsInUse   []string  `json:"models_in_use"`  // the default and per-source checkpoints
 	Loaded        []string  `json:"loaded"`         // checkpoints the engine reported, if it said
-	Capacity      int       `json:"capacity"`       // concurrent requests: max_in_flight × instances
+	Capacity      int       `json:"capacity"`       // concurrent requests: max_in_flight × instances Laya can ask
 	Calls         uint64    `json:"calls_total"`    // requests made for live and file events
 	CacheHits     uint64    `json:"cache_hits"`     // live events answered without a request
 	Errors        uint64    `json:"errors"`         // failed requests
@@ -136,6 +141,8 @@ type Classifier struct {
 	optionsWarn  string
 	pausedUntil  time.Time // all calls: engine unreachable, failing or rejecting the key
 	connPause    bool      // pausedUntil is from connection failures (a passing health check lifts it)
+	authPause    bool      // pausedUntil is from a rejected key (an instance listing its checkpoints to the key lifts it)
+	healthErr    bool      // lastErr is from a health check no instance passed (one passing clears it)
 	failures     int       // consecutive failures, for backoff
 	timeouts     int       // consecutive requests that ran out of time
 	modelPause   map[string]time.Time
@@ -179,8 +186,9 @@ func (c *Classifier) Configure(cfg *config.Config) {
 			models[src.ID] = src.EngineModel
 		}
 	}
-	c.mu.Lock()
 	s := cfg.Settings.Engine
+	x := expand(s) // may read files: not under mu
+	c.mu.Lock()
 	answersChange := s.Model != c.settings.Model || !maps.Equal(models, c.sourceModels) || !slices.Equal(cfg.Settings.Categories, c.categories)
 	c.settings = s
 	c.categories = slices.Clone(cfg.Settings.Categories)
@@ -188,7 +196,7 @@ func (c *Classifier) Configure(cfg *config.Config) {
 	if answersChange {
 		c.resetAnswersLocked()
 	}
-	c.rebuildLocked()
+	c.rebuildLocked(x)
 	c.mu.Unlock()
 	c.loopOnce.Do(func() { go c.healthLoop() })
 	if c.syncHealth {
@@ -204,19 +212,37 @@ func (c *Classifier) resetAnswersLocked() {
 	c.cacheGen++
 	c.optionsWarn = ""
 	c.modelPause = map[string]time.Time{}
-	c.pausedUntil, c.connPause, c.failures, c.timeouts = time.Time{}, false, 0, 0
+	c.pausedUntil, c.connPause, c.authPause, c.failures, c.timeouts = time.Time{}, false, false, 0, 0
+}
+
+// expanded is the engine URL and key with ${env:}/${file:} references
+// expanded.
+type expanded struct{ url, key string }
+
+func expand(s config.EngineSettings) expanded {
+	return expanded{config.ExpandEnv(s.URL), config.ExpandEnv(s.APIKey)}
 }
 
 // rebuildLocked (re)creates the client when the expanded URL or key
 // changed. Caller holds mu.
-func (c *Classifier) rebuildLocked() {
+func (c *Classifier) rebuildLocked(x expanded) {
 	s := c.settings
-	urls, err := config.ParseEngineURLs(config.ExpandEnv(s.URL))
-	key := config.ExpandEnv(s.APIKey)
+	urls, err := config.ParseEngineURLs(x.url)
+	key := x.key
 	c.configErr = ""
 	if err != nil {
 		c.configErr = "engine url: " + err.Error()
+		var ue *config.URLError
+		if config.HasRef(s.URL) && errors.As(err, &ue) {
+			// Don't show what a reference expanded to: it may be a secret.
+			c.configErr = fmt.Sprintf("engine url: entry %d of the list %s expands to is not an http(s) base URL", ue.Entry, config.MaskURLs(s.URL))
+		}
 		urls = nil
+	} else if len(urls) == 0 {
+		// A reference Laya may not read expands to nothing: say so, not "no URL".
+		if rerr := config.CheckRefs(s.URL); rerr != nil {
+			c.configErr = "engine url: " + rerr.Error() + "; it reads as empty"
+		}
 	}
 	capacity := max(s.MaxInFlight, 1) * max(len(urls), 1)
 	clientKey := fmt.Sprint(urls, "\x00", key, "\x00", s.TimeoutSeconds, "\x00", capacity)
@@ -225,16 +251,25 @@ func (c *Classifier) rebuildLocked() {
 			c.client.Close()
 		}
 		keyChanged := key != c.key
+		endpointChanged := keyChanged || !slices.Equal(urls, c.urls)
 		c.client, c.clientKey, c.urls, c.key = nil, clientKey, urls, key
 		if len(urls) > 0 {
 			c.client = NewClient(urls, key, time.Duration(s.TimeoutSeconds)*time.Second, capacity)
 		}
 		c.loaded = nil
-		if keyChanged {
+		switch {
+		case keyChanged:
 			// Possibly another engine. Instances coming and going (Nomad
 			// scaling or rescheduling) keep the answers: a new checkpoint
 			// revision is caught by the health check.
 			c.resetAnswersLocked()
+		case endpointChanged:
+			// A corrected URL takes effect at once.
+			c.modelPause = map[string]time.Time{}
+			c.pausedUntil, c.connPause, c.authPause, c.failures, c.timeouts = time.Time{}, false, false, 0, 0
+		}
+		if endpointChanged {
+			c.lastErr, c.lastErrAt, c.healthErr = "", time.Time{}, false // about the old engine
 		}
 	}
 	if cap(c.sem) != capacity {
@@ -266,16 +301,28 @@ func (c *Classifier) healthLoop() {
 			}
 			last = time.Now()
 			c.mu.Lock()
-			if config.HasRef(c.settings.URL) || config.HasRef(c.settings.APIKey) {
-				c.rebuildLocked()
-			}
+			s := c.settings
 			c.mu.Unlock()
+			if config.HasRef(s.URL) || config.HasRef(s.APIKey) {
+				x := expand(s)
+				c.mu.Lock()
+				if c.settings.URL == s.URL && c.settings.APIKey == s.APIKey {
+					c.rebuildLocked(x)
+				}
+				c.mu.Unlock()
+			}
 			c.checkHealth()
 		}
 	}
 }
 
-// checkHealth probes every instance once and records the result.
+// CheckHealth probes every instance now and records the result: which are
+// up and which checkpoints each has. The classifier also does this in the
+// background; call it to know the engine before the first events.
+func (c *Classifier) CheckHealth() { c.checkHealth() }
+
+// checkHealth probes the instances concurrently, so a hung one can't hide
+// the others, and records the result.
 func (c *Classifier) checkHealth() {
 	c.mu.Lock()
 	client := c.client
@@ -284,41 +331,82 @@ func (c *Classifier) checkHealth() {
 	if client == nil || !enabled {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	type probe struct {
+		h   Health
+		err error
+	}
+	urls := client.URLs()
+	probes := make([]probe, len(urls))
+	var wg sync.WaitGroup
+	for i, base := range urls {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
+			defer cancel()
+			h, err := client.Health(ctx, base)
+			probes[i] = probe{h, err}
+		}()
+	}
+	wg.Wait()
 	ready := map[string]bool{}
+	listed := false // an instance listed its checkpoints: it accepts the key
+	models := map[string]map[string]bool{}
 	var loaded map[string]bool
 	revisions := map[string]string{}
-	for _, base := range client.URLs() {
-		h, err := client.Health(ctx, base)
-		if err != nil {
+	for i, base := range urls {
+		p := probes[i]
+		if p.err != nil {
 			continue
 		}
 		ready[base] = true
-		if h.Loaded != nil {
-			if loaded == nil {
-				loaded = map[string]bool{}
-			}
-			for _, m := range h.Loaded {
-				loaded[m] = true
-			}
+		if p.h.Loaded == nil {
+			models[base] = nil // didn't say (no key)
+			continue
 		}
-		for m, r := range h.Revisions {
+		models[base] = map[string]bool{}
+		if loaded == nil {
+			loaded = map[string]bool{}
+		}
+		for _, m := range p.h.Loaded {
+			loaded[m] = true
+			models[base][m] = true
+		}
+		listed = true
+		for m, r := range p.h.Revisions {
 			if r != "" {
 				revisions[m] = r
 			}
 		}
 	}
-	client.SetReady(ready)
+	client.SetHealth(ready, models)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.client != client {
 		return // reconfigured meanwhile
 	}
+	if len(ready) == 0 && len(probes) > 0 {
+		// Show an unreachable engine before any event fails on it.
+		c.lastErr, c.lastErrAt, c.healthErr = "no engine instance passed its health check: "+probes[0].err.Error(), time.Now(), true
+	} else if c.healthErr {
+		c.lastErr, c.lastErrAt, c.healthErr = "", time.Time{}, false
+	}
 	if len(ready) > 0 {
+		// Capacity is max_in_flight per instance Laya can ask: one that is
+		// down, or hides its checkpoints while another lists them (another
+		// key), takes no requests, so the others must not get its share.
+		usable := 0
+		for u := range ready {
+			if !listed || models[u] != nil {
+				usable++
+			}
+		}
+		if n := max(c.settings.MaxInFlight, 1) * usable; n > 0 && cap(c.sem) != n {
+			c.sem = make(chan struct{}, n)
+		}
 		c.loaded = loaded
-		if c.connPause {
-			c.pausedUntil, c.connPause, c.failures = time.Time{}, false, 0
+		if c.connPause || c.authPause && listed {
+			c.pausedUntil, c.connPause, c.authPause, c.failures = time.Time{}, false, false, 0
 		}
 		for m, r := range revisions {
 			if old, ok := c.revisions[m]; ok && old != r {
@@ -377,8 +465,27 @@ func (c *Classifier) availableLocked(checkpoint string) error {
 	case c.loaded == nil && checkpoint != c.settings.Model:
 		// Until the engine says what it has, only the default is asked.
 		return fmt.Errorf("%w: %q (the engine hasn't reported its checkpoints yet)", ErrNotLoaded, checkpoint)
+	case c.client != nil && !c.client.Has(checkpoint, checkpoint != c.settings.Model):
+		// No instance has it (one may have answered with another).
+		return c.notLoadedErrLocked(checkpoint)
 	}
 	return nil
+}
+
+// Pending reports whether an answer for ev's pattern is already on its way:
+// another event's request will answer it too.
+func (c *Classifier) Pending(ev *model.Event) bool {
+	text := textKey(ev)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.flights[c.flightKeyLocked(ev, text)]
+	return ok
+}
+
+// flightKeyLocked identifies an open request: the answer's key, and the
+// cache generation so no event joins a request about old categories.
+func (c *Classifier) flightKeyLocked(ev *model.Event, text string) string {
+	return fmt.Sprint(c.cacheGen, "\x00", c.keyLocked(ev, text))
 }
 
 // MaxWait is how long an event may wait for an answer, queueing included,
@@ -389,6 +496,10 @@ func (c *Classifier) MaxWait() time.Duration {
 	return time.Duration(max(c.settings.TimeoutSeconds, 1)) * time.Second
 }
 
+// unmeasured is the time per answer WouldWait assumes until one is
+// measured, so a burst at startup isn't all queued only to time out.
+const unmeasured = 1000.0 // ms
+
 // WouldWait estimates how long an event queued behind queued others would
 // wait for its answer, from recent request times and the engine's capacity.
 func (c *Classifier) WouldWait(queued int) time.Duration {
@@ -396,10 +507,18 @@ func (c *Classifier) WouldWait(queued int) time.Duration {
 	defer c.mu.Unlock()
 	per := c.avgAttempt
 	if c.Completed.Load() == 0 {
-		return 0 // nothing measured yet
+		per = unmeasured
 	}
 	ahead := float64(queued+int(c.waiting.Load())+int(c.inFlight.Load())) / float64(max(cap(c.sem), 1))
 	return time.Duration((ahead + 1) * per * float64(time.Millisecond))
+}
+
+// Capacity is how many requests the engine takes at once: max_in_flight
+// per instance times the instances.
+func (c *Classifier) Capacity() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return cap(c.sem)
 }
 
 // ApplyCached applies a cached answer for ev's pattern. It returns false on
@@ -417,8 +536,12 @@ func (c *Classifier) ApplyCached(ev *model.Event) bool {
 func (c *Classifier) ApplyCachedQuiet(ev *model.Event) bool { return c.applyCached(ev, false) }
 
 func (c *Classifier) applyCached(ev *model.Event, live bool) bool {
+	return c.applyCachedText(ev, textKey(ev), live)
+}
+
+func (c *Classifier) applyCachedText(ev *model.Event, text string, live bool) bool {
 	c.mu.Lock()
-	key := c.keyLocked(ev)
+	key := c.keyLocked(ev, text)
 	r, ok := c.cache[key]
 	s := c.settings
 	c.mu.Unlock()
@@ -429,15 +552,25 @@ func (c *Classifier) applyCached(ev *model.Event, live bool) bool {
 	return true
 }
 
-// keyLocked identifies the answer for ev: its message pattern (shared by
-// sources, so file analysis reuses live answers), the checkpoint and
-// whether severity is asked. Caller holds mu.
-func (c *Classifier) keyLocked(ev *model.Event) string {
+// textKey identifies everything the engine reads about ev: the state
+// buildState sends, with numbers, ids and times normalized as in message
+// patterns. Events of one source that share it get the same answer.
+func textKey(ev *model.Event) string {
+	sum := sha1.Sum([]byte(classify.Normalize(buildState(ev))))
+	return hex.EncodeToString(sum[:10])
+}
+
+// keyLocked identifies the answer for ev: its source, its text (from
+// textKey), the checkpoint and whether severity is asked. Answers aren't
+// shared between sources: the normalized text can differ in what the engine
+// reads (numbers, case), so one source's events must not decide another's.
+// Caller holds mu.
+func (c *Classifier) keyLocked(ev *model.Event, text string) string {
 	sev := "c"
 	if c.asksSeverity(ev) {
 		sev = "cs"
 	}
-	return c.modelLocked(ev) + "\x00" + sev + "\x00" + classify.Fingerprint("", ev.Message)
+	return ev.SourceID + "\x00" + c.modelLocked(ev) + "\x00" + sev + "\x00" + text
 }
 
 func (c *Classifier) modelLocked(ev *model.Event) string {
@@ -456,13 +589,14 @@ func (c *Classifier) Enrich(ctx context.Context, ev *model.Event) { c.enrich(ctx
 func (c *Classifier) EnrichFile(ctx context.Context, ev *model.Event) { c.enrich(ctx, ev, false) }
 
 func (c *Classifier) enrich(ctx context.Context, ev *model.Event, live bool) {
-	if c.applyCached(ev, live) {
+	text := textKey(ev)
+	if c.applyCachedText(ev, text, live) {
 		if live {
 			c.CacheHits.Add(1)
 		}
 		return
 	}
-	r, coalesced, err := c.classify(ctx, ev)
+	r, coalesced, err := c.classify(ctx, ev, text)
 	switch {
 	case err == nil:
 		if coalesced && live {
@@ -478,6 +612,8 @@ func (c *Classifier) enrich(ctx context.Context, ev *model.Event, live bool) {
 		}
 	case ctx.Err() != nil:
 		c.TimedOut.Add(1)
+	case coalesced:
+		// The request this event shared has logged its failure.
 	default:
 		c.log.Warn("laya engine classification failed", "err", err)
 	}
@@ -491,6 +627,7 @@ func (c *Classifier) Classify(ctx context.Context, ev *model.Event) (Result, err
 	cfgErr := c.configErr
 	checkpoint := c.modelLocked(ev)
 	req := buildRequest(ev, c.categories, checkpoint, c.asksSeverity(ev))
+	req.Strict = checkpoint != c.settings.Model
 	var notLoaded error
 	if c.loaded != nil && !c.loaded[checkpoint] || c.loaded == nil && checkpoint != c.settings.Model {
 		notLoaded = c.notLoadedErrLocked(checkpoint)
@@ -504,6 +641,9 @@ func (c *Classifier) Classify(ctx context.Context, ev *model.Event) (Result, err
 	}
 	if notLoaded != nil {
 		return Result{}, notLoaded // asking would make the engine load it
+	}
+	if len(req.Questions) == 0 {
+		return Result{}, errors.New("nothing to ask: no categories are configured, and the severity isn't asked (set_severity is off, or the record states its level)")
 	}
 	select {
 	case sem <- struct{}{}:
@@ -520,53 +660,62 @@ func (c *Classifier) Classify(ctx context.Context, ev *model.Event) (Result, err
 
 // classify asks the engine about ev, coalescing concurrent requests for the
 // same answer. coalesced reports that another request's answer was used.
-func (c *Classifier) classify(ctx context.Context, ev *model.Event) (r Result, coalesced bool, err error) {
-	c.mu.Lock()
-	if c.client == nil {
-		c.mu.Unlock()
-		return Result{}, false, errors.New("no engine URL is configured")
-	}
-	checkpoint := c.modelLocked(ev)
-	if err := c.availableLocked(checkpoint); err != nil {
-		c.mu.Unlock()
-		return Result{}, false, err
-	}
-	key := c.keyLocked(ev)
-	if hit, ok := c.cache[key]; ok && time.Since(hit.at) <= cacheTTL {
-		c.mu.Unlock() // answered while this event waited for the lock
-		return hit.Result, true, nil
-	}
-	if f, ok := c.flights[key]; ok {
-		c.mu.Unlock()
-		select {
-		case <-f.done:
-			return f.res, true, f.err
-		case <-ctx.Done():
-			return Result{}, false, ctx.Err()
+func (c *Classifier) classify(ctx context.Context, ev *model.Event, text string) (r Result, coalesced bool, err error) {
+	for {
+		c.mu.Lock()
+		if c.client == nil {
+			c.mu.Unlock()
+			return Result{}, false, errors.New("no engine URL is configured")
 		}
-	}
-	f := &flight{done: make(chan struct{})}
-	c.flights[key] = f
-	client, sem, gen := c.client, c.sem, c.cacheGen
-	req := buildRequest(ev, c.categories, checkpoint, c.asksSeverity(ev))
-	c.mu.Unlock()
-
-	f.res, f.err = c.call(ctx, client, sem, req)
-	c.mu.Lock()
-	delete(c.flights, key)
-	// Don't store an answer to questions a reconfiguration replaced.
-	if f.err == nil && gen == c.cacheGen {
-		if len(c.cache) >= cacheSize {
-			for k := range c.cache { // drop an arbitrary entry
-				delete(c.cache, k)
-				break
+		checkpoint := c.modelLocked(ev)
+		if err := c.availableLocked(checkpoint); err != nil {
+			c.mu.Unlock()
+			return Result{}, false, err
+		}
+		key := c.keyLocked(ev, text)
+		if hit, ok := c.cache[key]; ok && time.Since(hit.at) <= cacheTTL {
+			c.mu.Unlock() // answered while this event waited for the lock
+			return hit.Result, true, nil
+		}
+		fkey := c.flightKeyLocked(ev, text)
+		if f, ok := c.flights[fkey]; ok {
+			c.mu.Unlock()
+			select {
+			case <-f.done:
+			case <-ctx.Done():
+				return Result{}, false, ctx.Err()
 			}
+			// The first event may have run out of its own time; this one
+			// still has time, so it asks itself.
+			if ctx.Err() == nil && (errors.Is(f.err, errNoSlot) || errors.Is(f.err, context.DeadlineExceeded) || errors.Is(f.err, context.Canceled)) {
+				continue
+			}
+			return f.res, true, f.err
 		}
-		c.cache[key] = cached{Result: f.res, at: time.Now()}
+		f := &flight{done: make(chan struct{})}
+		c.flights[fkey] = f
+		client, sem, gen := c.client, c.sem, c.cacheGen
+		req := buildRequest(ev, c.categories, checkpoint, c.asksSeverity(ev))
+		req.Strict = checkpoint != c.settings.Model
+		c.mu.Unlock()
+
+		f.res, f.err = c.call(ctx, client, sem, req)
+		c.mu.Lock()
+		delete(c.flights, fkey)
+		// Don't store an answer to questions a reconfiguration replaced.
+		if f.err == nil && gen == c.cacheGen {
+			if len(c.cache) >= cacheSize {
+				for k := range c.cache { // drop an arbitrary entry
+					delete(c.cache, k)
+					break
+				}
+			}
+			c.cache[key] = cached{Result: f.res, at: time.Now()}
+		}
+		c.mu.Unlock()
+		close(f.done)
+		return f.res, false, f.err
 	}
-	c.mu.Unlock()
-	close(f.done)
-	return f.res, false, f.err
 }
 
 func (c *Classifier) call(ctx context.Context, client *Client, sem chan struct{}, req Request) (Result, error) {
@@ -598,6 +747,9 @@ func (c *Classifier) call(ctx context.Context, client *Client, sem chan struct{}
 
 	c.Calls.Add(1)
 	resp, err := client.Decide(ctx, req)
+	if errors.Is(err, ErrNotLoaded) {
+		return Result{}, err // no instance has it (any more): not an engine failure
+	}
 	if err != nil && ctx.Err() != nil {
 		// The event's time ran out: the engine is slow or busy, not
 		// necessarily failing. Only a request that started with ample
@@ -635,7 +787,7 @@ func (c *Classifier) noteError(ctx context.Context, checkpoint string, err error
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := time.Now()
-	c.lastErr, c.lastErrAt = err.Error(), now
+	c.lastErr, c.lastErrAt, c.healthErr = err.Error(), now, false
 	var apiErr *APIError
 	var netErr net.Error
 	switch {
@@ -643,6 +795,7 @@ func (c *Classifier) noteError(ctx context.Context, checkpoint string, err error
 		c.modelPause[checkpoint] = now.Add(configPause)
 	case errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound):
 		c.pausedUntil, c.connPause = now.Add(configPause), false
+		c.authPause = apiErr.Status != http.StatusNotFound
 	case errors.As(err, &apiErr) && apiErr.Status == http.StatusServiceUnavailable:
 	case errors.As(err, &apiErr) && apiErr.Status < 500:
 		// This event's input; the next one may be fine.
@@ -665,7 +818,7 @@ func (c *Classifier) noteTimeout(ample bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.timeouts++; c.timeouts >= timeoutsToPause {
-		c.lastErr, c.lastErrAt = fmt.Sprintf("%d requests in a row got no answer in time", c.timeouts), time.Now()
+		c.lastErr, c.lastErrAt, c.healthErr = fmt.Sprintf("%d requests in a row got no answer in time", c.timeouts), time.Now(), false
 		c.backoffLocked(time.Now())
 	}
 }
@@ -730,8 +883,13 @@ func (c *Classifier) apply(ev *model.Event, r Result, s config.EngineSettings, l
 		ev.Severity = r.Severity
 		info.Applied, info.SeverityApplied = true, true
 	}
+	if !r.CategoryAsked {
+		info.Category = "" // only the severity was asked
+	}
+	if info.CategoryApplied {
+		ev.Classifier = ByEngine // the category is the engine's
+	}
 	if info.Applied {
-		ev.Classifier = ByEngine
 		if live {
 			c.Applied.Add(1)
 		}
@@ -767,11 +925,27 @@ func parseResult(resp Response, req Request) (Result, error) {
 		if !ok {
 			return Result{}, errors.New("laya engine: reply has no category answer")
 		}
-		label, _ := a.Choice.(string)
-		if label == "" {
-			return Result{}, fmt.Errorf("laya engine: unexpected category answer %v", a.Choice)
+		// Only what was offered is accepted, and only its probabilities are
+		// kept (they are cached).
+		offered, _ := req.Questions[qCategory].Criteria.(criteria)
+		choice, _ := a.Choice.(string)
+		if !slices.ContainsFunc(offered, func(l label) bool { return l.name == choice }) {
+			return Result{}, fmt.Errorf("laya engine: category answer %q was not offered", model.Truncate(choice, 64))
 		}
-		r.Category, r.CategoryConfidence, r.Probabilities = label, a.AnswerConfidence, a.Probabilities
+		if !(a.AnswerConfidence >= 0 && a.AnswerConfidence <= 1) {
+			return Result{}, fmt.Errorf("laya engine: category confidence %v is not a probability", a.AnswerConfidence)
+		}
+		probs := make(map[string]float64, len(offered))
+		for _, l := range offered {
+			if p, ok := a.Probabilities[l.name]; ok {
+				if !(p >= 0 && p <= 1) {
+					return Result{}, fmt.Errorf("laya engine: probability %v for %q is not a probability", p, l.name)
+				}
+				probs[l.name] = p
+			}
+		}
+		r.Category, r.CategoryConfidence, r.Probabilities = choice, a.AnswerConfidence, probs
+		r.CategoryAsked = true
 	} else {
 		r.Category = model.Uncategorized
 	}
@@ -784,7 +958,7 @@ func parseResult(resp Response, req Request) (Result, error) {
 		best, bestP := -1, -1.0
 		for k, p := range a.Probabilities {
 			i, err := strconv.Atoi(k)
-			if err != nil || i < 0 || i >= len(model.Severities) {
+			if err != nil || i < 0 || i >= len(model.Severities) || !(p >= 0 && p <= 1) {
 				continue
 			}
 			if p > bestP || p == bestP && i < best {
@@ -917,6 +1091,11 @@ func (c *Classifier) Status() Status {
 	if c.optionsWarn != "" {
 		st.Warnings = append(st.Warnings, c.optionsWarn)
 	}
+	if c.client != nil {
+		for _, u := range c.client.Hidden() {
+			st.Warnings = append(st.Warnings, fmt.Sprintf("%s answers but doesn't list its checkpoints to Laya's key, as the other instances do: its key differs, so it isn't asked", redactURL(u)))
+		}
+	}
 	if now.Before(c.pausedUntil) {
 		st.PausedUntil = c.pausedUntil
 	}
@@ -933,10 +1112,4 @@ func (c *Classifier) notLoadedErrLocked(checkpoint string) error {
 }
 
 // redactURL hides credentials embedded in a URL.
-func redactURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
-		return raw
-	}
-	return u.Redacted()
-}
+func redactURL(raw string) string { return config.MaskURLs(raw) }

@@ -133,11 +133,14 @@ func (r *retainer) ordered() []model.Event {
 // very large structured fields are dropped. Strings are copied so a kept
 // event never pins the larger record it was cut from.
 func compact(ev model.Event) model.Event {
+	cut := len(ev.Message) > retainedMsgBytes || len(ev.Level) > 64
 	ev.Message = strings.Clone(model.Truncate(ev.Message, retainedMsgBytes))
 	ev.Level = strings.Clone(model.Truncate(ev.Level, 64))
 	if len(ev.Fields) > 0 && fieldsCost(ev.Fields, retainedFieldsBytes) > retainedFieldsBytes {
 		ev.Fields = map[string]any{"laya_fields_omitted": "structured fields were too large to keep for browsing"}
+		cut = true
 	}
+	ev.Compacted = ev.Compacted || cut
 	return ev
 }
 

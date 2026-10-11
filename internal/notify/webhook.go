@@ -43,14 +43,18 @@ func newWebhook(s map[string]string) (Sender, error) {
 		return nil, err
 	}
 	headers := map[string]string{}
+	n := 0
 	for _, line := range strings.Split(s["headers"], "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+		n++
 		k, v, ok := strings.Cut(line, ":")
 		if !ok || strings.TrimSpace(k) == "" {
-			return nil, fmt.Errorf("invalid header line %q (want \"Name: value\")", line)
+			// By number, not text: the line may hold a secret a reference
+			// expanded to.
+			return nil, fmt.Errorf("header %d (counting non-empty lines, after references are expanded) is not \"Name: value\"", n)
 		}
 		headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}

@@ -106,3 +106,13 @@ func TestManagerStartsAndStops(t *testing.T) {
 		t.Error("disabled source should stop")
 	}
 }
+
+// A token in the pull URL (a user alone, which Go doesn't hide) doesn't
+// show in fetch errors.
+func TestFetchErrorHidesURLToken(t *testing.T) {
+	src := &config.Source{ID: "s", Name: "s", Type: config.SourcePull, Pull: &config.Pull{URL: "http://tok_pull_secret@127.0.0.1:1/logs", Method: "GET", TimeoutSeconds: 1}}
+	_, err := Fetch(context.Background(), src, time.Now(), time.Now(), nil)
+	if err == nil || strings.Contains(err.Error(), "tok_pull_secret") {
+		t.Errorf("fetch error: %v", err)
+	}
+}

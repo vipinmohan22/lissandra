@@ -353,7 +353,12 @@ func (s *Server) getImport(w http.ResponseWriter, r *http.Request) {
 func (s *Server) importTrainingData(w http.ResponseWriter, r *http.Request) {
 	if im, ok := s.findImport(w, r); ok {
 		evs, _ := im.Events(importer.Query{Limit: -1})
-		writeTrainingData(w, s.laya, evs, strings.TrimSuffix(im.Report(false).FileName, ".gz")+"-"+im.ID())
+		// The file name is cut, not the id that tells analyses apart.
+		name := strings.TrimSuffix(im.Report(false).FileName, ".gz")
+		if len(name) > 60 {
+			name = name[:60]
+		}
+		writeTrainingData(w, s.laya, evs, name+"-"+im.ID())
 	}
 }
 

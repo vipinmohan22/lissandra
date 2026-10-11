@@ -23,7 +23,12 @@ func Pattern(msg string) string {
 	if len(msg) > 400 {
 		msg = msg[:400]
 	}
-	s := strings.ToLower(msg)
+	return Normalize(msg)
+}
+
+// Normalize is Pattern for the whole of s, however long.
+func Normalize(s string) string {
+	s = strings.ToLower(s)
 	s = reTime.ReplaceAllString(s, "<ts>")
 	s = reUUID.ReplaceAllString(s, "<uuid>")
 	s = reIP.ReplaceAllString(s, "<ip>")

@@ -21,8 +21,13 @@ import (
 var ErrQueueFull = errors.New("pipeline queue full")
 
 // engineQueueSize bounds events waiting for the Laya engine; when it is
-// full, events go on with the rules' classification.
-const engineQueueSize = 256
+// full, events go on with the rules' classification, except those whose
+// answer is already being asked for: up to maxSharers of them wait for it
+// outside the queue (a burst of one new error shares one request).
+const (
+	engineQueueSize = 256
+	maxSharers      = 4096
+)
 
 // queued is an event waiting for the Laya engine.
 type queued struct {
@@ -49,6 +54,11 @@ type Pipeline struct {
 	engineCancel context.CancelFunc
 	draining     atomic.Bool
 
+	// engineLive counts live events queued for, or being answered by, the
+	// engine; file analysis leaves the engine to them.
+	engineLive atomic.Int64
+	sharers    chan struct{} // slots for events waiting on a request already open
+
 	Received, Processed, Dropped, Rejected, EngineQueued, EngineShed atomic.Uint64
 }
 
@@ -57,6 +67,7 @@ func New(queueSize int, store *events.Store, d *notify.Dispatcher, laya *engine.
 	p := &Pipeline{
 		in:          make(chan model.Event, queueSize),
 		engineQueue: make(chan queued, engineQueueSize),
+		sharers:     make(chan struct{}, maxSharers),
 		store:       store,
 		dispatcher:  d,
 		laya:        laya,
@@ -183,12 +194,16 @@ func (p *Pipeline) maxEngineWait() time.Duration {
 func (p *Pipeline) enrich(q queued) {
 	deadline := q.at.Add(p.maxEngineWait())
 	if time.Now().After(deadline) || p.draining.Load() {
-		p.laya.Skipped.Add(1)
+		// Out of time: an answer that arrived meanwhile is still used.
+		if !p.laya.ApplyCached(&q.ev) {
+			p.laya.Skipped.Add(1)
+		}
 	} else {
 		ctx, cancel := context.WithDeadline(p.engineCtx, deadline)
 		p.laya.Enrich(ctx, &q.ev)
 		cancel()
 	}
+	p.engineLive.Add(-1)
 	p.finish(q.ev)
 }
 
@@ -207,10 +222,10 @@ func (p *Pipeline) ClassifyOffline(rules *classify.Engine, ev *model.Event) bool
 
 // ClassifyFile classifies ev for file analysis: rules, then the Laya engine
 // for what they leave. A cached answer is used when there is one; otherwise
-// the engine is asked while calls (shared by the analysis) remain and no
-// live event is waiting for it, so file analysis never delays live
-// classification. It never stores the event or notifies. It returns false
-// when a rule drops the event.
+// the engine is asked while calls (shared by the analysis) remain and the
+// engine has a slot no live event needs, so file analysis doesn't delay
+// live classification. It never stores the event or notifies. It returns
+// false when a rule drops the event.
 func (p *Pipeline) ClassifyFile(ctx context.Context, rules *classify.Engine, ev *model.Event, calls *atomic.Int64) bool {
 	if !rules.Classify(ev) {
 		return false
@@ -218,7 +233,7 @@ func (p *Pipeline) ClassifyFile(ctx context.Context, rules *classify.Engine, ev 
 	if p.laya == nil || !p.laya.Eligible(ev) || p.laya.ApplyCachedQuiet(ev) {
 		return true
 	}
-	if p.EngineQueueDepth() > 0 || !p.laya.Available(ev) || calls.Add(-1) < 0 {
+	if p.engineLive.Load() >= int64(p.laya.Capacity()) || !p.laya.Available(ev) || calls.Add(-1) < 0 {
 		return true
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.laya.MaxWait())
@@ -232,29 +247,51 @@ func (p *Pipeline) process(ev model.Event) {
 		p.Dropped.Add(1)
 		return
 	}
-	if p.laya != nil && !p.draining.Load() && p.laya.Eligible(&ev) && !p.laya.ApplyCached(&ev) {
+	// While draining, cached answers are still used; nothing new is asked.
+	if p.laya != nil && p.laya.Eligible(&ev) && !p.laya.ApplyCached(&ev) {
 		switch {
-		case !p.laya.Available(&ev):
+		case p.draining.Load() || !p.laya.Available(&ev):
 			p.laya.Skipped.Add(1)
-		case p.laya.WouldWait(len(p.engineQueue)) > p.maxEngineWait():
+		case !p.laya.Pending(&ev) && p.laya.WouldWait(len(p.engineQueue)) > p.maxEngineWait():
+			// (An event whose pattern is already being asked about will
+			// share that answer, so it is never shed.)
 			// It would time out in the queue anyway: don't hold it.
 			p.EngineShed.Add(1)
 			p.laya.Skipped.Add(1)
 		default:
+			p.engineLive.Add(1)
+			q := queued{ev, time.Now()}
 			select {
-			case p.engineQueue <- queued{ev, time.Now()}:
+			case p.engineQueue <- q:
 				p.EngineQueued.Add(1)
 				return
-			default: // the queue is full; don't hold the event
-				p.laya.Skipped.Add(1)
+			default:
 			}
+			// The queue is full. An event whose answer is already being
+			// asked for costs no request: let it wait for that one.
+			if p.laya.Pending(&ev) {
+				select {
+				case p.sharers <- struct{}{}:
+					p.EngineQueued.Add(1)
+					go func() {
+						defer func() { <-p.sharers }()
+						p.enrich(q)
+					}()
+					return
+				default:
+				}
+			}
+			p.engineLive.Add(-1) // don't hold the event
+			p.laya.Skipped.Add(1)
 		}
 	}
 	p.finish(ev)
 }
 
+// finish records ev and hands it to the dispatcher. It is counted as
+// processed last, so Drain doesn't return before its alert is queued.
 func (p *Pipeline) finish(ev model.Event) {
-	p.Processed.Add(1)
 	p.store.Add(ev)
 	p.dispatcher.Handle(ev)
+	p.Processed.Add(1)
 }

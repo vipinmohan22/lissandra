@@ -116,7 +116,7 @@ Senders inside the cluster can discover Laya through service discovery. For exam
 
 ## 6. Run the Laya engine (optional)
 
-The Laya engine is `laya-serve`, a Python/PyTorch decision model served over HTTP. Laya asks it about the events its rules leave uncategorized, once per message pattern (see [Classification](../../README.md#classification) in the main README). It runs as its own job so it can be sized, scaled and upgraded on its own, and Laya keeps classifying with its rules while the engine is down.
+The Laya engine is `laya-serve`, a Python/PyTorch decision model served over HTTP. Laya asks it about the events its rules leave uncategorized, once per source and message pattern (see [Classification](../../README.md#classification) in the main README). It runs as its own job so it can be sized, scaled and upgraded on its own, and Laya keeps classifying with its rules while the engine is down.
 
 ### Build and push the image
 
@@ -156,7 +156,7 @@ nomad var get -out=json nomad/jobs/laya | nomad var put -in=json - \
   LAYA_ENGINE_API_KEY="$(nomad var get -item=LAYA_API_KEY nomad/jobs/laya-engine)"
 ```
 
-Laya's default engine settings read `${env:LAYA_ENGINE_URL}` (in this job, the address file described below) and `${env:LAYA_ENGINE_API_KEY}`, so there is nothing to set in the UI. To rotate the key, update both variables. Each job restarts with its new value.
+Laya's default engine settings read `${env:LAYA_ENGINE_URL}` (in this job, the address file described below) and `${env:LAYA_ENGINE_API_KEY}`, so there is nothing to set in the UI. To rotate the key, update `nomad/jobs/laya-engine` first, then `nomad/jobs/laya`. Each job restarts with its new value. In the other order, Laya's calls are refused until the engine has the new key too; Laya resumes them at its next health check once the engine accepts the key (within 30 seconds).
 
 ### Run it
 
@@ -179,7 +179,7 @@ To check the connection from Laya, use **Settings → Laya engine → Check conn
 curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" https://laya.example.com/api/engine/health
 ```
 
-`ok` is true when every instance answers, lists its checkpoints (it does so only when Laya's key is right) and has every checkpoint Laya uses loaded. Each endpoint reports its `loaded` checkpoints, the ones `missing` from them, `device` and `revision`. To see the addresses Laya was given: `nomad alloc fs <alloc> laya/local/engine_urls`.
+`ok` is true when every instance answers, lists its checkpoints (it does so only when Laya's key is right) and has the default checkpoint loaded (`model_loaded`). A checkpoint only a source uses doesn't affect `ok`: each endpoint lists the checkpoints in use that it hasn't loaded under `missing`, next to its `loaded` checkpoints, `device` and `revision`; the UI's **Check connection** warns about them. To see the addresses Laya was given: `nomad alloc fs <alloc> laya/local/engine_urls`.
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -192,7 +192,7 @@ curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" https://laya.example.com/api/e
 | `gpu` | `false` | `true` requests one `nvidia/gpu` device and sets `LAYA_DEVICE=cuda`. Needs the `cu130` image. |
 | `models` | `english` | `LAYA_MODELS`, loaded at startup. Include every checkpoint Laya uses, in Settings and in source overrides: Laya doesn't send events to a checkpoint the engine hasn't loaded; they keep the rules' result. |
 | `default_model` | `english` | `LAYA_DEFAULT_MODEL`. Laya always names the checkpoint it wants, so this only matters to other clients. |
-| `max_loaded` | `0` | `LAYA_MAX_LOADED`. `0` means one per entry in `models`. Don't set it lower: a checkpoint the engine unloads is one Laya stops asking for. |
+| `max_loaded` | `0` | `LAYA_MAX_LOADED`. `0` means one per entry in `models`. The checkpoints in `models` stay loaded whatever this says (laya-serve raises the cap to fit them); it only limits checkpoints loaded on demand, which Laya never asks for. |
 | `extra_models` | `""` | `LAYA_EXTRA_MODELS`: JSON `{"name": source}` registering fine-tuned checkpoints. |
 | `revision` | `7b928d8…` | `LAYA_REVISION`. See [pinning](#model-cache-offline-mode-and-pinning). |
 | `offline` | `false` | `HF_HUB_OFFLINE`: use only the cache. |
@@ -206,9 +206,9 @@ The job also sets `LAYA_HOST=0.0.0.0`, `LAYA_PORT` from the Nomad port, `LAYA_PR
 
 ### Sizing
 
-Laya calls the engine once per new message pattern and checkpoint and caches the answer for 24 hours, so what counts is how many *new* patterns arrive, not how many events.
+Laya calls the engine once per new message pattern, source and checkpoint and caches the answer for 24 hours, so what counts is how many *new* patterns arrive, not how many events. Structured fields count as part of the pattern (ids of requests, traces and users excepted), so logs whose fields carry other per-event values, such as free text, cost more requests.
 
-- **CPU.** With the english checkpoint on 4 cores, one question takes about 0.4–0.6 s; multilingual is a little faster. Laya asks one question per pattern (the category), or two when the severity was only guessed, so an instance answers roughly 1–2 new patterns per second. It works on one request at a time and batching gains nothing on CPU, so scale out with `count` rather than adding cores. Laya's `max_in_flight` engine setting is per instance (default 1, which matches), so new instances add capacity without changing any setting.
+- **CPU.** With the english checkpoint on 4 cores, one question takes about 0.4–0.6 s; multilingual is a little faster. Laya asks one question per pattern (the category), or two when `set_severity` is on and the severity was only guessed, so an instance answers roughly 1–2 new patterns per second. It works on one request at a time and batching gains nothing on CPU, so scale out with `count` rather than adding cores. Laya's `max_in_flight` engine setting is per instance (default 1, which matches), so new instances add capacity without changing any setting.
 - **Bursts.** When many new patterns arrive at once, after a deploy or during an outage, they queue in Laya. Each event waits at most the engine timeout (`timeout_seconds`, 30 s by default), queueing included, and then goes on with the rules' result, so the engine delays an alert by at most that. An event that would run out of time in the queue isn't queued at all (`engine_shed` in `/api/stats`). A busy engine is never treated as failed. `laya_engine_skipped_total` counts events that went on without an answer.
 - **Memory.** The english checkpoint uses 2.1–2.4 GB resident and peaks near 3 GB while loading. Multilingual uses about 1.9 GB. The default 3500 MB fits one checkpoint; add about 2 GB for each extra checkpoint in `models`.
 - **GPU.** On an NVIDIA T4 a question takes about 35 ms, so a GPU instance keeps up with far more new patterns. Set `gpu = true` and use the `cu130` image; `cores = 2` is enough. Keep the memory, since checkpoints load through host memory. The client needs the [NVIDIA device plugin](https://developer.hashicorp.com/nomad/plugins/devices/nvidia) and the NVIDIA container runtime. The docker driver uses that runtime for a task that is given a GPU.
@@ -238,7 +238,7 @@ Change `image` or `revision` and re-run the job. Instances are replaced one at a
 | `PermissionError` under `/home/laya/.cache/huggingface` | The cache volume must be owned by `10001:10001`. The volume spec does that; a static host volume needs `chown 10001:10001`. |
 | Exit code 137, OOM killed | Raise `memory`, by about 2 GB per extra checkpoint in `models`. |
 | Laya's engine health says `the engine did not list its checkpoints: check the API key` | `/health` answers anyone with `{"status":"ok"}` but lists checkpoints only to callers with the key, so the Nomad check passes either way. Make `LAYA_ENGINE_API_KEY` in `nomad/jobs/laya` match `LAYA_API_KEY` in `nomad/jobs/laya-engine`. With a wrong key, requests fail with 401 and Laya pauses engine calls for 5 minutes. |
-| Engine health is not ok, an endpoint has `missing` checkpoints and `model_loaded` is false; the engine status warns `checkpoint "…" is in use but not loaded` | A checkpoint Laya uses (in Settings or on a source) isn't in `models`. Laya doesn't ask for it, because laya-serve would load it on the first request: a second model in memory, possibly beyond `memory`, evicting another checkpoint at `max_loaded`, or downloading it. Events that need it keep the rules' result. Add it to `models` and raise `memory` by about 2 GB. |
+| An endpoint has `missing` checkpoints (health is not ok when the default checkpoint is one of them: `model_loaded` is false); the engine status warns `checkpoint not loaded on the engine: "…" (it has …)` | A checkpoint Laya uses (in Settings or on a source) isn't in `models`. Laya doesn't ask for it, because laya-serve would load it on the first request: a second model in memory, possibly beyond `memory`, evicting another checkpoint at `max_loaded`, or downloading it. Events that need it keep the rules' result. Add it to `models` and raise `memory` by about 2 GB. |
 | Laya's engine status warns `checkpoint "…" is paused` and shows `asked for "…", got "english"` | laya-serve answers a checkpoint name it doesn't know with another checkpoint, without saying so. Laya checks the name in every answer and pauses that checkpoint for 5 minutes; other checkpoints carry on. Fix the name in Settings or on the source, or register it with `extra_models`. |
 | `/api/engine/health` reports `"device": "cpu"` with `gpu = true` | laya-serve falls back to CPU silently. The image was built without `TORCH_INDEX=cu130`, or the client lacks the NVIDIA runtime or device plugin. |
 | laya-serve exits at start after `LAYA_DEVICE` was changed to `auto` | Use `cpu` or `cuda`. `auto` crashes it. |
@@ -273,7 +273,7 @@ The job sets `GOMEMLIMIT` to 80% of `memory`, so Go reclaims memory before Docke
 
 ## Upgrades and backups
 
-- **Upgrade:** change `image` and re-run the job. The config file on the volume is kept, and if the new version doesn't pass its health check, Nomad reverts to the old one. When the old one stops, it finishes the events it accepted and delivers queued notifications first (up to 25 s, within the job's 30 s `kill_timeout`). To upgrade the engine, see [Upgrades](#upgrades) in step 6.
+- **Upgrade:** change `image` and re-run the job. The config file on the volume is kept; settings it doesn't have yet (the engine's, when upgrading from a release before it) start at their defaults. If the new version doesn't pass its health check, Nomad reverts to the old one. When the old one stops, it finishes the events it accepted and delivers queued notifications first (up to 28 s, within the job's 30 s `kill_timeout`). To upgrade the engine, see [Upgrades](#upgrades) in step 6.
 - **Backup:** use **Settings → Backup → Export** (masked) in the UI, or copy `config.json` from the volume. Secrets referenced as `${env:…}` live in the Nomad Variable, so back that up too (`nomad var get -out=json nomad/jobs/laya`). The engine's cache volume needs no backup: it's downloaded again.
 - **Seeding a new cluster:** render a known config into the task and set `LAYA_CONFIG_SEED` to its path. It's used only when `config.json` doesn't exist yet.
 

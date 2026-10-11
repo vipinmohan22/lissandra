@@ -250,7 +250,7 @@ job "laya" {
       }
 
       # Let service discovery drop the instance before it stops. On SIGTERM
-      # Laya drains for up to 25 s: it finishes the events it accepted and
+      # Laya drains for up to 28 s: it finishes the events it accepted and
       # delivers queued notifications. kill_timeout covers that; Nomad
       # clients cap it at their max_kill_timeout (30 s by default).
       shutdown_delay = "5s"

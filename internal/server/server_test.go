@@ -55,6 +55,7 @@ func newEnvWith(t *testing.T, mutate func(*Options)) *env {
 	store := events.NewStore(1000)
 	d := notify.NewDispatcher(log)
 	a := engine.New(log)
+	t.Cleanup(a.Close)
 	p := pipeline.New(100, store, d, a)
 	pm := poller.NewManager(ctx, log, p.SubmitWait)
 	cfg.Subscribe(func(c *config.Config) { p.Configure(c); d.Configure(c); a.Configure(c); pm.Configure(c) })

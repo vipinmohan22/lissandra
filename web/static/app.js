@@ -310,9 +310,23 @@ function engineAnswer(r) {
   const min = Number(es.min_confidence ?? 0.6);
   const sure = res.category_confidence >= min;
   const rulesCat = rules.category || 'uncategorized';
+  const ruleCat = rulesCat !== 'uncategorized';
+  const asked = res.category_asked !== false;
+  // Would a live event like this be sent to the engine at all?
+  const belowMin = es.min_severity && rules.severity && sevRank(rules.severity) < sevRank(es.min_severity);
+  const onlyUncat = es.only_uncategorized !== false;
+  let notSent = '';
+  if (es.enabled === false) notSent = 'The engine is switched off, so live events are not sent to it.';
+  else if (rules.dropped) notSent = `A rule drops live events like this (${(rules.matched_rules || []).slice(-1)[0] || 'a drop rule'}), so the engine is never asked.`;
+  else if (belowMin) notSent = `Live events at ${rules.severity} are not sent to the engine (minimum severity: ${es.min_severity}), so its answer would not be used.`;
+  else if (ruleCat && onlyUncat) notSent = `A rule sets the category (${rulesCat}) and only uncategorized events are sent to the engine, so its answer would not be used.`;
   let outcome;
-  if (rulesCat !== 'uncategorized') {
-    outcome = `A rule sets the category (${rulesCat}), so the rules decide.`;
+  if (notSent) {
+    outcome = notSent;
+  } else if (!asked) {
+    outcome = 'No categories are configured, so only the severity was asked.';
+  } else if (ruleCat) {
+    outcome = `A rule sets the category (${rulesCat}), and rules win: the engine's category would only be recorded.`;
   } else if (res.category === 'uncategorized') {
     outcome = 'The engine found no category that fits; the event stays uncategorized.';
   } else if (!sure) {
@@ -320,16 +334,13 @@ function engineAnswer(r) {
   } else {
     outcome = `The engine's category (${res.category}) would be used.`;
   }
-  const notes = [];
-  if (es.min_severity && rules.severity && sevRank(rules.severity) < sevRank(es.min_severity)) {
-    notes.push(`Live events at ${rules.severity} are not sent to the engine (minimum severity: ${es.min_severity}).`);
-  }
   // The engine is asked for a severity only when the rules guessed it from
   // keywords; a severity the record states (or a rule sets) is never replaced.
   let severity = null;
   if (res.severity) {
     let use;
-    if (res.severity_confidence < min) use = `below ${pct(min)}: the severity guessed from keywords (${rules.severity}) stands`;
+    if (notSent) use = 'not used: a live event like this is not sent to the engine';
+    else if (res.severity_confidence < min) use = `below ${pct(min)}: the severity guessed from keywords (${rules.severity}) stands`;
     else if (res.severity === rules.severity) use = 'agrees with the severity guessed from keywords';
     else use = `would replace ${rules.severity}, which was only guessed from keywords`;
     severity = h('div', null, sevBadge(res.severity), ` · ${pct(res.severity_confidence)} sure · ${use}`);
@@ -338,16 +349,16 @@ function engineAnswer(r) {
   }
   const matched = rules.matched_rules && rules.matched_rules.length ? ` · matched: ${rules.matched_rules.join(', ')}` : ' · no rule matched';
   const kv = h('div', { class: 'kv' },
-    h('div', null, 'Category'), h('div', null, h('strong', null, res.category), ` · ${pct(res.category_confidence)} sure `,
-      h('span', { class: `badge ${sure ? 'ok' : 'warn'}` }, sure ? 'above threshold' : `below ${pct(min)}`)),
+    asked ? [h('div', null, 'Category'), h('div', null, h('strong', null, res.category), ` · ${pct(res.category_confidence)} sure `,
+      h('span', { class: `badge ${sure ? 'ok' : 'warn'}` }, sure ? 'above threshold' : `below ${pct(min)}`))] : null,
     severity ? [h('div', null, 'Severity'), severity] : null,
     h('div', null, 'Checkpoint'), h('div', null, res.model || '—'),
     h('div', null, 'Latency'), h('div', null, `${num(res.latency_ms)} ms`, res.inference_ms ? ` (${num(res.inference_ms)} ms computing)` : ''),
     res.truncated ? [h('div', null, 'Truncated'), h('div', null, 'Yes: the event was cut to fit the model, which reads only the beginning.')] : null,
     h('div', null, 'Rules alone'), h('div', null, rulesCat, ' · ', sevBadge(rules.severity), matched),
-    h('div', null, 'Outcome'), h('div', null, outcome, notes.map((n) => h('div', { class: 'muted small' }, n))));
+    h('div', null, 'Outcome'), h('div', null, outcome));
   return h('div', { class: 'engine-answer mt' }, kv,
-    res.probabilities && Object.keys(res.probabilities).length ? [h('div', { class: 'muted small mt' }, 'Most likely categories'), probBars(res.probabilities, 6, res.category)] : null);
+    asked && res.probabilities && Object.keys(res.probabilities).length ? [h('div', { class: 'muted small mt' }, 'Most likely categories'), probBars(res.probabilities, 6, res.category)] : null);
 }
 
 // unloadedCheckpoint returns the checkpoint a test request for sourceId
@@ -387,13 +398,13 @@ function severityNote(ev) {
 function engineVerdict(ev) {
   const e = ev.engine;
   const min = engineThreshold(e);
-  const catApplied = e.applied && e.category === ev.category && e.category !== 'uncategorized';
-  if (catApplied) return { cls: 'ok', text: 'applied' };
-  const below = e.category !== 'uncategorized' && e.confidence < min;
-  if (e.applied) {
+  if (e.category_applied) return { cls: 'ok', text: e.severity_applied ? 'applied (category and severity)' : 'applied' };
+  const below = e.category && e.category !== 'uncategorized' && e.confidence < min;
+  if (e.severity_applied) {
     // Only the severity was taken.
     return { cls: 'ok', text: below ? `severity applied; category below the ${pct(min)} confidence threshold` : 'severity applied' };
   }
+  if (!e.category) return { cls: '', text: 'not applied' }; // only the severity was asked
   // Rules win whatever the engine said.
   if (ev.category !== 'uncategorized') return { cls: '', text: 'rules decided' };
   if (below) return { cls: 'warn', text: `not applied (below the ${pct(min)} confidence threshold)` };
@@ -557,7 +568,7 @@ function renderDashboard(root, st) {
   const kpis = h('div', { class: 'kpis' },
     kpi('Events (1h)', num(ev.last_hour), `${num(ev.total_since_start)} since start`),
     kpi('Errors + critical (1h)', num(bad), `${num(bySev.critical || 0)} critical`, bad > 0),
-    kpi('Notifications', num(n.sent), `${num(n.failed)} failed · ${num(n.throttled)} throttled`, n.failed > 0),
+    kpi('Notifications', num(n.sent), `${num(n.failed)} failed · ${n.dropped ? `${num(n.dropped)} dropped (queue full) · ` : ''}${num(n.throttled)} throttled`, n.failed > 0 || n.dropped > 0),
     kpi('Pull sources', pulls.length ? `${healthy}/${pulls.length}` : '—', pulls.length ? 'healthy' : 'none configured', healthy < pulls.length),
     st.engine && st.engine.enabled
       ? engineKpi(st.engine, st.pipeline, kpi)
@@ -784,7 +795,7 @@ async function showEvent(target, opts = {}) {
     const e = ev.engine;
     const v = engineVerdict(ev);
     row('Engine', h('div', null,
-      [`${e.category} ${pct(e.confidence)}`, e.severity ? `severity ${e.severity} ${pct(e.severity_confidence)}` : null, e.model].filter(Boolean).join(' · '), ' ',
+      [e.category ? `${e.category} ${pct(e.confidence)}` : null, e.severity ? `severity ${e.severity} ${pct(e.severity_confidence)}` : null, e.model].filter(Boolean).join(' · '), ' ',
       h('span', { class: `badge ${v.cls}` }, v.text),
       h('div', { class: 'muted small' }, [`Threshold when it answered: ${pct(engineThreshold(e))}`, e.top && Object.keys(e.top).length ? `Top: ${topText(e.top)}` : null].filter(Boolean).join(' · ')),
       e.truncated ? h('div', { class: 'muted small' }, 'The message was cut to fit the model, which reads only its beginning.') : null));
@@ -1563,18 +1574,26 @@ pages.settings = async (main) => {
     const p = stats.pipeline || {};
     const paused = a.paused_until && new Date(a.paused_until) > new Date();
     const warnings = a.warnings || [];
+    const pausedCps = a.paused_checkpoints || [];
+    // As on the dashboard: an error counts until the engine answers again
+    // (or for 10 minutes).
+    const recovered = a.last_success_at && a.last_error_at && new Date(a.last_success_at) > new Date(a.last_error_at);
+    const recent = a.last_error && a.last_error_at && !recovered && Date.now() - new Date(a.last_error_at).getTime() < 10 * 60 * 1000;
     let status;
     if (!a.enabled) status = h('span', { class: 'badge' }, 'disabled');
     else if (!a.configured) status = h('span', { class: 'badge bad' }, a.config_error ? 'configuration error' : 'no URL');
     else if (paused) status = h('span', { class: 'badge warn' }, 'paused after errors');
-    else if (warnings.length) status = h('span', { class: 'badge warn' }, 'active, with warnings');
+    else if (pausedCps.includes(a.model)) status = h('span', { class: 'badge warn' }, `${a.model} paused`);
+    else if (recent) status = h('span', { class: 'badge warn' }, `error ${ago(a.last_error_at)}`);
+    else if (warnings.length || pausedCps.length) status = h('span', { class: 'badge warn' }, 'active, with warnings');
     else status = h('span', { class: 'badge ok' }, 'active');
     const inUse = a.models_in_use || (a.model ? [a.model] : []);
     const urls = a.urls || [];
     const perInstance = engineSettings().max_in_flight || 1;
     const checkpoints = h('div', null,
       inUse.map((m, i) => h('div', null, m, h('span', { class: 'muted' }, i === 0 ? ' (default) ' : ' (a source\'s) '),
-        a.loaded ? h('span', { class: `badge ${a.loaded.includes(m) ? 'ok' : 'warn'}` }, a.loaded.includes(m) ? 'loaded' : 'not loaded') : null)),
+        a.loaded ? h('span', { class: `badge ${a.loaded.includes(m) ? 'ok' : 'warn'}` }, a.loaded.includes(m) ? 'loaded' : 'not loaded') : null,
+        pausedCps.includes(m) ? [' ', h('span', { class: 'badge warn', title: 'The engine answered with another checkpoint (it doesn\'t know this name). Events that need it keep the rules\' result for 5 minutes.' }, 'paused')] : null)),
       a.loaded
         ? h('div', { class: 'small muted' }, `Loaded on the engine: ${a.loaded.join(', ') || 'none'}.`)
         : a.enabled && a.configured ? h('div', { class: 'small muted' }, 'The engine has not listed its checkpoints yet: it is checked every 30 s, and lists them only to callers with its API key.') : null);
@@ -1722,7 +1741,7 @@ pages.settings = async (main) => {
         h('p', { class: 'small muted' }, 'Rules run first. The Laya engine (laya-serve) classifies what they leave: it picks one of the category names, or none, and when the record states no level it judges the severity (a stated severity is never replaced). It is asked once per message pattern and repeats reuse the answer. If it is down, slow or unsure, events go on with the rules\' result.'),
         f.enabled.el,
         h('div', { class: 'mt' }),
-        field('Engine URL', f.url, 'Base URL of laya-serve. Several URLs, comma-separated, share the load and fail over. ${env:NAME} reads Laya\'s environment (or the file NAME_FILE names) and ${file:/path} a file; both are re-read while Laya runs. A password in the URL is shown masked: leave it as is to keep it.'),
+        field('Engine URL', f.url, 'Base URL of laya-serve. Several URLs, comma-separated, share the load and fail over. ${env:NAME} reads Laya\'s environment (or the file NAME_FILE names) and ${file:/path} a file in Laya\'s secrets or task directory (or LAYA_FILE_REF_DIRS); both are re-read while Laya runs. Credentials in a URL are shown masked: leave them as they are to keep them, also when adding instances or changing a port.'),
         field('API key', f.apiKey, 'The engine\'s LAYA_API_KEY, if it has one. Prefer ${env:LAYA_ENGINE_API_KEY} and keep the key in a Nomad Variable.'),
         field('Checkpoint', f.model.el, 'english reads English logs and is the best calibrated; multilingual handles other languages and is faster on CPU. The engine must have it loaded (its LAYA_MODELS): Laya never asks for one it hasn\'t. Sources can pick their own.'),
         h('div', { class: 'fields-2' },
@@ -1869,7 +1888,7 @@ function renderHealth(out, r, inUse) {
   const missing = [...new Set(r.endpoints.flatMap((ep) => ep.missing || []))];
   const them = missing.length > 1 ? 'them' : 'it';
   let summary;
-  if (r.ok) {
+  if (r.ok && !missing.length) {
     summary = h('div', { class: 'callout ok mt' }, `Connected: ${many ? 'every engine has' : 'the engine has'} ${inUse.join(', ')} loaded.`);
   } else if (missing.length && r.endpoints.every((ep) => ep.ok)) {
     summary = h('div', { class: 'callout warn mt' }, `Connected, but ${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} not loaded${many ? ' everywhere' : ''}. Laya won't ask for ${them} there, so events that need ${them} keep the rules' result: add ${them} to the engine's LAYA_MODELS.`);
@@ -2079,7 +2098,7 @@ pages.files = async (main, arg, params) => {
     for (const r of reports) {
       const bad = (r.by_severity.error || 0) + (r.by_severity.critical || 0);
       tbl.append(h('tr', { class: 'clickable', onclick: () => { location.hash = `#/files/${encodeURIComponent(r.id)}`; } },
-        h('td', { class: 'nowrap' }, r.file_name, h('div', { class: 'muted small' }, r.source_name)),
+        h('td', { class: 'fname', title: r.file_name }, r.file_name, h('div', { class: 'muted small' }, r.source_name)),
         h('td', null, importBadge(r)),
         h('td', null, num(r.events)),
         h('td', null, bad ? h('span', { class: 'badge sev sev-error' }, num(bad)) : '0'),

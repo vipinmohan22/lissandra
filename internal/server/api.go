@@ -78,6 +78,9 @@ func (s *Server) update(w http.ResponseWriter, fn func(c *config.Config) error) 
 		return true
 	case errors.Is(err, errNotFound):
 		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, config.ErrSave):
+		s.log.Error("saving the configuration failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "saving the configuration failed; see Laya's log")
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}
@@ -203,7 +206,9 @@ func (s *Server) updateSource(w http.ResponseWriter, r *http.Request) {
 			return errNotFound
 		}
 		old := c.Sources[i]
-		config.RestoreSource(&src, old)
+		if err := config.RestoreSource(&src, old); err != nil {
+			return err
+		}
 		src.ID, src.CreatedAt, src.UpdatedAt = id, old.CreatedAt, time.Now().UTC()
 		src.IngestToken = old.IngestToken
 		c.Sources[i] = src
@@ -301,7 +306,10 @@ func (s *Server) testSource(w http.ResponseWriter, r *http.Request) {
 	if src.ID != "" {
 		c := s.cfg.Get()
 		if i := indexOf(c.Sources, src.ID, sourceID); i >= 0 {
-			config.RestoreSource(&src, c.Sources[i])
+			if err := config.RestoreSource(&src, c.Sources[i]); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 	}
 	if src.ID == "" {
@@ -631,13 +639,25 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
-	var st config.Settings
-	if !readJSON(w, r, &st) {
+	body, ok := readBody(w, r)
+	if !ok {
 		return
 	}
 	if s.update(w, func(c *config.Config) error {
+		// Settings the request leaves out keep their current values (a body
+		// without engine settings must not zero its confidence threshold).
+		// Decoding here, under the store's lock, keeps concurrent partial
+		// updates from undoing each other.
+		st := c.Settings
+		if err := json.Unmarshal(body, &st); err != nil {
+			return fmt.Errorf("invalid JSON: %w", err)
+		}
 		st.Engine.APIKey = config.Restore(st.Engine.APIKey, c.Settings.Engine.APIKey)
-		st.Engine.URL = config.RestoreURLs(st.Engine.URL, c.Settings.Engine.URL)
+		u, err := config.RestoreURLs(st.Engine.URL, c.Settings.Engine.URL)
+		if err != nil {
+			return fmt.Errorf("engine url: %w", err)
+		}
+		st.Engine.URL = u
 		c.Settings = st
 		return nil
 	}) {
@@ -657,6 +677,7 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var ev model.Event
+	var kept bool // false when a rule drops the event: live, it would go no further
 	if body.EventID != "" {
 		var ok bool
 		if ev, ok = s.store.Get(body.EventID); !ok {
@@ -664,9 +685,11 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Ask about the event as the rules alone classify it today, and
-		// report that, not its stored (possibly engine-set) result.
+		// report that, not its stored (possibly engine-set) result. Its
+		// tags are its source's, as ingest gives them; the rules add theirs.
 		ev.Engine, ev.Tags = nil, nil
-		s.pipeline.Engine().Classify(&ev)
+		s.addSourceTags(&ev)
+		kept = s.pipeline.Engine().Classify(&ev)
 	} else {
 		if strings.TrimSpace(body.Message) == "" {
 			writeError(w, http.StatusBadRequest, "message or event_id is required")
@@ -674,9 +697,10 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 		}
 		ev = model.Event{ID: "test", SourceID: body.SourceID, SourceName: "test", Message: body.Message, ReceivedAt: time.Now().UTC(), Timestamp: time.Now().UTC()}
 		if src, ok := s.lookupSource(body.SourceID); ok {
-			ev.SourceName = src.Name
+			ev.SourceID, ev.SourceName = src.ID, src.Name
 		}
-		s.pipeline.Engine().Classify(&ev)
+		s.addSourceTags(&ev)
+		kept = s.pipeline.Engine().Classify(&ev)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
@@ -687,7 +711,17 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": res, "rules": map[string]any{
 		"category": ev.Category, "severity": ev.Severity, "severity_guessed": ev.SeverityGuessed, "matched_rules": ev.MatchedRules,
+		"dropped": !kept,
 	}})
+}
+
+// addSourceTags gives ev its source's tags, as ingest does.
+func (s *Server) addSourceTags(ev *model.Event) {
+	if src, ok := s.lookupSource(ev.SourceID); ok {
+		for _, t := range src.Tags {
+			ev.AddTag(t)
+		}
+	}
 }
 
 // engineTrainingData downloads laya-train JSONL from live events the rules
@@ -708,21 +742,30 @@ func writeTrainingData(w http.ResponseWriter, laya *engine.Classifier, evs []mod
 		return '_'
 	}, name)
 	w.Header().Set("Content-Type", "application/x-ndjson")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="laya-training-%s-%s.jsonl"`, model.Truncate(name, 80), time.Now().UTC().Format("20060102-150405")))
+	if len(name) > 100 { // ASCII by now: cut by bytes, without an ellipsis
+		name = name[:100]
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="laya-training-%s-%s.jsonl"`, name, time.Now().UTC().Format("20060102-150405")))
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	seen := map[string]bool{}
 	for i := range evs {
 		ev := &evs[i]
-		// The label must be a rule's, not the engine's own answer.
-		if len(ev.MatchedRules) == 0 || ev.Engine != nil && ev.Engine.CategoryApplied || seen[ev.Fingerprint] {
+		// The label must be a rule's, not the engine's own answer, and the
+		// text the record it was given for (not one cut for browsing).
+		if len(ev.MatchedRules) == 0 || ev.Engine != nil && ev.Engine.CategoryApplied || ev.Compacted {
 			continue
 		}
 		rec, ok := laya.TrainingRecord(ev)
 		if !ok {
 			continue
 		}
-		seen[ev.Fingerprint] = true
+		// One line per text the engine would read (from any source).
+		key := classify.Normalize(rec.State)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		if enc.Encode(rec) != nil {
 			return
 		}
@@ -765,8 +808,15 @@ func (s *Server) exportConfig(w http.ResponseWriter, r *http.Request) {
 // importConfig replaces the whole configuration. Masked secrets are kept
 // from the current config when IDs match.
 func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
+	body, ok := readBody(w, r)
+	if !ok {
+		return
+	}
+	// An export without engine settings (from before the engine) gets their
+	// defaults, as when loading a config file.
 	var next config.Config
-	if !readJSON(w, r, &next) {
+	if err := config.Decode(body, &next); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
 	for _, n := range next.Notifiers {
@@ -778,7 +828,9 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	if s.update(w, func(c *config.Config) error {
 		for i := range next.Sources {
 			if j := indexOf(c.Sources, next.Sources[i].ID, sourceID); j >= 0 {
-				config.RestoreSource(&next.Sources[i], c.Sources[j])
+				if err := config.RestoreSource(&next.Sources[i], c.Sources[j]); err != nil {
+					return fmt.Errorf("source %q: %w", next.Sources[i].Name, err)
+				}
 			}
 		}
 		for i := range next.Notifiers {
@@ -787,7 +839,11 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		next.Settings.Engine.APIKey = config.Restore(next.Settings.Engine.APIKey, c.Settings.Engine.APIKey)
-		next.Settings.Engine.URL = config.RestoreURLs(next.Settings.Engine.URL, c.Settings.Engine.URL)
+		u, err := config.RestoreURLs(next.Settings.Engine.URL, c.Settings.Engine.URL)
+		if err != nil {
+			return fmt.Errorf("engine url: %w", err)
+		}
+		next.Settings.Engine.URL = u
 		next.Version = c.Version
 		*c = next
 		return nil

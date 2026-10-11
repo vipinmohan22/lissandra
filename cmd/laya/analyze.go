@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -49,6 +50,9 @@ Flags:
 // runAnalyze implements "laya analyze". It returns the process exit code:
 // 0 on success, 1 on errors, 2 when -fail-on matched an event.
 func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	// The command runs as its user, on their files: -engine-key
+	// ${file:~/key} may name any of them.
+	config.AllowFileRefsAnywhere()
 	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
@@ -132,8 +136,12 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	rules := classify.New(cfg.Rules)
 	routes := notify.RouteMatcher(cfg)
 	classifyFn := rules.Classify
+	workers := runtime.GOMAXPROCS(0)
 	if *engineURL != "" {
-		laya, err := analyzeEngine(cfg, *engineURL, *engineModel, *engineKey, stderr)
+		// In order, so the engine is asked about each pattern's first line
+		// and runs give the same answers (the engine is the bottleneck).
+		workers = 1
+		laya, err := analyzeEngine(cfg, source, *engineURL, *engineModel, *engineKey, stderr)
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -157,7 +165,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	code := 0
 	for _, path := range files {
-		rep, err := analyzeOne(path, stdin, source, *format, loc, classifyFn, routes, *output, min, enc)
+		rep, err := analyzeOne(path, stdin, source, *format, loc, classifyFn, routes, *output, min, enc, workers)
 		if err != nil {
 			fmt.Fprintf(stderr, "laya analyze: %s: %s\n", terminalSafe(path), terminalSafe(err.Error()))
 			code = 1
@@ -182,7 +190,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 // analyzeEngine connects to the Laya engine for -engine and checks that the
 // checkpoint is loaded before any file is read.
-func analyzeEngine(cfg *config.Config, urls, checkpoint, key string, stderr io.Writer) (*engine.Classifier, error) {
+func analyzeEngine(cfg *config.Config, source *config.Source, urls, checkpoint, key string, stderr io.Writer) (*engine.Classifier, error) {
 	e := &cfg.Settings.Engine
 	e.Enabled, e.URL = true, urls
 	e.APIKey = key
@@ -197,6 +205,7 @@ func analyzeEngine(cfg *config.Config, urls, checkpoint, key string, stderr io.W
 	}
 	laya := engine.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	laya.Configure(cfg)
+	laya.CheckHealth() // know the engine's checkpoints before the first events
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	eps, err := laya.Probe(ctx)
@@ -209,6 +218,9 @@ func analyzeEngine(cfg *config.Config, urls, checkpoint, key string, stderr io.W
 			return nil, fmt.Errorf("-engine: %s: %s", ep.URL, ep.Error)
 		case !ep.ModelLoaded:
 			return nil, fmt.Errorf("-engine: %s has not loaded checkpoint %q (loaded: %s)", ep.URL, e.Model, strings.Join(ep.Loaded, ", "))
+		case source != nil && source.EngineModel != "" && slices.Contains(ep.Missing, source.EngineModel):
+			// The file is read as this source: its checkpoint is the one used.
+			return nil, fmt.Errorf("-engine: %s has not loaded checkpoint %q, which source %q uses (loaded: %s)", ep.URL, source.EngineModel, source.Name, strings.Join(ep.Loaded, ", "))
 		case len(ep.Missing) > 0:
 			fmt.Fprintf(stderr, "engine: %s has not loaded %s, used by some sources; their events keep the rules' result\n", ep.URL, strings.Join(ep.Missing, ", "))
 		}
@@ -270,7 +282,7 @@ func loadAnalyzeConfig(flagPath string) (*config.Config, string, error) {
 // analyzeOne analyzes one file. The report is returned even when the file
 // was only partly read; it is nil if the file couldn't be opened.
 func analyzeOne(path string, stdin io.Reader, source *config.Source, format string, loc *time.Location,
-	classifyFn func(*model.Event) bool, routes func(*model.Event) []string, output string, min model.Severity, enc *json.Encoder) (*importer.Report, error) {
+	classifyFn func(*model.Event) bool, routes func(*model.Event) []string, output string, min model.Severity, enc *json.Encoder, workers int) (*importer.Report, error) {
 	name := filepath.Base(path)
 	var r io.Reader
 	if path == "-" {
@@ -303,7 +315,7 @@ func analyzeOne(path string, stdin io.Reader, source *config.Source, format stri
 		Format:         format,
 		Location:       loc,
 		MaxRecordBytes: -1,
-		Workers:        runtime.GOMAXPROCS(0),
+		Workers:        workers,
 	}, deps)
 	rep := im.Report(true)
 	if err == nil && rep.Truncated {

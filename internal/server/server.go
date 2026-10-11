@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -192,6 +193,23 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// readBody reads a JSON request body (up to 2 MiB) for decoding later.
+func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
+	var mbe *http.MaxBytesError
+	switch {
+	case errors.As(err, &mbe):
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+	case err != nil:
+		writeError(w, http.StatusBadRequest, "reading the request: "+err.Error())
+	case len(bytes.TrimSpace(data)) == 0:
+		writeError(w, http.StatusBadRequest, "request body is empty")
+	default:
+		return data, true
+	}
+	return nil, false
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {

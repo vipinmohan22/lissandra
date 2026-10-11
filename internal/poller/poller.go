@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -179,7 +180,7 @@ func Fetch(ctx context.Context, src *config.Source, since, now time.Time, dedupe
 	}
 	req, err := http.NewRequestWithContext(ctx, p.Method, target, body)
 	if err != nil {
-		return nil, err
+		return nil, hideCreds(err)
 	}
 	req.Header.Set("User-Agent", "laya-poller/1")
 	req.Header.Set("Accept", "application/json, application/x-ndjson, text/plain;q=0.9, */*;q=0.5")
@@ -206,7 +207,7 @@ func Fetch(ctx context.Context, src *config.Source, since, now time.Time, dedupe
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, hideCreds(err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
@@ -284,4 +285,15 @@ func (s *seenSet) add(key string) bool {
 		s.order = append([]string(nil), s.order[drop:]...)
 	}
 	return true
+}
+
+// hideCreds masks credentials in the URL of an HTTP client error, as the
+// API shows the source's URL: Go hides a password, but not a user alone,
+// which is often a token.
+func hideCreds(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		ue.URL = config.MaskURL(ue.URL)
+	}
+	return err
 }

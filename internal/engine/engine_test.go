@@ -185,13 +185,18 @@ func TestCacheCoalescingAndSharing(t *testing.T) {
 	if hits := cl.CacheHits.Load(); hits != 11 {
 		t.Errorf("events answered without a request: %d, want 11", hits)
 	}
-	// Another source with the same checkpoint shares the answer; file
-	// analysis reads it without counting.
+	// File analysis read as the same source reads the answer without
+	// counting; another source doesn't share it.
 	hits := cl.CacheHits.Load()
+	same := event("disk full on /var (database)")
+	same.Fingerprint = "different-fingerprint"
+	if !cl.ApplyCachedQuiet(&same) || same.Category != "database" || cl.CacheHits.Load() != hits {
+		t.Error("answers should be shared by the source's events with the same text")
+	}
 	other := event("disk full on /var (database)")
-	other.SourceID, other.Fingerprint = "upload", "different-fingerprint"
-	if !cl.ApplyCachedQuiet(&other) || other.Category != "database" || cl.CacheHits.Load() != hits {
-		t.Error("answers should be shared across sources by message pattern")
+	other.SourceID = "upload"
+	if cl.ApplyCachedQuiet(&other) {
+		t.Error("answers must not be shared across sources")
 	}
 	// A source with its own checkpoint gets its own answer.
 	ml := event("disk full on /var (database)")
@@ -371,14 +376,19 @@ func TestFileURLIsReread(t *testing.T) {
 	fakeA, fakeB := enginetest.New(), enginetest.New()
 	defer fakeA.Close()
 	defer fakeB.Close()
-	path := filepath.Join(t.TempDir(), "engine_urls")
+	dir := t.TempDir()
+	dirs := config.FileRefDirs()
+	config.SetFileRefDirs([]string{dir})
+	t.Cleanup(func() { config.SetFileRefDirs(dirs) })
+	path := filepath.Join(dir, "engine_urls")
 	os.WriteFile(path, []byte(fakeA.URL+"\n"), 0o600)
-	cl, _, _ := setup(t, func(c *config.Config) { c.Settings.Engine.URL = "${file:" + path + "}" })
+	cl, _, cfg := setup(t, func(c *config.Config) { c.Settings.Engine.URL = "${file:" + path + "}" })
 	ev := event("database one")
 	cl.Enrich(context.Background(), &ev)
 	os.WriteFile(path, []byte(fakeB.URL+"\n"), 0o600)
+	x := expand(cfg.Settings.Engine)
 	cl.mu.Lock()
-	cl.rebuildLocked() // what the health loop does every healthEvery
+	cl.rebuildLocked(x) // what the health loop does every healthEvery
 	cl.mu.Unlock()
 	ev2 := event("database two")
 	cl.Enrich(context.Background(), &ev2)
@@ -399,20 +409,30 @@ func TestRetriesAndFailover(t *testing.T) {
 			t.Fatalf("failover: %v", err)
 		}
 	}
+	// Capacity is max_in_flight per instance Laya can ask: one of the two
+	// is down.
+	if st := cl.Status(); st.Capacity != 1 {
+		t.Errorf("capacity should be max_in_flight per usable instance: %d", st.Capacity)
+	}
+	other := enginetest.New()
+	defer other.Close()
+	cfg.Settings.Engine.URL = other.URL + ", " + fake.URL
+	cl.Configure(cfg)
 	if st := cl.Status(); st.Capacity != 2 {
-		t.Errorf("capacity should be max_in_flight per instance: %d", st.Capacity)
+		t.Errorf("capacity with two instances up: %d", st.Capacity)
 	}
 }
 
 func TestLoadEstimate(t *testing.T) {
 	cl, _, _ := setup(t, nil)
-	if cl.WouldWait(100) != 0 {
-		t.Error("no estimate before anything was measured")
+	// Before anything is measured, about a second per answer is assumed.
+	if w := cl.WouldWait(9); w < 9*time.Second || w > 11*time.Second {
+		t.Errorf("estimate before any answer: %v", w)
 	}
 	ev := event("database x")
 	cl.Enrich(context.Background(), &ev)
-	if w := cl.WouldWait(10); w <= 0 {
-		t.Errorf("estimate %v", w)
+	if w := cl.WouldWait(10); w <= 0 || w >= 10*time.Second {
+		t.Errorf("estimate from the fake engine's answers: %v", w)
 	}
 }
 
@@ -472,9 +492,10 @@ func TestTrainingRecord(t *testing.T) {
 
 func TestBuildState(t *testing.T) {
 	ev := model.Event{SourceName: "api", Level: "error", Message: "Request failed\n\tat a.B.c(B.java:1)\n\tat a.B.d(B.java:2)\nCaused by: java.io.IOException: disk full",
-		Fields: map[string]any{"status": 500, "user": map[string]any{"id": 7}}}
+		Fields: map[string]any{"status": 500, "user": map[string]any{"id": 7}, "request_id": "r-1", "traceId": "abc", "component": map[string]any{"name": "db"}}}
 	got := buildState(&ev)
-	want := "Request failed\nCaused by: java.io.IOException: disk full\nlevel: error\nstatus=500 user={\"id\":7}\n\tat a.B.c(B.java:1)\n\tat a.B.d(B.java:2)"
+	// Ids of users, requests and traces are left out.
+	want := "Request failed\nCaused by: java.io.IOException: disk full\nlevel: error\ncomponent={\"name\":\"db\"} status=500\n\tat a.B.c(B.java:1)\n\tat a.B.d(B.java:2)"
 	if got != want {
 		t.Errorf("state:\n%q\nwant\n%q", got, want)
 	}

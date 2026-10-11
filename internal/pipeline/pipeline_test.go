@@ -27,6 +27,7 @@ func run(t *testing.T, url string, wait time.Duration) (*Pipeline, *events.Store
 	store := events.NewStore(100)
 	d := notify.NewDispatcher(log)
 	laya := engine.New(log)
+	t.Cleanup(laya.Close)
 	laya.Configure(c)
 	p := New(100, store, d, laya)
 	p.Configure(c)
@@ -154,6 +155,9 @@ func TestDrainFinishesEverything(t *testing.T) {
 	}
 }
 
+var words = []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
+	"kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango"}
+
 func TestShedsWhenTheEngineCannotKeepUp(t *testing.T) {
 	fake := enginetest.New()
 	defer fake.Close()
@@ -171,7 +175,8 @@ func TestShedsWhenTheEngineCannotKeepUp(t *testing.T) {
 	waitFor(t, store, 1)
 	var evs []model.Event
 	for i := 0; i < 20; i++ {
-		evs = append(evs, model.Event{ID: fmt.Sprint(i), SourceID: "s", Message: fmt.Sprint("ERROR burst failure ", i)})
+		// Distinct patterns: events of one pattern share one request.
+		evs = append(evs, model.Event{ID: fmt.Sprint(i), SourceID: "s", Message: "ERROR burst failure in " + words[i]})
 	}
 	p.Submit(evs)
 	waitFor(t, store, 21)
