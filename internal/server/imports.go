@@ -353,7 +353,7 @@ func (s *Server) getImport(w http.ResponseWriter, r *http.Request) {
 func (s *Server) importTrainingData(w http.ResponseWriter, r *http.Request) {
 	if im, ok := s.findImport(w, r); ok {
 		evs, _ := im.Events(importer.Query{Limit: -1})
-		writeTrainingData(w, s.laya, evs, "laya-training-file")
+		writeTrainingData(w, s.laya, evs, strings.TrimSuffix(im.Report(false).FileName, ".gz")+"-"+im.ID())
 	}
 }
 

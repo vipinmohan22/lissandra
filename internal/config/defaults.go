@@ -70,11 +70,11 @@ func Defaults() *Config {
 				Tags:         []string{"attack"},
 			},
 			{
-				Name:         "Security: auth failures",
+				Name:         "Auth failures",
 				Enabled:      true,
 				Match:        MatchAny,
 				Conditions:   []Condition{cond("message", OpRegex, `(?i)(unauthori[sz]ed|forbidden|authentication (failed|failure)|failed password|invalid (user|password|token|credentials|api key)|permission denied|access denied|login failed|jwt (expired|invalid))`)},
-				Category:     "security",
+				Category:     "auth",
 				Severity:     model.SeverityWarning,
 				SeverityMode: SeverityAtLeast,
 				Tags:         []string{"auth"},
@@ -143,7 +143,7 @@ func Defaults() *Config {
 				OnlyUncategorized: true,
 				MinSeverity:       model.SeverityWarning,
 				MinConfidence:     0.6,
-				SetSeverity:       true,
+				SetSeverity:       false, // doubles engine time; rarely changes a keyword guess
 				MaxInFlight:       1,
 				TimeoutSeconds:    30,
 			},

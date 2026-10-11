@@ -133,7 +133,7 @@ func Validate(n config.Notifier) error {
 		if f.Required && v == "" && f.Default == "" {
 			return fmt.Errorf("%s is required", f.Label)
 		}
-		if strings.Contains(v, "${env:") {
+		if config.HasRef(v) {
 			usesEnv = true
 		}
 		if f.Type == "select" && v != "" && len(f.Options) > 0 {

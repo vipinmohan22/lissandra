@@ -56,7 +56,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if !est.PausedUntil.IsZero() {
 		paused = 1
 	}
-	metric("laya_engine_paused", "gauge", "1 while engine requests are paused after errors.", fmt.Sprintf(" %d", paused))
+	metric("laya_engine_paused", "gauge", "1 while all engine requests are paused after errors.", fmt.Sprintf(" %d", paused))
+	metric("laya_engine_checkpoints_paused", "gauge", "Checkpoints paused alone because the engine answered with another.", fmt.Sprintf(" %d", len(est.PausedCheckpoints)))
 
 	metric("laya_imports_total", "counter", "Log file analyses by outcome.",
 		fmt.Sprintf(`{status="done"} %d`, s.imports.Succeeded.Load()),

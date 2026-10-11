@@ -35,10 +35,13 @@ type Server struct {
 	// HideLoaded makes /health report only {"status":"ok"}, as laya-serve
 	// does for callers without its key.
 	HideLoaded bool
-	Calls      atomic.Int32
-	mu         sync.Mutex
-	Last       Request // the last decision request
-	Headers    http.Header
+	// Advertise adds names to /health's loaded list that requests are
+	// nevertheless routed away from (to Models[0]).
+	Advertise []string
+	Calls     atomic.Int32
+	mu        sync.Mutex
+	Last      Request // the last decision request
+	Headers   http.Header
 }
 
 // Request is what the fake received.
@@ -117,7 +120,8 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	for _, m := range s.Models {
 		revs[m] = "7b928d8"
 	}
-	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "loaded": s.Models, "revisions": revs, "device": "cpu"})
+	loaded := append(append([]string{}, s.Models...), s.Advertise...)
+	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "loaded": loaded, "revisions": revs, "device": "cpu"})
 }
 
 func (s *Server) systemone(w http.ResponseWriter, r *http.Request) {

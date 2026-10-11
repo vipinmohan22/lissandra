@@ -209,6 +209,8 @@ func analyzeEngine(cfg *config.Config, urls, checkpoint, key string, stderr io.W
 			return nil, fmt.Errorf("-engine: %s: %s", ep.URL, ep.Error)
 		case !ep.ModelLoaded:
 			return nil, fmt.Errorf("-engine: %s has not loaded checkpoint %q (loaded: %s)", ep.URL, e.Model, strings.Join(ep.Loaded, ", "))
+		case len(ep.Missing) > 0:
+			fmt.Fprintf(stderr, "engine: %s has not loaded %s, used by some sources; their events keep the rules' result\n", ep.URL, strings.Join(ep.Missing, ", "))
 		}
 	}
 	fmt.Fprintf(stderr, "engine: %s, checkpoint %s, %d categories\n", strings.Join(laya.Status().URLs, ", "), e.Model, len(cfg.Settings.Categories))

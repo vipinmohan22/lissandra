@@ -148,6 +148,10 @@ func TestFileRefsAndURLMasking(t *testing.T) {
 	if got := ExpandEnv("${env:LAYA_TEST_URLS}"); got != "http://10.0.0.1:8000,http://10.0.0.2:8000" {
 		t.Errorf("NAME_FILE fallback: %q", got)
 	}
+	t.Setenv("LAYA_TEST_URLS", "")
+	if got := ExpandEnv("${env:LAYA_TEST_URLS}"); got != "http://10.0.0.1:8000,http://10.0.0.2:8000" {
+		t.Errorf("an empty NAME should fall back to NAME_FILE: %q", got)
+	}
 	t.Setenv("LAYA_TEST_URLS", "http://set")
 	if got := ExpandEnv("${env:LAYA_TEST_URLS}"); got != "http://set" {
 		t.Errorf("NAME wins over NAME_FILE: %q", got)

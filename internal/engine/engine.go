@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,6 +43,10 @@ const (
 	qCategory = "category"
 	qSeverity = "severity"
 )
+
+// ampleTime is the least time left at the start of a request for its
+// timing out to count against the engine.
+var ampleTime = 5 * time.Second
 
 // Errors for events that were not sent.
 var (
@@ -99,7 +104,10 @@ type Status struct {
 	CachedResults int       `json:"cached_results"`
 	LastError     string    `json:"last_error,omitempty"`
 	LastErrorAt   time.Time `json:"last_error_at,omitzero"`
+	LastSuccessAt time.Time `json:"last_success_at,omitzero"`
 	PausedUntil   time.Time `json:"paused_until,omitzero"`
+	// PausedCheckpoints are paused alone: the engine answered as another.
+	PausedCheckpoints []string `json:"paused_checkpoints,omitempty"`
 	// Warnings are problems with the setup: checkpoints the engine hasn't
 	// loaded, categories it can't tell apart.
 	Warnings []string `json:"warnings,omitempty"`
@@ -131,9 +139,12 @@ type Classifier struct {
 	failures     int       // consecutive failures, for backoff
 	timeouts     int       // consecutive requests that ran out of time
 	modelPause   map[string]time.Time
-	loaded       map[string]bool // union over instances; nil when unknown
-	avgLatency   float64         // ms, moving average
+	loaded       map[string]bool   // union over instances; nil when unknown
+	revisions    map[string]string // checkpoint revisions the engine reported
+	avgLatency   float64           // ms, moving average of round trips
+	avgAttempt   float64           // …of the answering request alone
 	avgInfer     float64
+	lastOK       time.Time
 
 	stop       chan struct{}
 	stopOnce   sync.Once
@@ -143,7 +154,7 @@ type Classifier struct {
 	Calls, CacheHits, Errors, TimedOut, Applied, LowConfidence, Truncated, Skipped atomic.Uint64
 	// Totals for metrics.
 	LatencyMsTotal, InferMsTotal, Completed atomic.Uint64
-	inFlight                                atomic.Int64
+	inFlight, waiting                       atomic.Int64
 }
 
 // New returns an unconfigured classifier; call Configure. Close stops its
@@ -213,14 +224,16 @@ func (c *Classifier) rebuildLocked() {
 		if c.client != nil {
 			c.client.Close()
 		}
-		urlsChanged := !slices.Equal(urls, c.urls) || key != c.key || c.clientKey == ""
+		keyChanged := key != c.key
 		c.client, c.clientKey, c.urls, c.key = nil, clientKey, urls, key
 		if len(urls) > 0 {
 			c.client = NewClient(urls, key, time.Duration(s.TimeoutSeconds)*time.Second, capacity)
 		}
 		c.loaded = nil
-		if urlsChanged {
-			// Another engine or key may answer differently.
+		if keyChanged {
+			// Possibly another engine. Instances coming and going (Nomad
+			// scaling or rescheduling) keep the answers: a new checkpoint
+			// revision is caught by the health check.
 			c.resetAnswersLocked()
 		}
 	}
@@ -233,13 +246,25 @@ func (c *Classifier) rebuildLocked() {
 // learns which instances are up and which checkpoints they hold, and lifts
 // a pause from connection failures once an instance answers again.
 func (c *Classifier) healthLoop() {
-	t := time.NewTicker(healthEvery)
+	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	var last time.Time
 	for {
 		select {
 		case <-c.stop:
 			return
 		case <-t.C:
+			// Every 30 s, or every 5 s while no instance has answered yet.
+			c.mu.Lock()
+			every := healthEvery
+			if c.loaded == nil {
+				every = 5 * time.Second
+			}
+			c.mu.Unlock()
+			if time.Since(last) < every {
+				continue
+			}
+			last = time.Now()
 			c.mu.Lock()
 			if config.HasRef(c.settings.URL) || config.HasRef(c.settings.APIKey) {
 				c.rebuildLocked()
@@ -263,6 +288,7 @@ func (c *Classifier) checkHealth() {
 	defer cancel()
 	ready := map[string]bool{}
 	var loaded map[string]bool
+	revisions := map[string]string{}
 	for _, base := range client.URLs() {
 		h, err := client.Health(ctx, base)
 		if err != nil {
@@ -277,6 +303,11 @@ func (c *Classifier) checkHealth() {
 				loaded[m] = true
 			}
 		}
+		for m, r := range h.Revisions {
+			if r != "" {
+				revisions[m] = r
+			}
+		}
 	}
 	client.SetReady(ready)
 	c.mu.Lock()
@@ -289,6 +320,16 @@ func (c *Classifier) checkHealth() {
 		if c.connPause {
 			c.pausedUntil, c.connPause, c.failures = time.Time{}, false, 0
 		}
+		for m, r := range revisions {
+			if old, ok := c.revisions[m]; ok && old != r {
+				c.resetAnswersLocked() // new weights: earlier answers no longer hold
+				break
+			}
+		}
+		if c.revisions == nil {
+			c.revisions = map[string]string{}
+		}
+		maps.Copy(c.revisions, revisions)
 	}
 }
 
@@ -333,6 +374,9 @@ func (c *Classifier) availableLocked(checkpoint string) error {
 		// Asking anyway would make laya-serve load it: a second model in
 		// memory, possibly more than its allocation holds.
 		return fmt.Errorf("%w: %q", ErrNotLoaded, checkpoint)
+	case c.loaded == nil && checkpoint != c.settings.Model:
+		// Until the engine says what it has, only the default is asked.
+		return fmt.Errorf("%w: %q (the engine hasn't reported its checkpoints yet)", ErrNotLoaded, checkpoint)
 	}
 	return nil
 }
@@ -350,11 +394,11 @@ func (c *Classifier) MaxWait() time.Duration {
 func (c *Classifier) WouldWait(queued int) time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	per := c.avgLatency
+	per := c.avgAttempt
 	if c.Completed.Load() == 0 {
 		return 0 // nothing measured yet
 	}
-	ahead := float64(queued+int(c.inFlight.Load())) / float64(max(cap(c.sem), 1))
+	ahead := float64(queued+int(c.waiting.Load())+int(c.inFlight.Load())) / float64(max(cap(c.sem), 1))
 	return time.Duration((ahead + 1) * per * float64(time.Millisecond))
 }
 
@@ -445,13 +489,21 @@ func (c *Classifier) Classify(ctx context.Context, ev *model.Event) (Result, err
 	c.mu.Lock()
 	client, sem := c.client, c.sem
 	cfgErr := c.configErr
-	req := buildRequest(ev, c.categories, c.modelLocked(ev), c.asksSeverity(ev))
+	checkpoint := c.modelLocked(ev)
+	req := buildRequest(ev, c.categories, checkpoint, c.asksSeverity(ev))
+	var notLoaded error
+	if c.loaded != nil && !c.loaded[checkpoint] || c.loaded == nil && checkpoint != c.settings.Model {
+		notLoaded = c.notLoadedErrLocked(checkpoint)
+	}
 	c.mu.Unlock()
 	if client == nil {
 		if cfgErr == "" {
 			cfgErr = "no engine URL is configured"
 		}
 		return Result{}, errors.New(cfgErr)
+	}
+	if notLoaded != nil {
+		return Result{}, notLoaded // asking would make the engine load it
 	}
 	select {
 	case sem <- struct{}{}:
@@ -518,24 +570,41 @@ func (c *Classifier) classify(ctx context.Context, ev *model.Event) (r Result, c
 }
 
 func (c *Classifier) call(ctx context.Context, client *Client, sem chan struct{}, req Request) (Result, error) {
+	c.waiting.Add(1)
 	select {
 	case sem <- struct{}{}:
+		c.waiting.Add(-1)
 	case <-ctx.Done():
+		c.waiting.Add(-1)
 		return Result{}, errNoSlot
 	}
 	defer func() { <-sem }()
-	// The engine may have been paused while this event waited for a slot.
+	// The engine may have been paused while this event waited for a slot,
+	// and an event with too little time left would only time out.
 	c.mu.Lock()
 	err := c.availableLocked(req.Model)
+	per := time.Duration(c.avgAttempt * float64(time.Millisecond))
 	c.mu.Unlock()
 	if err != nil {
 		return Result{}, err
+	}
+	deadline, hasDeadline := ctx.Deadline()
+	budget := time.Until(deadline)
+	if hasDeadline && per > 0 && budget < 2*per {
+		return Result{}, errNoSlot
 	}
 	c.inFlight.Add(1)
 	defer c.inFlight.Add(-1)
 
 	c.Calls.Add(1)
 	resp, err := client.Decide(ctx, req)
+	if err != nil && ctx.Err() != nil {
+		// The event's time ran out: the engine is slow or busy, not
+		// necessarily failing. Only a request that started with ample
+		// time counts toward a pause.
+		c.noteTimeout(!hasDeadline || budget >= max(ampleTime, 3*per))
+		return Result{}, err
+	}
 	if err == nil {
 		var r Result
 		if r, err = parseResult(resp, req); err == nil {
@@ -577,12 +646,27 @@ func (c *Classifier) noteError(ctx context.Context, checkpoint string, err error
 	case errors.As(err, &apiErr) && apiErr.Status == http.StatusServiceUnavailable:
 	case errors.As(err, &apiErr) && apiErr.Status < 500:
 		// This event's input; the next one may be fine.
-	case ctx.Err() != nil || errors.As(err, &netErr) && netErr.Timeout():
+	case errors.As(err, &netErr) && netErr.Timeout():
 		if c.timeouts++; c.timeouts >= timeoutsToPause {
 			c.backoffLocked(now)
 		}
 	default: // unreachable or failing
 		c.backoffLocked(now)
+	}
+}
+
+// noteTimeout records a request that ran out of the event's time. ample
+// says it started with enough time that a working engine would have
+// answered; three such in a row pause calls.
+func (c *Classifier) noteTimeout(ample bool) {
+	if !ample {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.timeouts++; c.timeouts >= timeoutsToPause {
+		c.lastErr, c.lastErrAt = fmt.Sprintf("%d requests in a row got no answer in time", c.timeouts), time.Now()
+		c.backoffLocked(time.Now())
 	}
 }
 
@@ -606,7 +690,9 @@ func (c *Classifier) noteSuccess(resp Response) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.failures, c.timeouts = 0, 0
+	c.lastOK = time.Now()
 	c.avgLatency = ewma(c.avgLatency, ms)
+	c.avgAttempt = ewma(c.avgAttempt, float64(resp.Attempt)/float64(time.Millisecond))
 	c.avgInfer = ewma(c.avgInfer, infer)
 }
 
@@ -635,14 +721,14 @@ func (c *Classifier) apply(ev *model.Event, r Result, s config.EngineSettings, l
 	if ev.Category == model.Uncategorized && r.Category != "" && r.Category != model.Uncategorized {
 		if r.CategoryConfidence >= s.MinConfidence {
 			ev.Category = r.Category
-			info.Applied = true
+			info.Applied, info.CategoryApplied = true, true
 		} else if live {
 			c.LowConfidence.Add(1)
 		}
 	}
 	if r.Severity.Valid() && r.Severity != ev.Severity && s.SetSeverity && ev.SeverityGuessed && r.SeverityConfidence >= s.MinConfidence {
 		ev.Severity = r.Severity
-		info.Applied = true
+		info.Applied, info.SeverityApplied = true, true
 	}
 	if info.Applied {
 		ev.Classifier = ByEngine
@@ -721,7 +807,7 @@ type EndpointHealth struct {
 	Missing     []string `json:"missing,omitempty"` // checkpoints in use that it hasn't loaded
 	Device      string   `json:"device,omitempty"`
 	Revision    string   `json:"revision,omitempty"`
-	ModelLoaded bool     `json:"model_loaded"` // every checkpoint in use is resident
+	ModelLoaded bool     `json:"model_loaded"` // the default checkpoint is resident
 	LatencyMs   int64    `json:"latency_ms"`
 }
 
@@ -762,7 +848,7 @@ func (c *Classifier) Probe(ctx context.Context) ([]EndpointHealth, error) {
 						eh.Missing = append(eh.Missing, m)
 					}
 				}
-				eh.ModelLoaded = len(eh.Missing) == 0
+				eh.ModelLoaded = slices.Contains(h.Loaded, s.Model)
 			}
 			out[i] = eh
 		}()
@@ -808,6 +894,7 @@ func (c *Classifier) Status() Status {
 		CachedResults: len(c.cache),
 		LastError:     c.lastErr,
 		LastErrorAt:   c.lastErrAt,
+		LastSuccessAt: c.lastOK,
 	}
 	for _, u := range c.urls {
 		st.URLs = append(st.URLs, redactURL(u))
@@ -816,13 +903,14 @@ func (c *Classifier) Status() Status {
 		st.Loaded = slices.Sorted(maps.Keys(c.loaded))
 		for _, m := range st.ModelsInUse {
 			if !c.loaded[m] {
-				st.Warnings = append(st.Warnings, fmt.Sprintf("checkpoint %q is in use but not loaded on the engine: events that need it go on with the rules' result (add it to the engine's LAYA_MODELS)", m))
+				st.Warnings = append(st.Warnings, c.notLoadedErrLocked(m).Error()+": events that need it go on with the rules' result")
 			}
 		}
 	}
 	now := time.Now()
 	for _, m := range slices.Sorted(maps.Keys(c.modelPause)) {
 		if until := c.modelPause[m]; now.Before(until) {
+			st.PausedCheckpoints = append(st.PausedCheckpoints, m)
 			st.Warnings = append(st.Warnings, fmt.Sprintf("checkpoint %q is paused until %s: the engine answered with a different checkpoint", m, until.Format(time.TimeOnly)))
 		}
 	}
@@ -833,6 +921,15 @@ func (c *Classifier) Status() Status {
 		st.PausedUntil = c.pausedUntil
 	}
 	return st
+}
+
+// notLoadedErrLocked explains that checkpoint isn't loaded. Caller holds mu.
+func (c *Classifier) notLoadedErrLocked(checkpoint string) error {
+	if c.loaded == nil {
+		return fmt.Errorf("%w: %q (the engine hasn't reported its checkpoints yet)", ErrNotLoaded, checkpoint)
+	}
+	has := slices.Sorted(maps.Keys(c.loaded))
+	return fmt.Errorf("%w: %q (it has %s): check the name, or add it to the engine's LAYA_MODELS", ErrNotLoaded, checkpoint, strings.Join(has, ", "))
 }
 
 // redactURL hides credentials embedded in a URL.

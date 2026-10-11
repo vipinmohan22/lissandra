@@ -238,11 +238,18 @@ func FieldValue(ev *model.Event, name string) (string, bool) {
 }
 
 var (
-	klogPrefix   = regexp.MustCompile(`^([IWEF])\d{4} `)
-	leadingLevel = regexp.MustCompile(`(?i)(?:^|[\s\[(|:"'=<])(trace|debug|info|notice|warn|warning|error|err|fatal|crit|critical|panic|emerg|alert)(?:$|[\s\]):|"',>])`)
+	klogPrefix = regexp.MustCompile(`^([IWEF])\d{4} `)
+	// A level stated in the text: an uppercase level word, a bracketed one
+	// ([info], <warn>, (error)), or one that opens the line, possibly after
+	// a timestamp ("error: …", "2026-10-11T10:00:00Z info …").
+	// Lowercase level words inside a sentence ("user info", "debug
+	// symbols", "error rate") are not levels.
+	upperLevel   = regexp.MustCompile(`(?:^|[\s\[(|:"'=<])(TRACE|DEBUG|INFO|NOTICE|WARN|WARNING|ERROR|ERR|FATAL|CRIT|CRITICAL|PANIC|EMERG|ALERT|SEVERE)(?:$|[\s\]):|"',>])`)
+	bracketLevel = regexp.MustCompile(`(?i)[\[(<](trace|debug|info|notice|warn|warning|error|err|fatal|crit|critical|panic|emerg|alert|severe)[\])>]`)
+	openingLevel = regexp.MustCompile(`(?i)^\s*(?:\S*\d\S*\s+){0,2}(trace|debug|info|notice|warn|warning|error|err|fatal|crit|critical|panic|emerg|alert|severe)(?:[:\s]|$)`)
 	kvLevel      = regexp.MustCompile(`(?i)\b(?:level|lvl|severity|loglevel)["']?\s*[=:]\s*["']?([a-z]+)`)
-	kwCritical   = regexp.MustCompile(`(?i)\b(fatal|critical|emergency|panic)\b`)
-	kwError      = regexp.MustCompile(`(?i)\b(error|errors? occurred|exception|failed|failure|severe)\b`)
+	kwCritical   = regexp.MustCompile(`(?i)\b(fatal|critical|emergency|panic|outage|data loss|breach)\b`)
+	kwError      = regexp.MustCompile(`(?i)\b(error|errors? occurred|exception|failed|failure|failing|severe|refused|denied|unable to|cannot|could not|timed out)\b`)
 	kwWarning    = regexp.MustCompile(`(?i)\b(warn|warning|deprecated|retrying)\b`)
 )
 
@@ -286,9 +293,11 @@ func detectSeverity(level, message string) (model.Severity, bool) {
 	if len(head) > 96 {
 		head = head[:96]
 	}
-	if m := leadingLevel.FindStringSubmatch(head); m != nil {
-		if s, ok := model.ParseSeverity(m[1]); ok {
-			return s, true
+	for _, re := range []*regexp.Regexp{openingLevel, bracketLevel, upperLevel} {
+		if m := re.FindStringSubmatch(head); m != nil {
+			if s, ok := model.ParseSeverity(m[1]); ok {
+				return s, true
+			}
 		}
 	}
 	switch {

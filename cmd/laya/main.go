@@ -161,17 +161,30 @@ func run() error {
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
 	// Stop ingest (pollers stopped with ctx), then finish every accepted
-	// event, engine requests cancelled, and deliver its alerts.
-	_ = httpSrv.Shutdown(shutdownCtx)
-	if err := pipe.Drain(shutdownCtx); err != nil {
+	// event, engine requests cancelled, and deliver its alerts. Each step
+	// has its own budget, so a slow upload can't use up the drain's; all
+	// together fit Nomad's kill_timeout (30 s).
+	step := func(d time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), d)
+	}
+	httpCtx, cancel := step(8 * time.Second)
+	if err := httpSrv.Shutdown(httpCtx); err != nil {
+		_ = httpSrv.Close() // in-flight uploads end as interrupted
+	}
+	cancel()
+	drainCtx, cancel := step(8 * time.Second)
+	if err := pipe.Drain(drainCtx); err != nil {
 		log.Warn("events still queued at shutdown", "queued", pipe.QueueDepth()+pipe.EngineQueueDepth())
 	}
-	if err := dispatcher.Drain(shutdownCtx); err != nil {
+	cancel()
+	notifyCtx, cancel := step(10 * time.Second)
+	if err := dispatcher.Drain(notifyCtx); err != nil {
 		log.Warn("notifications still queued at shutdown", "queued", dispatcher.QueueDepth())
 	}
+	cancel()
+	shutdownCtx, cancel := step(2 * time.Second)
+	defer cancel()
 	laya.Close()
 	stopRun()
 	for i := 0; i < 2; i++ {

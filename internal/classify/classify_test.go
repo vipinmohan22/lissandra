@@ -32,6 +32,18 @@ func TestDetectSeverity(t *testing.T) {
 		{"", "this API is deprecated", model.SeverityWarning},
 		{"", "all good", model.SeverityInfo},
 		{"bogus", "all good", model.SeverityInfo},
+		// Lowercase level words inside a sentence are not levels.
+		{"", "failed to fetch user info: connection lost", model.SeverityError},
+		{"", "crash report upload failed: could not attach debug symbols", model.SeverityError},
+		{"", "canary analysis failed for checkout-api: error rate 4.2%", model.SeverityError},
+		{"", "database cluster lost quorum, all writes are failing, outage in progress", model.SeverityCritical},
+		{"", "connect: connection refused", model.SeverityError},
+		// …but levels that open the line, after a timestamp or bracketed are.
+		{"", "error: could not open file", model.SeverityError},
+		{"", "2026-10-11T10:00:00.000Z\tinfo\tserver started, 0 errors", model.SeverityInfo},
+		{"", "2026-10-11 10:00:00 warn cache miss ratio high", model.SeverityWarning},
+		{"", "2026/10/11 09:40:03 [crit] 31#31: SSL_do_handshake() failed", model.SeverityCritical},
+		{"", "<warning> low disk", model.SeverityWarning},
 	}
 	for _, c := range cases {
 		if got := DetectSeverity(c.level, c.msg); got != c.want {
@@ -180,7 +192,7 @@ func TestDefaultRulesCompileAndClassify(t *testing.T) {
 	cases := map[string]string{
 		"panic: runtime error: invalid memory address":   "application",
 		"kernel: Out of memory: Killed process 1 (java)": "resource",
-		"login failed for user bob":                      "security",
+		"login failed for user bob":                      "auth",
 		"ERROR: deadlock detected":                       "database",
 		"dial tcp 10.0.0.1:5432: connection refused":     "network",
 		"deployment v1.2 rolled out":                     "deployment",
@@ -208,6 +220,7 @@ func TestSeverityGuessed(t *testing.T) {
 		{"", "E1011 04:10:03.123456 1 controller.go:88] failed", false},
 		{"", "x509: certificate has expired", true},
 		{"", "payment failed for order 7", true},
+		{"", "failed to fetch user info: connection lost", true},
 		{"", "quota exceeded for tenant", false}, // a rule set it
 	}
 	for _, c := range cases {

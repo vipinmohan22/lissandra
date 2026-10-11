@@ -80,6 +80,14 @@ func (c criteria) MarshalJSON() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// skipField lists structured fields that tell the engine nothing about the
+// category (level is sent once above; times and ids vary per event).
+var skipField = map[string]bool{
+	"level": true, "severity": true, "lvl": true, "log.level": true, "levelname": true, "loglevel": true, "log_level": true,
+	"@timestamp": true, "timestamp": true, "time": true, "ts": true, "date": true, "datetime": true, "_time": true,
+	"eventtime": true, "__realtime_timestamp": true, "@version": true,
+}
+
 // rootCause matches lines that name what went wrong in a multi-line record:
 // Java's "Caused by:", exception and error class names, Go panics.
 var rootCause = regexp.MustCompile(`^(Caused by: |panic: |fatal error: |[A-Za-z_][\w.$]*(Exception|Error|Panic)\b)`)
@@ -100,15 +108,10 @@ func buildState(ev *model.Event) string {
 			break
 		}
 	}
-	var meta []string
+	// The source name is left out: answers are cached per message pattern
+	// across sources, so the text must not depend on where it came from.
 	if ev.Level != "" {
-		meta = append(meta, "level: "+ev.Level)
-	}
-	if ev.SourceName != "" {
-		meta = append(meta, "source: "+ev.SourceName)
-	}
-	if len(meta) > 0 {
-		parts = append(parts, strings.Join(meta, ", "))
+		parts = append(parts, "level: "+ev.Level)
 	}
 	if len(ev.Fields) > 0 {
 		keys := slices.Sorted(func(yield func(string) bool) {
@@ -120,6 +123,9 @@ func buildState(ev *model.Event) string {
 		})
 		var kv []string
 		for _, k := range keys {
+			if skipField[strings.ToLower(k)] {
+				continue
+			}
 			v := ev.Fields[k]
 			switch v.(type) {
 			case map[string]any, []any:
@@ -129,7 +135,9 @@ func buildState(ev *model.Event) string {
 				kv = append(kv, k+"="+model.Truncate(model.ToString(v), 200))
 			}
 		}
-		parts = append(parts, strings.Join(kv, " "))
+		if len(kv) > 0 {
+			parts = append(parts, strings.Join(kv, " "))
+		}
 	}
 	for i := 1; i < len(lines); i++ {
 		if i != cause {

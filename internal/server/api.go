@@ -122,7 +122,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		"pipeline": map[string]any{
 			"queue_depth": p.QueueDepth(), "received": p.Received.Load(), "processed": p.Processed.Load(),
 			"dropped": p.Dropped.Load(), "rejected": p.Rejected.Load(), "engine_queued": p.EngineQueued.Load(),
-			"engine_queue_depth": p.EngineQueueDepth(), "engine_stale": p.EngineStale.Load(), "engine_shed": p.EngineShed.Load(),
+			"engine_queue_depth": p.EngineQueueDepth(), "engine_shed": p.EngineShed.Load(),
 		},
 		"notifications": map[string]any{
 			"queue_depth": d.QueueDepth(), "sent": d.Sent.Load(), "failed": d.Failed.Load(),
@@ -686,7 +686,7 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": res, "rules": map[string]any{
-		"category": ev.Category, "severity": ev.Severity, "matched_rules": ev.MatchedRules,
+		"category": ev.Category, "severity": ev.Severity, "severity_guessed": ev.SeverityGuessed, "matched_rules": ev.MatchedRules,
 	}})
 }
 
@@ -695,20 +695,27 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 // question Laya sends the engine, so a checkpoint can be fine-tuned on
 // exactly what it will be asked.
 func (s *Server) engineTrainingData(w http.ResponseWriter, r *http.Request) {
-	writeTrainingData(w, s.laya, s.store.All(), "laya-training-live")
+	writeTrainingData(w, s.laya, s.store.All(), "live")
 }
 
 // writeTrainingData writes one record per pattern of events whose category
 // came from a rule.
 func writeTrainingData(w http.ResponseWriter, laya *engine.Classifier, evs []model.Event, name string) {
+	name = strings.Map(func(r rune) rune {
+		if r < 128 && (r == '-' || r == '_' || r == '.' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return r
+		}
+		return '_'
+	}, name)
 	w.Header().Set("Content-Type", "application/x-ndjson")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.jsonl"`, name, time.Now().UTC().Format("20060102-150405")))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="laya-training-%s-%s.jsonl"`, model.Truncate(name, 80), time.Now().UTC().Format("20060102-150405")))
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	seen := map[string]bool{}
 	for i := range evs {
 		ev := &evs[i]
-		if len(ev.MatchedRules) == 0 || ev.Classifier == engine.ByEngine || seen[ev.Fingerprint] {
+		// The label must be a rule's, not the engine's own answer.
+		if len(ev.MatchedRules) == 0 || ev.Engine != nil && ev.Engine.CategoryApplied || seen[ev.Fingerprint] {
 			continue
 		}
 		rec, ok := laya.TrainingRecord(ev)

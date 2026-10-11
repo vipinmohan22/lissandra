@@ -49,7 +49,7 @@ type Pipeline struct {
 	engineCancel context.CancelFunc
 	draining     atomic.Bool
 
-	Received, Processed, Dropped, Rejected, EngineQueued, EngineStale, EngineShed atomic.Uint64
+	Received, Processed, Dropped, Rejected, EngineQueued, EngineShed atomic.Uint64
 }
 
 // New builds a pipeline with a queue of queueSize events. laya may be nil.
@@ -183,7 +183,6 @@ func (p *Pipeline) maxEngineWait() time.Duration {
 func (p *Pipeline) enrich(q queued) {
 	deadline := q.at.Add(p.maxEngineWait())
 	if time.Now().After(deadline) || p.draining.Load() {
-		p.EngineStale.Add(1)
 		p.laya.Skipped.Add(1)
 	} else {
 		ctx, cancel := context.WithDeadline(p.engineCtx, deadline)

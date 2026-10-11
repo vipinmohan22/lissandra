@@ -103,6 +103,8 @@ type EngineResult struct {
 	SeverityConfidence float64            `json:"severity_confidence,omitempty"` // answer confidence of Severity
 	Threshold          float64            `json:"threshold"`                     // min_confidence when it was applied
 	Applied            bool               `json:"applied"`                       // the answer changed the category or severity
+	CategoryApplied    bool               `json:"category_applied,omitempty"`    // …the category
+	SeverityApplied    bool               `json:"severity_applied,omitempty"`    // …the severity
 	Truncated          bool               `json:"truncated,omitempty"`           // the event was cut to fit the model
 }
 

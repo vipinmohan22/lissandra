@@ -126,7 +126,7 @@ The response is the finished report. `GET /api/imports/{id}/events` (and `?forma
 
 ### Classification
 
-1. **Severity detection.** Laya reads explicit level fields (names, syslog 0–7, pino/bunyan 10–60), klog prefixes (`E1011 …`), `level=` key/values and level words in the first 96 characters of the message (`ERROR …`, `[crit]`, `[warn]`). A severity found this way is *stated* by the record. Otherwise Laya *guesses* it from keywords such as panic/fatal, error/exception/failed, and warn/deprecated/retrying, defaulting to *info*, and marks the event `severity_guessed`. A rule that sets a severity makes it stated.
+1. **Severity detection.** Laya reads explicit level fields (names, syslog 0–7, pino/bunyan 10–60), klog prefixes (`E1011 …`), `level=` key/values, and level words in the first 96 characters of the message that are uppercase (`ERROR …`, `FATAL:`), bracketed (`[crit]`, `<warn>`) or open the line, possibly after a timestamp (`error: …`, `2026-10-11T10:00:00Z info …`). Lowercase level words inside a sentence (`user info`, `debug symbols`, `error rate`) are not levels. A severity found this way is *stated* by the record. Otherwise Laya *guesses* it from keywords such as panic/fatal/outage/breach, error/exception/failed/failing/refused/denied/unable to/cannot/timed out, and warn/deprecated/retrying, defaulting to *info*, and marks the event `severity_guessed`. A rule that sets a severity makes it stated.
 2. **Rules, top to bottom.** Conditions test `message`, `level`, `severity`, `source`, `category`, `tags`, or any structured field by dot path (`http.status_code`). The operators are contains, equals, starts/ends with, regex (RE2, so no catastrophic backtracking), exists/missing, and numeric `>`/`<`, each with a negated form where it makes sense. Every matching rule adds tags and can set the severity or raise it to a minimum. The first matching rule with a category decides the category. **Drop** discards the event and **Stop** ends evaluation. Rules can be limited to specific sources.
 3. **Fingerprint.** The message is reduced to a pattern (numbers, IPs, UUIDs, hex ids and timestamps replaced by placeholders) and hashed with the source. The fingerprint groups the dashboard's "Top issues" and drives notification throttling. The Laya engine's answers are cached by the pattern alone, so all sources share them.
 4. **Laya engine (optional).** What the rules leave uncategorized, at *warning* or above, goes to the [Laya engine](#laya-engine-optional), which may fill in the category, and the severity when it was only guessed.
@@ -162,13 +162,13 @@ The Laya engine is [`laya-serve`](https://github.com/NandhaKishorM/laya), a smal
 
 1. **Rules first.** Events go through severity detection and the rules as usual.
 2. **What goes to the engine.** An event is sent when its severity, stated or guessed, is at least `min_severity` (*warning*) and, with `only_uncategorized` on (the default), no rule gave it a category. A message with no level and no telling keyword is guessed *info*, so at the default it isn't sent.
-3. **The questions.** Laya asks which of your categories the event belongs to: a choice over your categories in the order you list them, offered by name (with the description, where you gave one), plus `uncategorized` offered as "none of the above". When the severity was only guessed (`severity_guessed`, see [Classification](#classification)), it also asks how severe the event is, on the scale from *debug* to *critical*. A severity the record states or a rule sets is never questioned.
+3. **The questions.** Laya asks which of your categories the event belongs to: a choice over your categories in the order you list them, offered by name (with the description, where you gave one), plus `uncategorized` offered as "none of the above". With `set_severity` on (off by default: it about doubles the engine's time per event, and in testing rarely changed a keyword guess), when the severity was only guessed (`severity_guessed`, see [Classification](#classification)), it also asks how severe the event is, on the scale from *debug* to *critical*. A severity the record states or a rule sets is never questioned.
 4. **Confidence.** Each answer, category and severity, is used only when its confidence is at least `min_confidence` (0.6). Below that it's recorded on the event and nothing changes.
 5. **Applied.** An answer counts as *applied* only when it changed the event: an uncategorized event got one of your categories, or a guessed severity became another one. An answer of `uncategorized`, a severity equal to the guessed one, or an answer below the threshold changes nothing.
 6. **Rules win.** The engine only fills in a missing category and corrects a guessed severity. It never overrides a rule.
-7. **Once per pattern.** Answers are cached by message pattern and checkpoint (and whether the severity was asked) for 24 hours, up to 5,000 patterns, and simultaneous events with the same pattern share one request, so a recurring error costs one call. The cache is shared across sources and with file analysis, so an uploaded file reuses the answers given for live events, and the other way round. Changing the categories, a checkpoint (the default or a source's), the URL list or the key clears it. A new `min_confidence` applies to cached answers at once.
+7. **Once per pattern.** Answers are cached by message pattern and checkpoint (and whether the severity was asked) for 24 hours, up to 5,000 patterns, and simultaneous events with the same pattern share one request, so a recurring error costs one call. The cache is shared across sources and with file analysis, so an uploaded file reuses the answers given for live events, and the other way round; that's why the text sent to the engine leaves out the source name. Changing the categories, a checkpoint (the default or a source's) or the key clears it, and so does a new checkpoint revision reported by the engine; instances coming and going (Nomad scaling or rescheduling) don't. A new `min_confidence` applies to cached answers at once.
 
-Each event that was sent carries the engine's answer in `engine`: the checkpoint (`model`), the chosen `category` and its `confidence`, the `top` three categories, the `severity` and `severity_confidence` when it was asked, the `threshold` (`min_confidence` when the answer was used), whether it was `applied`, and whether the event was `truncated` to fit the model. Its `classifier` is `laya` when the answer was applied.
+Each event that was sent carries the engine's answer in `engine`: the checkpoint (`model`), the chosen `category` and its `confidence`, the `top` three categories, the `severity` and `severity_confidence` when it was asked, the `threshold` (`min_confidence` when the answer was used), whether it was `applied` (and whether to the `category_applied` or `severity_applied`), and whether the event was `truncated` to fit the model. Its `classifier` is `laya` when the answer was applied.
 
 **Load and waiting.** laya-serve computes one answer at a time; further requests wait inside it, where Laya can neither see them nor give up on them early. So `max_in_flight` is counted per engine instance and defaults to 1, and events wait in Laya's own queue (256 events) instead. An event waits at most `timeout_seconds` (30) for its answer, queueing included, so the engine delays an alert by at most that. From recent request times and the capacity (`max_in_flight` × instances), Laya estimates how long a new event would wait: one that would run out of time in the queue isn't queued at all, and goes on at once with the rules' result (it is *shed*). More instances add capacity: requests go round-robin to the instances that passed their last health check, with failover between them.
 
@@ -185,7 +185,7 @@ Each event that was sent carries the engine's answer in `engine`: the checkpoint
 
 Laya checks every instance's `/health` every 30 seconds: which instances answer and which checkpoints they have loaded. A passing check lifts a pause caused by timeouts or connection failures. Changing the URL, key, checkpoints or categories lifts every pause at once.
 
-**Categories.** Under **Settings → Categories**, list your categories in the order you want them offered. Plain names work best, and the defaults are just names: `security`, `auth`, `application`, `database`, `network`, `resource`, `http`, `performance`, `deployment`, `audit`. Add a short description only to tell apart names the engine confuses. With ten or more categories the engine reads only about 16 tokens of each option, and Laya's engine status warns when the engine couldn't tell categories apart. On 23 hand-labelled log lines with the english checkpoint, plain names plus "none of the above" picked the right category 15 times, against 8 with a few keywords as each category's description (the earlier defaults), and answered faster. That is a small sample: read it as a hint, not a benchmark, and check your own logs with the tester below.
+**Categories.** Under **Settings → Categories**, list your categories in the order you want them offered. Plain names work best, and the defaults are just names: `security`, `auth`, `application`, `database`, `network`, `resource`, `http`, `performance`, `deployment`, `audit`. Add a short description only to tell apart names the engine confuses. With ten or more categories the engine reads only about 16 tokens of each option, and Laya's engine status warns when the engine couldn't tell categories apart. On 23 hand-labelled log lines with the english checkpoint, plain names plus "none of the above" picked the right category 14 times, against 9 with a few keywords as each category's description (the earlier defaults), and answered faster (about 0.8 s against 1.4 s per event on 2 CPU threads). That is a small sample: read it as a hint, not a benchmark, and check your own logs with the tester below.
 
 Names are lower-cased and limited to 64 characters, descriptions to 300, and there can be up to 50 categories. A description needs a name, and `uncategorized` is reserved for events no category fits, so it is refused as a name. A name listed twice is merged, unless the two descriptions differ, which is an error. Blank rows are dropped. Configs that list categories as plain strings still load.
 
@@ -213,7 +213,7 @@ Laya sends each event as compact text: the first line, the root cause of a stack
 | `only_uncategorized` | `true` | `false` also asks about events a rule categorized. Rules still win, so that only records the engine's opinion on the event, at the cost of more calls. |
 | `min_severity` | `warning` | Compared with the stated or guessed severity. |
 | `min_confidence` | `0.6` | 0 to 1, for the category and the severity answer alike. |
-| `set_severity` | `true` | Ask for a severity when it was only guessed (step 3). |
+| `set_severity` | `false` | Ask for a severity when it was only guessed (step 3). About doubles the engine's time per event. |
 | `max_in_flight` | `1` | Concurrent requests per engine instance, at most 16. See **Load and waiting**. |
 | `timeout_seconds` | `30` | The longest an event waits for an answer, queueing included, at most 300. |
 
@@ -233,12 +233,12 @@ curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" -X POST http://localhost:8080/
  "result": {"model": "english", "category": "database", "category_confidence": 0.9979,
             "probabilities": {"database": 0.9979, "application": 0.0018, "performance": 0.0002, "…": 0},
             "severity": "error", "severity_confidence": 0.5911, "latency_ms": 1338, "inference_ms": 1335},
- "rules": {"category": "uncategorized", "severity": "error", "matched_rules": null}}
+ "rules": {"category": "uncategorized", "severity": "error", "severity_guessed": true, "matched_rules": null}}
 ```
 
-The rules guessed *error* from "failed", so the severity was asked too. The category answer clears the threshold and would be applied; the severity answer is below it (and the same as the guess). For `canary analysis failed for checkout-api: error rate 4.2% above threshold` the same checkpoint split between `application` (0.58) and `http` (0.33), so nothing would be applied; "error rate" counts as a stated level there, so no severity was asked. Add `"source_id"` to classify a message as that source would (its name and checkpoint), or pass `{"event_id": "…"}` instead for a stored event. For a stored event, `rules` is what the rules alone decide today, not the event's stored result, which may include the engine's answer. Errors come back as `{"ok": false, "error": "…"}`.
+The rules guessed *error* from "failed" (and `set_severity` was on in this example, so the severity was asked too; it is off by default). The category answer clears the threshold and would be applied; the severity answer is below it (and the same as the guess). Add `"source_id"` to classify a message as that source would (its checkpoint), or pass `{"event_id": "…"}` instead for a stored event. For a stored event, `rules` is what the rules alone decide today (including `severity_guessed`), not the event's stored result, which may include the engine's answer. The tester never asks for a checkpoint the engine hasn't loaded (that would make it load it). Errors come back as `{"ok": false, "error": "…"}`.
 
-**Health and status.** `GET /api/engine/health` checks every configured instance now. `ok` is true when each one answers, lists its checkpoints (laya-serve shows them only to callers with its key, so a wrong or missing key makes `ok` false, with an error saying so) and has every checkpoint in use loaded. Each endpoint reports `url`, `ok`, `error`, `loaded`, `missing` (checkpoints in use that it hasn't loaded), `model_loaded` (nothing missing), `device`, `revision` and `latency_ms`. The `engine` section of `GET /api/stats`:
+**Health and status.** `GET /api/engine/health` checks every configured instance now. `ok` is true when each one answers, lists its checkpoints (laya-serve shows them only to callers with its key, so a wrong or missing key makes `ok` false, with an error saying so) and has the default checkpoint loaded. Each endpoint reports `url`, `ok`, `error`, `loaded`, `missing` (checkpoints in use, a source's included, that it hasn't loaded), `model_loaded` (the default checkpoint is loaded), `device`, `revision` and `latency_ms`. Until the engine has reported its checkpoints, Laya asks it only with the default checkpoint, and checks its health every 5 s instead of every 30 s. The `engine` section of `GET /api/stats`:
 
 | Field | |
 | --- | --- |
@@ -255,10 +255,11 @@ The rules guessed *error* from "failed", so the severity was asked too. The cate
 | `truncated` | Events cut to fit the model. |
 | `avg_latency_ms`, `avg_inference_ms` | Recent round trips (including time queued inside the engine), and the engine's own compute time. |
 | `cached_results` | Patterns in the cache. |
-| `last_error`, `last_error_at`, `paused_until` | The last failure, and until when all calls are paused. |
+| `last_error`, `last_error_at`, `last_success_at`, `paused_until` | The last failure, the last answer (after it, the error is history), and until when all calls are paused. |
+| `paused_checkpoints` | Checkpoints paused alone because the engine answered with another. |
 | `warnings` | Setup problems: checkpoints in use but not loaded, checkpoints paused because the engine answered with another, categories the engine can't tell apart. |
 
-The `pipeline` section of `/api/stats` adds `engine_queued`, `engine_queue_depth`, `engine_stale` (events whose time ran out while queued, or that were queued at shutdown) and `engine_shed` (events not queued because they would have run out of time).
+The `pipeline` section of `/api/stats` adds `engine_queued`, `engine_queue_depth` and `engine_shed` (events not queued because they would have run out of time; they are also in the engine's `skipped`).
 
 **Running the engine for development.** laya-serve needs Python 3.10 or newer. Install the CPU build of PyTorch first unless you have a GPU:
 
@@ -286,10 +287,10 @@ Fine-tuning is where the engine's accuracy comes from, and your rules already la
 - `GET /api/engine/training-data`: from the live events in memory;
 - `GET /api/imports/{id}/training-data`: from the events kept for browsing an analyzed file, which include examples of every pattern.
 
-Each line is one message pattern (per source) that a rule gave one of your categories; events the engine classified are left out. `state` is exactly the text Laya sends the engine for that event, `questions` is the category question Laya asks (your current categories in order, plus `uncategorized`), and `expected` is the rule's category:
+Each line is one message pattern that a rule gave one of your categories; events whose category the engine set are left out. `state` is exactly the text Laya sends the engine for that event, `questions` is the category question Laya asks (your current categories in order, plus `uncategorized`), and `expected` is the rule's category:
 
 ```json
-{"state": "java.lang.NullPointerException at com.example.Foo.bar(Foo.java:42)\nlevel: error, source: default\nlevel=error service=api",
+{"state": "java.lang.NullPointerException at com.example.Foo.bar(Foo.java:42)\nlevel: error\nservice=api",
  "questions": {"category": {"type": "choice", "instructions": "Which category does this log event belong to?",
                "criteria": {"security": null, "auth": null, "application": null, "…": null, "uncategorized": "none of the above"}}},
  "expected": {"category": "application"}}
@@ -357,13 +358,14 @@ The Laya engine's metrics:
 | `laya_engine_requests_completed_total` | Requests answered. |
 | `laya_engine_request_seconds_total` | Time spent on answered requests, including time queued inside the engine. Divide its rate by the rate of `…_requests_completed_total` for the average. |
 | `laya_engine_inference_seconds_total` | The engine's compute time for answered requests (its `X-Inference-Time-Ms`). |
-| `laya_engine_paused` | 1 while all calls are paused after errors (a single checkpoint's pause shows in the engine status instead). |
+| `laya_engine_paused` | 1 while all calls are paused after errors. |
+| `laya_engine_checkpoints_paused` | Checkpoints paused alone because the engine answered with another. |
 
 ## Operational notes
 
 - **Single instance.** Configuration is one file on one volume, so the Nomad job runs `count = 1` and Nomad reschedules it if the node fails. Recent events and delivery history live in memory and reset on restart. Laya is a classifier and alerter, not long-term log storage; keep shipping logs to your log store as well (a webhook notifier can forward classified events).
 - **Laya engine.** The engine is a separate service with its own needs: about 3.5 GB of memory and 4 CPU cores per instance on CPU, roughly 1–2 new message patterns per second each, or an NVIDIA GPU for far more. Laya never depends on it: without it, or while it's down, classification is the rules' alone. On Nomad, Laya re-reads the engine addresses from a file, so engine instances coming and going don't restart it; see [deploy/nomad/README.md](deploy/nomad/README.md#6-run-the-laya-engine-optional).
-- **Shutdown.** On SIGTERM or Ctrl-C, Laya stops accepting requests and stops polling, finishes the events it already accepted (engine requests are cancelled, so those events keep the rules' result), then delivers the notifications still queued. It gives this 25 seconds in all, and logs what was left if time runs out. A request still running, such as a log file upload, counts against those 25 seconds.
+- **Shutdown.** On SIGTERM or Ctrl-C, Laya stops accepting requests and stops polling, finishes the events it already accepted (engine requests are cancelled, so those events keep the rules' result), then delivers the notifications still queued. Each step has its own budget (8 s for requests in progress, which are then cut off, 8 s for events, 10 s for notifications), within Nomad's 30 s `kill_timeout`, and Laya logs what was left if time runs out.
 - **Security.** The UI sends a strict Content-Security-Policy and renders all log content as text, never HTML. Ingest and admin tokens are compared in constant time. Pull sources and webhooks can reach any URL the admin enters, so treat the admin token like infrastructure credentials and put Laya behind TLS (for example Traefik or another load balancer).
 
 ## Development

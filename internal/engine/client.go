@@ -89,6 +89,7 @@ type Response struct {
 	// Measured by the client (round trip) and reported by the engine
 	// (X-Inference-Time-Ms, the forward pass alone).
 	Elapsed   time.Duration `json:"-"`
+	Attempt   time.Duration `json:"-"` // the answering request alone, without retries or waits
 	Inference time.Duration `json:"-"`
 	Endpoint  string        `json:"-"`
 }
@@ -171,9 +172,10 @@ func (c *Client) Decide(ctx context.Context, req Request) (Response, error) {
 	var last error
 	for attempt := 0; attempt < 30; attempt++ {
 		base := c.pick()
+		attempt := time.Now()
 		resp, err := c.post(ctx, base, body)
 		if err == nil {
-			resp.Elapsed, resp.Endpoint = time.Since(start), base
+			resp.Elapsed, resp.Attempt, resp.Endpoint = time.Since(start), time.Since(attempt), base
 			if want := req.Model; want != "" && resp.Routing.Model != want {
 				return resp, fmt.Errorf("%w: asked for %q, got %q (is the checkpoint configured on the engine?)", ErrWrongModel, want, resp.Routing.Model)
 			}

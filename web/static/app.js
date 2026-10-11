@@ -614,7 +614,9 @@ function engineKpi(e, pipeline, kpi) {
     return kpi('Laya engine', 'off', e.config_error || 'not configured: set the URL in Settings', true);
   }
   const paused = e.paused_until && new Date(e.paused_until) > new Date();
-  const recent = e.last_error && e.last_error_at && Date.now() - new Date(e.last_error_at).getTime() < 10 * 60 * 1000;
+  // An error counts until the engine answers again (or for 10 minutes).
+  const recovered = e.last_success_at && e.last_error_at && new Date(e.last_success_at) > new Date(e.last_error_at);
+  const recent = e.last_error && e.last_error_at && !recovered && Date.now() - new Date(e.last_error_at).getTime() < 10 * 60 * 1000;
   const warnings = e.warnings || [];
   const parts = [`${num(e.cache_hits)} cached`, `${num(e.applied)} applied`, `${num(e.avg_latency_ms)} ms avg`];
   if (warnings.length) parts.unshift(warnings.length === 1 ? '1 warning' : `${warnings.length} warnings`);
@@ -1515,7 +1517,7 @@ pages.settings = async (main) => {
     minConf: h('input', { type: 'number', min: 0, max: 1, step: 0.05 }),
     minSev: select(SEVERITIES, ''),
     onlyUncat: checkbox('Only events no rule categorized (rules first)', false),
-    setSev: checkbox('Let the engine judge severity when the record states no level', false),
+    setSev: checkbox('Let the engine judge severity when the record states no level (about doubles engine time; off by default)', false),
     inFlight: h('input', { type: 'number', min: 1, max: 16, step: 1 }),
     timeout: h('input', { type: 'number', min: 1, max: 300, step: 1 }),
   };
@@ -1593,7 +1595,8 @@ pages.settings = async (main) => {
       h('div', null, 'Without the engine'), h('div', null, `${plural(a.skipped, 'live event')} kept the rules' result: engine busy, paused or too slow, or checkpoint not loaded`,
         p.engine_shed ? h('div', { class: 'small muted' }, `${num(p.engine_shed)} of them were not queued because they would have timed out.`) : null),
       h('div', null, 'Errors'), h('div', null, `${plural(a.errors, 'failed request')} · ${num(a.timed_out)} timed out`),
-      a.last_error ? [h('div', null, 'Last error'), h('div', null, `${a.last_error} (${ago(a.last_error_at)})`)] : null,
+      a.last_error ? [h('div', null, 'Last error'), h('div', null, `${a.last_error} (${ago(a.last_error_at)})`,
+        a.last_success_at && new Date(a.last_success_at) > new Date(a.last_error_at) ? h('span', { class: 'muted small' }, ` · answered again ${ago(a.last_success_at)}`) : null)] : null,
       paused ? [h('div', null, 'Paused until'), h('div', null, `${fmtTime(a.paused_until)}. Meanwhile events go on with the rules' result.`)] : null));
   };
 

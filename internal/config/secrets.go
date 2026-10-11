@@ -34,7 +34,7 @@ func ExpandEnv(s string) string {
 		if !envName.MatchString(sub[2]) {
 			return m
 		}
-		if v, ok := os.LookupEnv(sub[2]); ok {
+		if v := os.Getenv(sub[2]); v != "" {
 			return v
 		}
 		if path := os.Getenv(sub[2] + "_FILE"); path != "" {

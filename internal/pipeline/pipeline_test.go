@@ -115,17 +115,18 @@ func TestSlowEngineDoesNotHoldEventsBack(t *testing.T) {
 		<-block
 		return enginetest.Answer{Choice: q.Labels[0], Probs: map[string]float64{q.Labels[0]: 1}}
 	}
-	p, store, _ := run(t, fake.URL, 100*time.Millisecond)
-	// One request is with the engine (max_in_flight 1); the rest wait in
-	// the queue, then go on without it.
+	p, store, laya := run(t, fake.URL, 100*time.Millisecond)
+	// One request is with the engine (max_in_flight 1); the rest wait for
+	// it, then go on without it, all within the engine wait.
 	var evs []model.Event
 	for i := 0; i < 8; i++ {
 		evs = append(evs, model.Event{ID: string(rune('a' + i)), SourceID: "s", Message: "ERROR distinct failure " + string(rune('a'+i))})
 	}
+	start := time.Now()
 	p.Submit(evs)
-	waitFor(t, store, 4)
-	if p.EngineStale.Load() == 0 {
-		t.Error("queued events should time out of the engine queue")
+	waitFor(t, store, 8)
+	if time.Since(start) > 2*time.Second || laya.Skipped.Load() == 0 {
+		t.Errorf("held back %v, skipped %d", time.Since(start), laya.Skipped.Load())
 	}
 }
 

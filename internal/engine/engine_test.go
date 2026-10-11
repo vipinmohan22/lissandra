@@ -87,7 +87,7 @@ func TestRequestContract(t *testing.T) {
 }
 
 func TestConfidenceThresholdAndSeverity(t *testing.T) {
-	cl, fake, _ := setup(t, nil)
+	cl, fake, _ := setup(t, func(c *config.Config) { c.Settings.Engine.SetSeverity = true })
 	fake.Decide = func(state string, q enginetest.Question) enginetest.Answer {
 		if q.ID == "severity" {
 			return enginetest.Answer{Probs: map[string]float64{q.Labels[4]: 0.7, q.Labels[3]: 0.3}}
@@ -237,7 +237,7 @@ func TestCheckpointsMustBeLoaded(t *testing.T) {
 		t.Errorf("status %+v", st)
 	}
 	eps, _ := cl.Probe(context.Background())
-	if len(eps) != 1 || eps[0].ModelLoaded || strings.Join(eps[0].Missing, ",") != "multilingual" {
+	if len(eps) != 1 || !eps[0].ModelLoaded || strings.Join(eps[0].Missing, ",") != "multilingual" {
 		t.Errorf("probe should name the missing checkpoint: %+v", eps)
 	}
 	_ = cfg
@@ -247,7 +247,7 @@ func TestWrongCheckpointPausesOnlyThatCheckpoint(t *testing.T) {
 	cl, fake, cfg := setup(t, func(c *config.Config) {
 		c.Sources = append(c.Sources, config.Source{ID: "ft", Name: "ft", Type: config.SourcePush, EngineModel: "logs-finetune"})
 	})
-	fake.HideLoaded = true // the engine doesn't say what it has
+	fake.Advertise = []string{"logs-finetune"} // listed, but answered as english
 	cl.checkHealth()
 	ev := event("database down")
 	ev.SourceID = "ft"
@@ -294,7 +294,10 @@ func TestBusyAndSlowEnginesAreNotDown(t *testing.T) {
 	}
 	fake.Busy.Store(0)
 
-	// Requests running out of time: a pause only after several in a row.
+	// Requests running out of time: a pause only after several in a row
+	// that started with ample time.
+	defer func(old time.Duration) { ampleTime = old }(ampleTime)
+	ampleTime = 50 * time.Millisecond
 	block := make(chan struct{})
 	defer close(block)
 	fake.Decide = func(string, enginetest.Question) enginetest.Answer { <-block; return enginetest.Answer{} }
@@ -458,7 +461,7 @@ func TestTrainingRecord(t *testing.T) {
 	ev := event("ERROR db pool exhausted")
 	ev.Category = "database"
 	rec, ok := cl.TrainingRecord(&ev)
-	if !ok || rec.Expected["category"] != "database" || rec.State != "ERROR db pool exhausted\nsource: app" || rec.Questions["category"].Type != TypeChoice {
+	if !ok || rec.Expected["category"] != "database" || rec.State != "ERROR db pool exhausted" || rec.Questions["category"].Type != TypeChoice {
 		t.Errorf("record %+v %v", rec, ok)
 	}
 	ev.Category = "made-up"
@@ -471,7 +474,7 @@ func TestBuildState(t *testing.T) {
 	ev := model.Event{SourceName: "api", Level: "error", Message: "Request failed\n\tat a.B.c(B.java:1)\n\tat a.B.d(B.java:2)\nCaused by: java.io.IOException: disk full",
 		Fields: map[string]any{"status": 500, "user": map[string]any{"id": 7}}}
 	got := buildState(&ev)
-	want := "Request failed\nCaused by: java.io.IOException: disk full\nlevel: error, source: api\nstatus=500 user={\"id\":7}\n\tat a.B.c(B.java:1)\n\tat a.B.d(B.java:2)"
+	want := "Request failed\nCaused by: java.io.IOException: disk full\nlevel: error\nstatus=500 user={\"id\":7}\n\tat a.B.c(B.java:1)\n\tat a.B.d(B.java:2)"
 	if got != want {
 		t.Errorf("state:\n%q\nwant\n%q", got, want)
 	}
@@ -518,5 +521,111 @@ func TestConfigValidation(t *testing.T) {
 	urls, _ := config.ParseEngineURLs(c.Settings.Engine.URL)
 	if strings.Join(urls, ",") != "http://a:8000,https://b" {
 		t.Errorf("urls %v", urls)
+	}
+}
+
+func TestUnloadedCheckpointsAreNeverRequested(t *testing.T) {
+	// Before the engine has reported anything, only the default is asked.
+	fake := enginetest.New()
+	defer fake.Close()
+	fake.HideLoaded = true
+	c := config.Defaults()
+	c.Settings.Engine.URL = fake.URL
+	c.Sources = append(c.Sources, config.Source{ID: "multi", Name: "es", Type: config.SourcePush, EngineModel: "multilingual"})
+	config.Normalize(c)
+	cl := New(quiet())
+	cl.syncHealth = true
+	defer cl.Close()
+	cl.Configure(c)
+	ml := event("Verbindung fehlgeschlagen")
+	ml.SourceID = "multi"
+	en := event("database down")
+	if cl.Available(&ml) || !cl.Available(&en) {
+		t.Error("with nothing known, only the default checkpoint may be asked")
+	}
+	// The tester refuses too: asking would make the engine load it.
+	if _, err := cl.Classify(context.Background(), &ml); !errors.Is(err, ErrNotLoaded) || fake.Calls.Load() != 0 {
+		t.Errorf("tester asked for an unknown checkpoint: %v calls=%d", err, fake.Calls.Load())
+	}
+	fake.HideLoaded = false
+	fake.Models = []string{"english"}
+	cl.checkHealth()
+	if _, err := cl.Classify(context.Background(), &ml); err == nil || !strings.Contains(err.Error(), "it has english") {
+		t.Errorf("tester error should name what the engine has: %v", err)
+	}
+}
+
+func TestShortBudgetIsSkippedNotCountedAgainstTheEngine(t *testing.T) {
+	cl, fake, _ := setup(t, nil)
+	warm := event("database warm")
+	cl.Enrich(context.Background(), &warm)
+	cl.mu.Lock()
+	cl.avgAttempt = 200 // ms: the engine answers in about 200ms
+	cl.mu.Unlock()
+	calls := fake.Calls.Load()
+	for i := 0; i < 5; i++ {
+		ev := event("database short " + []string{"alpha", "bravo", "charlie", "delta", "echo"}[i])
+		ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+		cl.Enrich(ctx, &ev)
+		cancel()
+	}
+	if fake.Calls.Load() != calls || !cl.Available(&warm) || cl.Errors.Load() != 0 {
+		t.Errorf("events with too little time left: calls %d→%d, paused=%v, errors=%d", calls, fake.Calls.Load(), !cl.Available(&warm), cl.Errors.Load())
+	}
+}
+
+func TestWouldWaitCountsEventsWaitingForASlot(t *testing.T) {
+	cl, fake, _ := setup(t, nil)
+	warm := event("database warm")
+	cl.Enrich(context.Background(), &warm)
+	block := make(chan struct{})
+	fake.Decide = func(string, enginetest.Question) enginetest.Answer {
+		<-block
+		return enginetest.Answer{Choice: "database", Probs: map[string]float64{"database": 1}}
+	}
+	before := cl.WouldWait(0)
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ev := event("database held " + []string{"alpha", "bravo", "charlie", "delta"}[i])
+			cl.Enrich(context.Background(), &ev)
+		}(i)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for cl.waiting.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if after := cl.WouldWait(0); after < 3*before {
+		t.Errorf("estimate ignores events waiting for the slot: %v → %v", before, after)
+	}
+	close(block)
+	wg.Wait()
+}
+
+func TestCacheKeepsAnswersAcrossInstanceChanges(t *testing.T) {
+	cl, fake, cfg := setup(t, nil)
+	ev := event("database down")
+	cl.Enrich(context.Background(), &ev)
+	other := enginetest.New()
+	defer other.Close()
+	cfg.Settings.Engine.URL = fake.URL + "," + other.URL
+	cl.Configure(cfg)
+	if again := event("database down"); !cl.ApplyCached(&again) {
+		t.Error("an added instance should not clear cached answers")
+	}
+	cfg.Settings.Engine.APIKey = "new-key"
+	cl.Configure(cfg)
+	if again := event("database down"); cl.ApplyCached(&again) {
+		t.Error("a new key may mean another engine: answers should be cleared")
+	}
+}
+
+func TestStateLeavesOutSourceAndTimeFields(t *testing.T) {
+	ev := model.Event{SourceName: "app.log", Level: "error", Message: "boom",
+		Fields: map[string]any{"level": "error", "@timestamp": "2026-10-11T10:00:00Z", "ts": 1, "service": "checkout"}}
+	if got := buildState(&ev); got != "boom\nlevel: error\nservice=checkout" {
+		t.Errorf("state %q", got)
 	}
 }
