@@ -131,7 +131,7 @@ func (p *Pipeline) ClassifyOffline(engine *classify.Engine, ev *model.Event) boo
 		return false
 	}
 	if p.ai != nil && p.ai.Eligible(ev) {
-		p.ai.ApplyCached(ev)
+		p.ai.ApplyCachedQuiet(ev)
 	}
 	return true
 }

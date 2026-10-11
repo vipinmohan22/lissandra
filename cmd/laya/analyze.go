@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/vipinmohan22/layalogs/internal/classify"
 	"github.com/vipinmohan22/layalogs/internal/config"
@@ -123,7 +125,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	out := bufio.NewWriter(stdout)
 	defer out.Flush()
-	enc := json.NewEncoder(out)
+	enc := json.NewEncoder(jsonSafeWriter{out})
 	enc.SetEscapeHTML(false)
 
 	code := 0
@@ -268,6 +270,35 @@ func terminalSafe(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// jsonSafeWriter escapes characters that encoding/json passes through but a
+// terminal acts on (C1 controls such as an 8-bit CSI, bidi and other format
+// characters) as \uXXXX. Each Write is one whole JSON value, and these
+// characters can only occur inside its strings, so the JSON is unchanged.
+type jsonSafeWriter struct{ w io.Writer }
+
+func (j jsonSafeWriter) Write(p []byte) (int, error) {
+	var buf []byte
+	last := 0
+	for i := 0; i < len(p); {
+		r, size := utf8.DecodeRune(p[i:])
+		if r >= 0x80 && (unicode.IsControl(r) || unicode.Is(unicode.Cf, r)) {
+			buf = append(buf, p[last:i]...)
+			for _, u := range utf16.Encode([]rune{r}) {
+				buf = fmt.Appendf(buf, `\u%04x`, u)
+			}
+			last = i + size
+		}
+		i += size
+	}
+	if buf == nil {
+		return j.w.Write(p)
+	}
+	if _, err := j.w.Write(append(buf, p[last:]...)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // writeTextReport prints a terminal-friendly summary of rep.

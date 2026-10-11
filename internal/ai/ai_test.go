@@ -107,6 +107,13 @@ func TestClassifyRequestShapeAndCache(t *testing.T) {
 	if ev2.Severity != model.SeverityError {
 		t.Error("explicit log level must not be overridden by AI")
 	}
+
+	// File analysis reads the cache without counting hits in live metrics.
+	hits := c.CacheHits.Load()
+	ev3 := &model.Event{Message: "pg: connection refused", Severity: model.SeverityError, Category: model.Uncategorized, Fingerprint: "fp1"}
+	if !c.ApplyCachedQuiet(ev3) || ev3.Category != "database" || c.CacheHits.Load() != hits {
+		t.Errorf("quiet lookup: %+v, hits %d -> %d", ev3, hits, c.CacheHits.Load())
+	}
 }
 
 func TestBudgetAndEligibility(t *testing.T) {

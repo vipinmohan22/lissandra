@@ -11,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -96,6 +97,12 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 			p.set(k, q.Get(k))
 		}
 	}
+	// Options in the query string are checked before taking a slot, so a
+	// bad request never creates an import or pushes out finished ones.
+	if _, err := s.importOptions(p); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Take a slot before reading the body or extending deadlines, so idle
 	// or junk uploads can't hold connections open without one.
@@ -115,9 +122,12 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer s.imports.Done(im)
+	release := sync.OnceFunc(func() { s.imports.Done(im) })
+	defer release()
 	fail := func(status int, msg string) {
 		importer.Fail(im, msg)
+		release()
+		w.Header().Set("Connection", "close") // the rest of the upload is not read
 		writeError(w, status, msg)
 	}
 
@@ -133,48 +143,25 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 			fail(http.StatusBadRequest, err.Error())
 			return
 		}
-		defer part.Close()
 		if p.name == "" {
 			p.name = part.FileName()
 		}
+		// The part is deliberately not closed: Close drains the rest of the
+		// upload, which after an early stop would hold the slot meanwhile.
 		file = part
 	}
-	name := cleanFileName(p.name)
-
-	format := p.format
-	if format == "" {
-		format = config.FormatAuto
-	}
-	if !contains(ImportFormats, format) {
-		fail(http.StatusBadRequest, fmt.Sprintf("unknown format %q (use %s)", format, strings.Join(ImportFormats, ", ")))
+	opts, err := s.importOptions(p)
+	if err != nil {
+		fail(http.StatusBadRequest, err.Error())
 		return
-	}
-	loc := time.UTC
-	if p.tz != "" {
-		if loc, err = time.LoadLocation(p.tz); err != nil {
-			fail(http.StatusBadRequest, fmt.Sprintf("unknown time zone %q", p.tz))
-			return
-		}
-	}
-	src := config.Source{Name: uploadSourceName, Type: config.SourcePush, Parse: config.Parse{Format: config.FormatAuto}}
-	if p.source != "" {
-		found, ok := s.lookupSource(p.source)
-		if !ok {
-			fail(http.StatusBadRequest, "unknown source "+strconv.Quote(p.source))
-			return
-		}
-		src = found
-	}
-	if p.format == "" && p.source != "" {
-		format = "" // use the source's own format
 	}
 
 	engine := s.pipeline.Engine()
 	err = importer.Run(r.Context(), im, uploadReader{file, limit}, importer.Options{
-		FileName:       name,
-		Source:         src,
-		Format:         format,
-		Location:       loc,
+		FileName:       opts.name,
+		Source:         opts.src,
+		Format:         opts.format,
+		Location:       opts.loc,
 		MaxBytes:       s.opts.MaxImportDecompressed,
 		MaxRecordBytes: maxImportRecordBytes,
 		Deadline:       time.Now().Add(importDeadline),
@@ -184,6 +171,7 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 		Routes:   s.dispatcher.Matches,
 		Busy:     s.pipeline.Busy,
 	})
+	release() // free the slot before replying, so the next upload can start
 
 	rep := im.Report(true)
 	status := http.StatusCreated
@@ -192,10 +180,53 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 	case errors.As(err, &unsupported):
 		status = http.StatusUnsupportedMediaType
 	case err != nil:
-		s.log.Info("log file analysis failed", "file", name, "err", err)
+		s.log.Info("log file analysis failed", "file", opts.name, "err", err)
 		status = http.StatusBadRequest
 	}
+	if rep.Truncated || err != nil {
+		w.Header().Set("Connection", "close") // the rest of the upload may be unread
+	}
 	writeJSON(w, status, rep)
+}
+
+// importOptions validates an upload's options.
+type importOptions struct {
+	name, format string
+	loc          *time.Location
+	src          config.Source
+}
+
+func (s *Server) importOptions(p importParams) (importOptions, error) {
+	o := importOptions{
+		name:   cleanFileName(p.name),
+		format: p.format,
+		loc:    time.UTC,
+		src:    config.Source{Name: uploadSourceName, Type: config.SourcePush, Parse: config.Parse{Format: config.FormatAuto}},
+	}
+	if o.format == "" {
+		o.format = config.FormatAuto
+	}
+	if !contains(ImportFormats, o.format) {
+		return o, fmt.Errorf("unknown format %q (use %s)", o.format, strings.Join(ImportFormats, ", "))
+	}
+	if p.tz != "" {
+		loc, err := time.LoadLocation(p.tz)
+		if err != nil {
+			return o, fmt.Errorf("unknown time zone %q", p.tz)
+		}
+		o.loc = loc
+	}
+	if p.source != "" {
+		found, ok := s.lookupSource(p.source)
+		if !ok {
+			return o, errors.New("unknown source " + strconv.Quote(p.source))
+		}
+		o.src = found
+		if p.format == "" {
+			o.format = "" // use the source's own format
+		}
+	}
+	return o, nil
 }
 
 func contains(list []string, v string) bool {
@@ -227,17 +258,16 @@ func findFilePart(r *http.Request, p *importParams) (*multipart.Part, error) {
 			return part, nil
 		}
 		if i >= maxFormParts {
-			part.Close()
 			return nil, errors.New(`too many form fields before the "file" part`)
 		}
 		value, err := io.ReadAll(io.LimitReader(part, maxFormPartBytes+1))
-		part.Close()
 		if err != nil {
 			return nil, fmt.Errorf("invalid multipart body: %w", err)
 		}
 		if total += len(value); len(value) > maxFormPartBytes || total > maxFormBytes {
 			return nil, errors.New("form fields too large")
 		}
+		part.Close() // read in full; parts are never drained
 		p.set(part.FormName(), strings.TrimSpace(string(value)))
 	}
 }

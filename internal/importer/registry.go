@@ -102,14 +102,21 @@ func (reg *Registry) Done(im *Import) {
 	reg.Events.Add(uint64(rep.Events))
 }
 
-// evictLocked drops the oldest finished imports beyond Keep, then frees the
-// retained events of the oldest finished imports while their total exceeds
-// the byte budget (their reports stay).
+// evictLocked drops the oldest finished imports beyond Keep, failed ones
+// first, then frees the retained events of the oldest finished imports while
+// their total exceeds the byte budget (their reports stay).
 func (reg *Registry) evictLocked() {
 	for len(reg.imports) > reg.cfg.Keep {
 		idx := -1
 		for i, im := range reg.imports {
-			if !im.Running() {
+			status := im.status()
+			if status == StatusRunning {
+				continue
+			}
+			if idx < 0 {
+				idx = i
+			}
+			if status == StatusFailed {
 				idx = i
 				break
 			}

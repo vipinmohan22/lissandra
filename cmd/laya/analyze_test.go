@@ -178,6 +178,25 @@ func TestAnalyzeTerminalSafe(t *testing.T) {
 	if !strings.Contains(out, "clipboard") {
 		t.Errorf("message text lost: %q", out)
 	}
+
+	// JSON output escapes what encoding/json passes through: C1 controls
+	// (an 8-bit CSI) and bidi characters. The decoded text is unchanged.
+	hidden := "2026-10-11 10:00:00 ERROR a\u202eb\u2066c\u009b2Jd\U000e0041e\n"
+	f = writeFile(t, dir, "hidden.log", hidden)
+	for _, mode := range []string{"json", "ndjson"} {
+		_, out, _ := analyze(t, "", "-output", mode, f)
+		for _, bad := range []string{"\u202e", "\u2066", "\u009b", "\U000e0041"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("%s output contains raw %q", mode, bad)
+			}
+		}
+		if mode == "ndjson" {
+			var ev model.Event
+			if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &ev); err != nil || !strings.HasSuffix(ev.Message, "a\u202eb\u2066c\u009b2Jd\U000e0041e") {
+				t.Errorf("escaped JSON does not decode to the message: %v %q", err, ev.Message)
+			}
+		}
+	}
 }
 
 func TestParseInterspersed(t *testing.T) {

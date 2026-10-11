@@ -329,10 +329,12 @@ func (im *Import) retainedBytes() int64 {
 }
 
 // Running reports whether the import is still in progress.
-func (im *Import) Running() bool {
+func (im *Import) Running() bool { return im.status() == StatusRunning }
+
+func (im *Import) status() string {
 	im.mu.RLock()
 	defer im.mu.RUnlock()
-	return im.report.Status == StatusRunning
+	return im.report.Status
 }
 
 // Report returns a snapshot. With detail it includes the timeline and top

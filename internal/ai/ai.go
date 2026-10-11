@@ -121,13 +121,26 @@ func (c *Classifier) Eligible(ev *model.Event) bool {
 
 // ApplyCached enriches ev from the cache. It returns false on a miss.
 func (c *Classifier) ApplyCached(ev *model.Event) bool {
+	if !c.lookup(ev) {
+		return false
+	}
+	c.CacheHits.Add(1)
+	return true
+}
+
+// ApplyCachedQuiet is ApplyCached for file analysis: hits are not counted
+// in the live metrics.
+func (c *Classifier) ApplyCachedQuiet(ev *model.Event) bool {
+	return c.lookup(ev)
+}
+
+func (c *Classifier) lookup(ev *model.Event) bool {
 	c.mu.Lock()
 	r, ok := c.cache[ev.Fingerprint]
 	c.mu.Unlock()
 	if !ok || time.Since(r.at) > cacheTTL {
 		return false
 	}
-	c.CacheHits.Add(1)
 	apply(ev, r.Result)
 	return true
 }

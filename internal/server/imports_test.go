@@ -298,3 +298,77 @@ func TestCleanFileName(t *testing.T) {
 		}
 	}
 }
+
+func TestInvalidRequestsKeepFinishedReports(t *testing.T) {
+	e := newEnv(t) // keeps 3
+	for i := 0; i < 3; i++ {
+		if code := e.admin("POST", "/api/imports", sampleLog, nil); code != http.StatusCreated {
+			t.Fatalf("upload %d: %d", i, code)
+		}
+	}
+	// Bad query options are rejected before an import is created.
+	for i := 0; i < 3; i++ {
+		if code := e.admin("POST", "/api/imports?tz=Europe/Berlinn", sampleLog, nil); code != 400 {
+			t.Errorf("bad tz: %d", code)
+		}
+	}
+	// Bad multipart options do create a failed import, which goes first.
+	body, ct := multipartBody(t, map[string]string{"format": "xml"}, "a.log", sampleLog)
+	if code, _ := e.do("POST", "/api/imports", body.Bytes(), authHeaders(map[string]string{"Content-Type": ct})); code != 400 {
+		t.Errorf("bad multipart format: %d", code)
+	}
+	e.admin("POST", "/api/imports", sampleLog, nil)
+	var reports []importer.Report
+	e.admin("GET", "/api/imports", nil, &reports)
+	done := 0
+	for _, r := range reports {
+		if r.Status == importer.StatusDone {
+			done++
+		}
+	}
+	if len(reports) != 3 || done != 3 {
+		t.Errorf("finished reports pushed out: %d listed, %d done", len(reports), done)
+	}
+}
+
+// pacedBody sends a multipart upload slowly until the server stops reading.
+type pacedBody struct {
+	head   []byte
+	chunks int
+	sent   int
+}
+
+func (b *pacedBody) Read(p []byte) (int, error) {
+	if len(b.head) > 0 {
+		n := copy(p, b.head)
+		b.head = b.head[n:]
+		return n, nil
+	}
+	if b.sent >= b.chunks {
+		return 0, io.EOF
+	}
+	b.sent++
+	time.Sleep(50 * time.Millisecond)
+	return copy(p, bytes.Repeat([]byte{'z'}, min(len(p), 32<<10))), nil
+}
+
+func TestEarlyStopDoesNotDrainMultipartUpload(t *testing.T) {
+	e := newEnv(t)
+	head := "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"x.zip\"\r\nContent-Type: application/octet-stream\r\n\r\nPK\x03\x04"
+	body := &pacedBody{head: []byte(head), chunks: 200} // ~10 s if drained
+	req, _ := http.NewRequest("POST", e.srv.URL+"/api/imports", body)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=b")
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnsupportedMediaType || time.Since(start) > 3*time.Second {
+		t.Errorf("status %d after %v", resp.StatusCode, time.Since(start))
+	}
+	if n := e.imports.Active(); n != 0 {
+		t.Errorf("slot still held: %d", n)
+	}
+}

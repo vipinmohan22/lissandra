@@ -28,9 +28,10 @@ import (
 const adminToken = "test-admin-token-0123456789"
 
 type env struct {
-	t   *testing.T
-	srv *httptest.Server
-	cfg *config.Store
+	t       *testing.T
+	srv     *httptest.Server
+	cfg     *config.Store
+	imports *importer.Registry
 }
 
 func newEnv(t *testing.T) *env {
@@ -62,10 +63,11 @@ func newEnvWith(t *testing.T, mutate func(*Options)) *env {
 	if mutate != nil {
 		mutate(&opts)
 	}
-	s := New(opts, log, cfg, store, p, d, a, pm, importer.NewRegistry(importer.RegistryConfig{Keep: 3, Limits: importer.Limits{Events: 1000, Bytes: 8 << 20}}))
+	reg := importer.NewRegistry(importer.RegistryConfig{Keep: 3, Limits: importer.Limits{Events: 1000, Bytes: 8 << 20}})
+	s := New(opts, log, cfg, store, p, d, a, pm, reg)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return &env{t: t, srv: srv, cfg: cfg}
+	return &env{t: t, srv: srv, cfg: cfg, imports: reg}
 }
 
 func (e *env) do(method, path string, body any, headers map[string]string) (int, []byte) {
