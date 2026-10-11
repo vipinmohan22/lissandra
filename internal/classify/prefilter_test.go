@@ -20,6 +20,7 @@ func TestPrefilterNeverRejectsAMatch(t *testing.T) {
 		`a(?i)b`, `(?i)a(?-i)B`, `(?i)k`, `(?i)s+x`, `(?i)(ab|)c`, `(?i)(ab)*c`, `(?i)(ab){2,3}`,
 		`(?i)(ab){0,2}z`, `^\[?error`, `(?i)\bwarn(ing)?\b`, `x|(?i)y`, `(?i)ſ`, `(?i)straße`, `(?i)ǅ`,
 		`(?i)σ`, `(?i)ı`, `(?i)İ`, `(?i)[a-c]x`, `"\s5\d\d\s`, `(?i)(?:foo|bar)baz`, `(?i)é`, `\x{212A}`,
+		`\x{FFFD}`, `(?i)[\x{FFFD}]`, `caf\x{FFFD} login`,
 	}
 	c := config.Defaults()
 	config.Normalize(c)

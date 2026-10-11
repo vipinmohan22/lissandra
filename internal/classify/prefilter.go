@@ -61,6 +61,13 @@ func required(re *syntax.Regexp) ([]literal, bool) {
 	switch re.Op {
 	case syntax.OpLiteral:
 		fold := re.Flags&syntax.FoldCase != 0
+		for _, r := range re.Rune {
+			// The regexp reads each invalid UTF-8 byte as U+FFFD, so that
+			// rune has no fixed byte form to search for.
+			if r == utf8.RuneError || !utf8.ValidRune(r) {
+				return nil, false
+			}
+		}
 		s := string(re.Rune)
 		if fold {
 			// Only ASCII literals are folded safely by foldASCII below.
