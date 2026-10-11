@@ -24,3 +24,4 @@ docker:
 nomad-validate:
 	nomad fmt -check -recursive deploy/nomad
 	nomad job validate deploy/nomad/laya.nomad.hcl
+	nomad job validate deploy/nomad/laya-engine.nomad.hcl

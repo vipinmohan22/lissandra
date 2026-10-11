@@ -2,3 +2,4 @@
 /data/
 /laya
 deploy/nomad/laya.vars.hcl
+deploy/nomad/laya-engine.vars.hcl

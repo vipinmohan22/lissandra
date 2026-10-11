@@ -1,10 +1,13 @@
 # Laya: log ingestion, classification and alerting on Nomad.
 #
 #   nomad volume create deploy/nomad/laya-volume.hcl          # once
-#   nomad var put nomad/jobs/laya LAYA_ADMIN_TOKEN="$(openssl rand -hex 24)"
+#   nomad var put nomad/jobs/laya LAYA_ADMIN_TOKEN="$(openssl rand -hex 24)" \
+#     LAYA_ENGINE_API_KEY="<the engine's LAYA_API_KEY>"       # if you run laya-engine
 #   nomad job run -var-file=deploy/nomad/laya.vars.hcl deploy/nomad/laya.nomad.hcl
 #
-# See deploy/nomad/README.md for details.
+# Classification by the Laya engine is optional: run laya-engine.nomad.hcl
+# and this job finds it through service discovery. Without it, Laya
+# classifies with its rules alone. See deploy/nomad/README.md for details.
 
 variable "datacenters" {
   description = "Datacenters Laya may run in."
@@ -88,6 +91,33 @@ variable "log_level" {
   description = "debug, info, warn or error."
   type        = string
   default     = "info"
+}
+
+variable "engine_service" {
+  description = "Service name of the Laya engine (laya-engine.nomad.hcl), found through service_provider. Every registered instance is used. Empty turns discovery off."
+  type        = string
+  default     = "laya-engine"
+}
+
+variable "engine_url" {
+  description = "Fixed engine URL(s), comma-separated, e.g. a load balancer in front of the engine. Overrides engine_service."
+  type        = string
+  default     = ""
+}
+
+locals {
+  # LAYA_ENGINE_URL for the task: every instance of the engine service as
+  # http://address:port, comma-separated (Laya spreads requests over them
+  # and fails over), or nothing when no instance is registered, in which
+  # case Laya classifies with its rules alone.
+  engine_lookup = var.service_provider == "consul" ? "service" : "nomadService"
+  engine_env = (
+    var.engine_url != "" ? "LAYA_ENGINE_URL=${var.engine_url}\n" :
+    var.engine_service == "" ? "LAYA_ENGINE_URL=\n" :
+    <<-EOT
+      LAYA_ENGINE_URL={{ range $i, $s := ${local.engine_lookup} "${var.engine_service}" }}{{ if $i }},{{ end }}http://{{ if .Address | regexMatch ":" }}[{{ .Address }}]{{ else }}{{ .Address }}{{ end }}:{{ .Port }}{{ end }}
+    EOT
+  )
 }
 
 job "laya" {
@@ -182,8 +212,9 @@ job "laya" {
       # Secrets come from the Nomad Variable at nomad/jobs/laya, which this
       # job can read through its workload identity. Every key becomes an
       # environment variable, so besides LAYA_ADMIN_TOKEN you can add e.g.
-      # ANTHROPIC_API_KEY, SMTP_PASSWORD or SLACK_WEBHOOK_URL and refer to
-      # them in the UI as ${env:SMTP_PASSWORD}. Changing the variable
+      # LAYA_ENGINE_API_KEY (the engine's bearer key, which the default
+      # engine settings read), SMTP_PASSWORD or SLACK_WEBHOOK_URL and refer
+      # to them in the UI as ${env:SMTP_PASSWORD}. Changing the variable
       # restarts the task with the new values.
       template {
         destination = "${NOMAD_SECRETS_DIR}/laya.env"
@@ -196,6 +227,17 @@ job "laya" {
           {{- end }}
           {{- end }}
         EOT
+      }
+
+      # Where the Laya engine is: LAYA_ENGINE_URL, which the default engine
+      # settings read (${env:LAYA_ENGINE_URL}). Laya reads its environment
+      # at startup, so it restarts when engine instances come or go; while
+      # none is registered it runs on rules alone.
+      template {
+        destination = "local/engine.env"
+        env         = true
+        change_mode = "restart"
+        data        = local.engine_env
       }
 
       resources {

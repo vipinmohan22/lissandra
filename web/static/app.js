@@ -146,6 +146,8 @@ function textToHeaders(text) {
 let token = sessionStorage.getItem('laya.token') || '';
 
 class AuthError extends Error {}
+// InputError is a form value that can't be saved: shown, but not logged.
+class InputError extends Error {}
 
 async function api(method, path, body) {
   const opts = { method, headers: { Authorization: `Bearer ${token}` } };
@@ -168,7 +170,7 @@ const GET = (p) => api('GET', p);
 
 function reportError(err) {
   if (err instanceof AuthError) return;
-  console.error(err);
+  if (!(err instanceof InputError)) console.error(err);
   toast(err.message || String(err), 'error');
 }
 
@@ -187,8 +189,146 @@ function sourceName(id) {
   return src ? src.name : id;
 }
 
+// categoryList returns the configured categories as {name, description}, in
+// order. Older configs stored plain names.
+function categoryList() {
+  return ((cache.settings && cache.settings.categories) || [])
+    .map((c) => (typeof c === 'string' ? { name: c, description: '' } : { name: c.name || '', description: c.description || '' }))
+    .filter((c) => c.name);
+}
+
+// categories returns the configured category names, in order.
 function categories() {
-  return (cache.settings && cache.settings.categories) || [];
+  return categoryList().map((c) => c.name);
+}
+
+function engineSettings() {
+  return (cache.settings && cache.settings.engine) || {};
+}
+
+// ---------- Laya engine helpers ----------
+
+// Checkpoints laya-serve ships. Anything else is a fine-tune named in the
+// engine's LAYA_EXTRA_MODELS.
+const ENGINE_MODELS = [
+  ['english', 'english — English logs, calibrated'],
+  ['multilingual', 'multilingual — other languages, faster on CPU'],
+  ['typed-decisions', 'typed-decisions'],
+];
+const CUSTOM_MODEL = '\u0000custom';
+
+// modelPicker is a checkpoint select with a "custom…" choice that reveals a
+// text input. Stored values it doesn't know show up as custom, so they
+// survive a save. first is an optional leading [value, label] option.
+function modelPicker(value, first) {
+  value = value || '';
+  const known = [...(first ? [first[0]] : []), ...ENGINE_MODELS.map((m) => m[0])];
+  const sel = select([...(first ? [first] : []), ...ENGINE_MODELS, [CUSTOM_MODEL, 'custom…']], '', { 'aria-label': 'Checkpoint' });
+  const custom = h('input', { placeholder: 'checkpoint name from the engine\'s LAYA_EXTRA_MODELS', 'aria-label': 'Custom checkpoint name', autocomplete: 'off', spellcheck: 'false', maxlength: 64 });
+  const toggle = () => { custom.hidden = sel.value !== CUSTOM_MODEL; };
+  const set = (v) => {
+    v = v || '';
+    const isCustom = !known.includes(v);
+    sel.value = isCustom ? CUSTOM_MODEL : v;
+    custom.value = isCustom ? v : '';
+    toggle();
+  };
+  sel.addEventListener('change', () => { toggle(); if (!custom.hidden) custom.focus(); });
+  set(value);
+  return {
+    el: h('div', { class: 'model-pick' }, sel, custom),
+    set,
+    value: () => {
+      if (sel.value !== CUSTOM_MODEL) return sel.value;
+      const v = custom.value.trim();
+      if (!v) throw new InputError('Enter the custom checkpoint name, or pick a checkpoint from the list.');
+      return v;
+    },
+  };
+}
+
+function pct(p) {
+  const n = Number(p || 0) * 100;
+  if (n > 0 && n < 1) return '<1%';
+  return `${Math.round(n)}%`;
+}
+
+// topText lists label probabilities, most likely first: "db 82% · net 9%".
+function topText(probs, n = 3) {
+  return Object.entries(probs || {}).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, p]) => `${k} ${pct(p)}`).join(' · ');
+}
+
+// probBars draws the n most likely labels as bars.
+function probBars(probs, n, chosen) {
+  const entries = Object.entries(probs || {}).sort((a, b) => b[1] - a[1]).slice(0, n);
+  return h('div', { class: 'probs' }, entries.map(([k, p]) => {
+    const fill = h('div', { class: 'fill' });
+    fill.style.width = `${Math.max(0, Math.min(100, p * 100))}%`;
+    return h('div', { class: `hbar ${k === chosen ? 'chosen' : ''}` },
+      h('span', { class: 'name', title: k }, k), h('div', { class: 'track' }, fill), h('span', { class: 'n' }, pct(p)));
+  }));
+}
+
+// engineAnswer renders a POST /api/engine/classify reply: what the engine
+// chose, how sure it was, and what the rules alone decided. ev is the stored
+// event when one was asked about: its classification may already include an
+// earlier engine answer, which the reply's "rules" part does not separate.
+function engineAnswer(r, ev) {
+  if (!r.ok) return h('div', { class: 'callout bad mt' }, r.error || 'The engine did not answer.');
+  const res = r.result;
+  const rules = r.rules || {};
+  const es = engineSettings();
+  const min = Number(es.min_confidence ?? 0.6);
+  const sure = res.category_confidence >= min;
+  let rulesCat = rules.category || 'uncategorized';
+  if (ev && ev.engine && ev.engine.applied && ev.category === ev.engine.category) rulesCat = 'uncategorized';
+  let outcome;
+  if (rulesCat !== 'uncategorized') {
+    outcome = `A rule already set the category (${rulesCat}), so the rules decide.`;
+  } else if (res.category === 'uncategorized') {
+    outcome = 'The engine found no category that fits; the event stays uncategorized.';
+  } else if (!sure) {
+    outcome = `Below the ${pct(min)} confidence threshold: the event would stay uncategorized.`;
+  } else {
+    outcome = `The engine's category (${res.category}) would be used.`;
+  }
+  const notes = [];
+  if (!ev && es.min_severity && rules.severity && sevRank(rules.severity) < sevRank(es.min_severity)) {
+    notes.push(`Live events at ${rules.severity} are not sent to the engine (minimum severity: ${es.min_severity}).`);
+  }
+  const matched = rules.matched_rules && rules.matched_rules.length ? ` · matched: ${rules.matched_rules.join(', ')}` : ' · no rule matched';
+  const kv = h('div', { class: 'kv' },
+    h('div', null, 'Category'), h('div', null, h('strong', null, res.category), ` · ${pct(res.category_confidence)} sure `,
+      h('span', { class: `badge ${sure ? 'ok' : 'warn'}` }, sure ? 'above threshold' : `below ${pct(min)}`)),
+    res.severity ? [h('div', null, 'Severity'), h('div', null, sevBadge(res.severity), ` · ${pct(res.severity_confidence)} sure`,
+      res.severity_confidence >= min ? ' (would be used: no level field and no rule matched)' : ` (below ${pct(min)}: not used)`)] : null,
+    h('div', null, 'Checkpoint'), h('div', null, res.model || '—'),
+    h('div', null, 'Latency'), h('div', null, `${num(res.latency_ms)} ms`),
+    res.truncated ? [h('div', null, 'Truncated'), h('div', null, 'Yes: the event was cut to fit the model, which reads only the beginning.')] : null,
+    h('div', null, 'Rules alone'), ev
+      ? h('div', null, rulesCat, matched)
+      : h('div', null, rulesCat, ' · ', sevBadge(rules.severity), matched),
+    h('div', null, 'Outcome'), h('div', null, outcome, notes.map((n) => h('div', { class: 'muted small' }, n))));
+  return h('div', { class: 'engine-answer mt' }, kv,
+    res.probabilities && Object.keys(res.probabilities).length ? [h('div', { class: 'muted small mt' }, 'Most likely categories'), probBars(res.probabilities, 6, res.category)] : null);
+}
+
+// engineVerdict says whether an event's engine answer was used.
+function engineVerdict(ev) {
+  const e = ev.engine;
+  const min = Number(engineSettings().min_confidence ?? 0.6);
+  const catApplied = e.applied && e.category === ev.category && e.category !== 'uncategorized';
+  if (catApplied) return { cls: 'ok', text: 'applied' };
+  const below = e.category !== 'uncategorized' && e.confidence < min;
+  if (e.applied) {
+    // Only the severity was taken.
+    return { cls: 'ok', text: below ? `severity applied; category below the ${pct(min)} confidence threshold` : 'severity applied' };
+  }
+  // Rules win whatever the engine said.
+  if (ev.category !== 'uncategorized') return { cls: '', text: 'rules decided' };
+  if (below) return { cls: 'warn', text: `not applied (below the ${pct(min)} confidence threshold)` };
+  if (e.category === 'uncategorized') return { cls: '', text: 'not applied (no category fits)' };
+  return { cls: '', text: 'not applied' };
 }
 
 // ---------- Modal ----------
@@ -349,8 +489,8 @@ function renderDashboard(root, st) {
     kpi('Errors + critical (1h)', num(bad), `${num(bySev.critical || 0)} critical`, bad > 0),
     kpi('Notifications', num(n.sent), `${num(n.failed)} failed · ${num(n.throttled)} throttled`, n.failed > 0),
     kpi('Pull sources', pulls.length ? `${healthy}/${pulls.length}` : '—', pulls.length ? 'healthy' : 'none configured', healthy < pulls.length),
-    st.ai.enabled
-      ? kpi('AI classifications', num(st.ai.calls_total), `${st.ai.calls_this_hour}/${st.ai.budget_per_hour} this hour · ${num(st.ai.cache_hits)} cached`, Boolean(st.ai.last_error))
+    st.engine && st.engine.enabled
+      ? engineKpi(st.engine, kpi)
       : kpi('Pipeline queue', num(st.pipeline.queue_depth), `${num(st.pipeline.dropped)} dropped by rules`));
 
   const timeline = h('div', { class: 'card' }, h('h2', null, 'Events per minute'), timelineChart(ev.timeline));
@@ -393,6 +533,25 @@ function renderDashboard(root, st) {
       bars('By category', ev.by_category, (k) => `#/events?category=${encodeURIComponent(k)}`),
       bars('By source', ev.by_source)),
     patterns);
+}
+
+// engineKpi summarizes the Laya engine: flagged when it is not configured,
+// paused after errors, or failed in the last 10 minutes.
+function engineKpi(e, kpi) {
+  if (!e.configured) {
+    return kpi('Laya engine', 'off', e.config_error || 'not configured: set the URL in Settings', true);
+  }
+  const paused = e.paused_until && new Date(e.paused_until) > new Date();
+  const recent = e.last_error && e.last_error_at && Date.now() - new Date(e.last_error_at).getTime() < 10 * 60 * 1000;
+  const parts = [`${num(e.cache_hits)} cached`, `${num(e.applied)} applied`, `${num(e.avg_latency_ms)} ms avg`];
+  if (paused) parts.unshift(`paused until ${new Date(e.paused_until).toLocaleTimeString()}`);
+  else if (recent) parts.unshift(`error ${ago(e.last_error_at)}`);
+  const card = kpi('Laya engine calls', num(e.calls_total), parts.join(' · '), paused || recent);
+  const notes = [];
+  if (paused || recent) notes.push(`Last error: ${e.last_error}`);
+  if (e.warning) notes.push(`Warning: ${e.warning}`);
+  if (notes.length) card.title = notes.join('\n');
+  return card;
 }
 
 // timelineChart draws stacked severity bars. labels sets the axis text:
@@ -443,7 +602,7 @@ pages.events = async (main, arg, params) => {
   const more = h('button', { type: 'button', onclick: () => fetchEvents(true).catch(reportError) }, 'Load older');
 
   const sevSel = select([['', 'Any severity'], ...SEVERITIES.map((x) => [x, `≥ ${x}`])], eventFilter.min_severity);
-  const catSel = select([['', 'Any category'], ...[...categories(), 'uncategorized'].map((x) => [x, x])], eventFilter.category);
+  const catSel = select([['', 'Any category'], ...[...new Set([...categories(), 'uncategorized', eventFilter.category].filter(Boolean))].map((x) => [x, x])], eventFilter.category);
   const srcSel = select([['', 'Any source'], ...cache.sources.map((x) => [x.id, x.name])], eventFilter.source);
   const q = h('input', { type: 'search', placeholder: 'Search messages…', value: eventFilter.q });
   const liveBox = checkbox('Live', live, (v) => { live = v; });
@@ -493,7 +652,7 @@ pages.events = async (main, arg, params) => {
       tbl.append(h('tr', { class: 'clickable', onclick: () => showEvent({ id: ev.id }) },
         h('td', null, timeCell(ev.received_at)),
         h('td', null, sevBadge(ev.severity)),
-        h('td', { class: 'nowrap' }, ev.category, ev.classifier === 'ai' ? h('span', { class: 'muted small', title: 'Classified by AI' }, ' ✦') : null),
+        h('td', { class: 'nowrap' }, ev.category, ev.classifier === 'laya' ? h('span', { class: 'muted small', title: 'Classified by the Laya engine' }, ' ✦') : null),
         h('td', { class: 'nowrap' }, ev.source_name),
         h('td', { class: 'msg', title: ev.message }, ev.message, ' ', tags(ev.tags))));
     }
@@ -524,12 +683,12 @@ async function showEvent(target, opts = {}) {
   }
   await load('settings');
   const ev = data.event;
-  const aiOut = h('div');
+  const engineOut = h('div');
   const kv = h('div', { class: 'kv' });
   const row = (k, v) => { if (v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length)) kv.append(h('div', null, k), h('div', null, v)); };
   row('Severity', sevBadge(ev.severity));
   row('Category', ev.category);
-  row('Classified by', ev.classifier);
+  row('Classified by', ev.classifier === 'laya' ? 'the Laya engine' : ev.classifier);
   row('Source', ev.source_name);
   row('Level field', ev.level);
   row('Log timestamp', ev.time_source === 'none' ? '— (no timestamp in this record or before it)' : `${fmtTime(ev.timestamp)}${ev.time_source === 'inferred' ? ' (taken from the previous record)' : ''}`);
@@ -538,7 +697,15 @@ async function showEvent(target, opts = {}) {
   row('Tags', tags(ev.tags));
   row('Matched rules', (ev.matched_rules || []).join(', '));
   row('Alert routes', (data.routes || []).join(', ') || 'none');
-  row('AI summary', ev.summary);
+  if (ev.engine) {
+    const e = ev.engine;
+    const v = engineVerdict(ev);
+    row('Engine', h('div', null,
+      [e.category, pct(e.confidence), e.model, e.severity ? `severity ${e.severity}` : null].filter(Boolean).join(' · '), ' ',
+      h('span', { class: `badge ${v.cls}` }, v.text),
+      e.top && Object.keys(e.top).length ? h('div', { class: 'muted small' }, `Top: ${topText(e.top)}`) : null,
+      e.truncated ? h('div', { class: 'muted small' }, 'The message was cut to fit the model, which reads only its beginning.') : null));
+  }
   row('Fingerprint', opts.onFingerprint
     ? h('button', { type: 'button', class: 'link', onclick: () => { modal.close(); opts.onFingerprint(ev.fingerprint); } }, ev.fingerprint)
     : h('a', { href: `#/events?fingerprint=${encodeURIComponent(ev.fingerprint)}`, onclick: () => modal.close() }, ev.fingerprint));
@@ -547,18 +714,21 @@ async function showEvent(target, opts = {}) {
     h('div', { class: 'code-box' }, h('pre', null, ev.message)),
     h('h3', null, 'Classification'), kv,
     ev.fields && Object.keys(ev.fields).length ? [h('h3', null, 'Fields'), codeBox(JSON.stringify(ev.fields, null, 2))] : null,
-    aiOut);
+    engineOut);
   const actions = [];
-  // Imported events stay on this server: no AI call for uploaded content.
-  if (cache.settings.ai && cache.settings.ai.enabled && !ev.import_id) {
+  // Only live events: the API looks up event_id among live events.
+  if (engineSettings().enabled && !ev.import_id) {
     actions.push({
-      label: 'Classify with AI',
+      label: 'Ask the Laya engine',
       onClick: async () => {
-        clear(aiOut).append(h('p', { class: 'muted' }, 'Asking Claude…'));
-        const r = await api('POST', '/api/ai/test', { event_id: ev.id });
-        clear(aiOut).append(h('h3', null, 'AI classification'), r.ok
-          ? h('div', { class: 'kv' }, h('div', null, 'Category'), h('div', null, r.result.category), h('div', null, 'Severity'), h('div', null, sevBadge(r.result.severity)), h('div', null, 'Summary'), h('div', null, r.result.summary))
-          : h('div', { class: 'callout bad' }, r.error));
+        clear(engineOut).append(h('h3', null, 'Laya engine'), h('p', { class: 'muted' }, 'Asking the engine…'));
+        try {
+          const r = await api('POST', '/api/engine/classify', { event_id: ev.id });
+          clear(engineOut).append(h('h3', null, 'Laya engine (asked now)'), engineAnswer(r, ev));
+        } catch (err) {
+          clear(engineOut);
+          throw err;
+        }
         return false;
       },
     });
@@ -571,7 +741,7 @@ async function showEvent(target, opts = {}) {
 // ---------- Sources ----------
 
 pages.sources = async (main) => {
-  await load('sources', 'info');
+  await load('sources', 'info', 'settings');
   const list = h('div', { class: 'card flush' });
   append(main, pageHead('Sources', 'Where logs come from: Laya can receive them on an ingest endpoint (push) or poll an API (pull).',
     h('button', { type: 'button', class: 'primary', onclick: () => editSource(null) }, 'Add source')), list);
@@ -600,7 +770,8 @@ function renderSources(root, sources, status) {
     if (src.description) meta.unshift(h('div', { class: 'meta' }, src.description));
     root.append(h('div', { class: `list-item ${src.enabled ? '' : 'disabled-item'}` },
       h('div', { class: 'main' },
-        h('div', { class: 'title' }, src.name, h('span', { class: 'badge' }, src.type), src.enabled ? null : h('span', { class: 'badge' }, 'disabled'), tags(src.tags)),
+        h('div', { class: 'title' }, src.name, h('span', { class: 'badge' }, src.type), src.enabled ? null : h('span', { class: 'badge' }, 'disabled'),
+          src.engine_model ? h('span', { class: 'badge', title: 'Laya engine checkpoint for this source' }, `checkpoint: ${src.engine_model}`) : null, tags(src.tags)),
         meta),
       h('div', { class: 'actions' },
         src.type === 'push' ? h('button', { type: 'button', class: 'small', onclick: () => showIngest(src) }, 'Setup instructions') : null,
@@ -686,6 +857,7 @@ function editSource(src) {
     messageField: h('input', { value: src.parse.message_field || '', placeholder: 'auto: message, msg, log…' }),
     levelField: h('input', { value: src.parse.level_field || '', placeholder: 'auto: level, severity…' }),
     tsField: h('input', { value: src.parse.timestamp_field || '', placeholder: 'auto: @timestamp, timestamp, time…' }),
+    engineModel: modelPicker(src.engine_model || '', ['', `Default (${engineSettings().model || 'english'})`]),
   };
 
   const authFields = h('div');
@@ -724,6 +896,8 @@ function editSource(src) {
     h('fieldset', null, h('legend', null, 'Parsing'),
       h('div', { class: 'fields-2' }, field('Format', f.format), field('Records path', f.recordsPath, 'Dot path to the array of log records in a JSON response.')),
       h('div', { class: 'fields-3' }, field('Message field', f.messageField), field('Level field', f.levelField), field('Timestamp field', f.tsField))),
+    h('fieldset', null, h('legend', null, 'Classification'),
+      field('Laya engine checkpoint', f.engineModel.el, 'The checkpoint that classifies this source\'s events when no rule does. Pick multilingual for logs that are not in English. The engine must serve it (its LAYA_MODELS).')),
     preview);
 
   const collect = () => {
@@ -734,6 +908,7 @@ function editSource(src) {
       tags: splitList(f.tags.value),
       enabled: f.enabled.input.checked,
       type: f.type.value,
+      engine_model: f.engineModel.value(),
       parse: {
         format: f.format.value, records_path: f.recordsPath.value.trim(), message_field: f.messageField.value.trim(),
         level_field: f.levelField.value.trim(), timestamp_field: f.tsField.value.trim(),
@@ -780,7 +955,7 @@ function editSource(src) {
       if (isNew && saved.type === 'push') showIngest(saved);
     },
   });
-  openModal({ title: isNew ? 'Add source' : `Edit source "${src.name}"`, body, actions, wide: true, left: h('button', { type: 'button', onclick: () => testBtn.onClick() }, 'Test fetch') });
+  openModal({ title: isNew ? 'Add source' : `Edit source "${src.name}"`, body, actions, wide: true, left: h('button', { type: 'button', onclick: () => testBtn.onClick().catch(reportError) }, 'Test fetch') });
 }
 
 function previewTable(items) {
@@ -934,7 +1109,7 @@ function editRule(rule, fromEvent) {
   renderConds();
 
   const catIn = h('input', { value: rule.category || '', list: 'category-suggestions', placeholder: 'leave empty to not set' });
-  const catList = h('datalist', { id: 'category-suggestions' }, categories().map((x) => h('option', { value: x })));
+  const catList = h('datalist', { id: 'category-suggestions' }, categoryList().map((c) => h('option', { value: c.name }, c.description || null)));
   const sev = select([['', '— keep detected —'], ...SEVERITIES.map((x) => [x, x])], rule.severity || '');
   const sevMode = select([['set', 'set exactly'], ['at_least', 'raise to at least']], rule.severity_mode || 'set');
   const tagsIn = h('input', { value: (rule.tags || []).join(', ') });
@@ -1161,7 +1336,9 @@ function editRoute(r) {
   const name = h('input', { value: r.name, placeholder: 'e.g. Production errors to on-call' });
   const enabled = checkbox('Enabled', r.enabled);
   const minSev = select(SEVERITIES, r.min_severity);
-  const cats = [...categories(), 'uncategorized'].map((c) => ({ c, box: checkbox(c, (r.categories || []).includes(c)) }));
+  const descs = Object.fromEntries(categoryList().map((c) => [c.name, c.description]));
+  const cats = [...new Set([...categories(), 'uncategorized', ...(r.categories || [])])].map((c) => ({ c, box: checkbox(c, (r.categories || []).includes(c)) }));
+  for (const x of cats) if (descs[x.c]) x.box.el.title = descs[x.c];
   const srcs = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (r.source_ids || []).includes(x.id)) }));
   const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, (r.notifier_ids || []).includes(x.id)) }));
   const tagsIn = h('input', { value: (r.tags || []).join(', ') });
@@ -1233,56 +1410,134 @@ pages.deliveries = async (main) => {
 
 // ---------- Settings ----------
 
-const AI_MODELS = [
-  ['claude-opus-5-5', 'Claude Opus 5.5 (default)'],
-  ['claude-sonnet-5-5', 'Claude Sonnet 5.5'],
-  ['claude-haiku-5-5', 'Claude Haiku 5.5 (lowest cost)'],
-  ['claude-fable-5-1', 'Claude Fable 5.1 (most capable)'],
-];
+// The engine chooses less accurately among many options.
+const MANY_CATEGORIES = 20;
 
 pages.settings = async (main) => {
-  await load('settings', 'info');
+  await load('settings', 'info', 'sources');
   const st = cache.settings;
   const publicURL = h('input', { value: st.public_url || '', placeholder: cache.info.public_url });
-  const cats = h('textarea', { rows: 3 }, st.categories.join(', '));
-  const ai = st.ai;
-  const aiEnabled = checkbox('Use Claude to classify events the rules can\'t', ai.enabled);
-  const apiKey = secretInput(ai.api_key || '', { placeholder: '${env:ANTHROPIC_API_KEY}' });
-  const models = AI_MODELS.some((m) => m[0] === ai.model) ? AI_MODELS : [...AI_MODELS, [ai.model, ai.model]];
-  const model = select(models, ai.model);
-  const effort = select([['low', 'low (recommended for classification)'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max']], ai.effort);
-  const onlyUncat = checkbox('Only events no rule categorized', ai.only_uncategorized);
-  const minSev = select(SEVERITIES, ai.min_severity);
-  const budget = h('input', { type: 'number', min: 1, value: ai.max_calls_per_hour });
-  const aiStatus = h('div');
-  const aiTestIn = h('textarea', { rows: 3, placeholder: 'A log line to classify…' }, 'kafka consumer group rebalancing took 48213ms, lag on orders topic now 120k messages');
-  const aiTestOut = h('div');
+  const cats = categoryEditor(categoryList());
 
+  const e = st.engine || {};
+  const f = {
+    enabled: checkbox('Classify events with the Laya engine', e.enabled),
+    url: h('input', { placeholder: 'http://127.0.0.1:8000 or ${env:LAYA_ENGINE_URL}', autocomplete: 'off', spellcheck: 'false' }),
+    apiKey: secretInput('', { placeholder: '${env:LAYA_ENGINE_API_KEY}' }),
+    model: modelPicker(''),
+    minConf: h('input', { type: 'number', min: 0, max: 1, step: 0.05 }),
+    minSev: select(SEVERITIES, ''),
+    onlyUncat: checkbox('Only events no rule categorized (rules first)', false),
+    setSev: checkbox('Let the engine set severity when the log has no level', false),
+    inFlight: h('input', { type: 'number', min: 1, max: 16, step: 1 }),
+    timeout: h('input', { type: 'number', min: 1, max: 300, step: 1 }),
+  };
+  const fill = (x) => {
+    f.enabled.input.checked = Boolean(x.enabled);
+    f.url.value = x.url || '';
+    f.apiKey.value = x.api_key || '';
+    f.apiKey.dispatchEvent(new Event('input'));
+    f.model.set(x.model || 'english');
+    f.minConf.value = x.min_confidence ?? 0.6;
+    f.minSev.value = x.min_severity || 'warning';
+    f.onlyUncat.input.checked = Boolean(x.only_uncategorized);
+    f.setSev.input.checked = Boolean(x.set_severity);
+    f.inFlight.value = x.max_in_flight || 4;
+    f.timeout.value = x.timeout_seconds || 30;
+  };
+  fill(e);
+
+  const numberIn = (input, name, lo, hi, whole) => {
+    const raw = input.value.trim();
+    const v = Number(raw);
+    if (raw === '' || !Number.isFinite(v) || v < lo || v > hi || (whole && !Number.isInteger(v))) {
+      throw new InputError(`${name} must be ${whole ? 'a whole number' : 'a number'} from ${lo} to ${hi}.`);
+    }
+    return v;
+  };
+
+  const statusBox = h('div');
   const renderStatus = async () => {
     const stats = await GET('/api/stats');
-    const a = stats.ai;
-    clear(aiStatus).append(h('div', { class: 'kv' },
-      h('div', null, 'Status'), h('div', null, !a.enabled ? 'disabled' : !a.configured ? h('span', { class: 'badge bad' }, 'no API key') : h('span', { class: 'badge ok' }, 'active')),
-      h('div', null, 'Calls this hour'), h('div', null, `${a.calls_this_hour} / ${a.budget_per_hour}`),
-      h('div', null, 'Total calls'), h('div', null, `${num(a.calls_total)} (${num(a.cache_hits)} cache hits, ${num(a.cached_results)} cached patterns)`),
+    const a = stats.engine || {};
+    const p = stats.pipeline || {};
+    const paused = a.paused_until && new Date(a.paused_until) > new Date();
+    let status;
+    if (!a.enabled) status = h('span', { class: 'badge' }, 'disabled');
+    else if (!a.configured) status = h('span', { class: 'badge bad' }, a.config_error ? 'configuration error' : 'no URL');
+    else if (paused) status = h('span', { class: 'badge warn' }, 'paused after errors');
+    else status = h('span', { class: 'badge ok' }, 'active');
+    clear(statusBox).append(h('div', { class: 'kv' },
+      h('div', null, 'Status'), h('div', null, status,
+        a.config_error ? h('div', { class: 'small' }, a.config_error)
+          : a.enabled && !a.configured ? h('div', { class: 'small muted' }, 'Set the engine URL above (or LAYA_ENGINE_URL in Laya\'s environment) and save.') : null),
+      a.urls && a.urls.length ? [h('div', null, a.urls.length > 1 ? 'Engines' : 'Engine'), h('div', { class: 'mono' }, a.urls.join(', '))] : null,
+      h('div', null, 'Checkpoint'), h('div', null, a.model || '—'),
+      h('div', null, 'Requests'), h('div', null, `${num(a.calls_total)} sent · ${num(a.cache_hits)} answered from cache (${num(a.cached_results)} patterns cached)`),
+      h('div', null, 'Answers'), h('div', null, `${num(a.applied)} applied · ${num(a.low_confidence)} below the threshold · ${num(a.truncated)} truncated`),
+      h('div', null, 'Latency'), h('div', null, a.avg_latency_ms ? `${num(a.avg_latency_ms)} ms on average · ${num(a.in_flight)} in flight` : '—'),
+      h('div', null, 'Waiting'), h('div', null, `${num(p.engine_queue_depth)} queued · ${num(a.skipped)} went on without the engine (busy, paused or too slow)`),
       h('div', null, 'Errors'), h('div', null, num(a.errors)),
       a.last_error ? [h('div', null, 'Last error'), h('div', null, `${a.last_error} (${ago(a.last_error_at)})`)] : null,
-      a.paused_until && new Date(a.paused_until) > new Date() ? [h('div', null, 'Paused until'), h('div', null, fmtTime(a.paused_until))] : null));
+      a.warning ? [h('div', null, 'Warning'), h('div', null, h('span', { class: 'badge warn' }, 'categories'), ' ', a.warning)] : null,
+      paused ? [h('div', null, 'Paused until'), h('div', null, `${fmtTime(a.paused_until)}. Meanwhile events go on with the rules' result.`)] : null));
   };
 
   const save = async () => {
-    const data = {
-      public_url: publicURL.value.trim(),
-      categories: splitList(cats.value),
-      ai: {
-        enabled: aiEnabled.input.checked, api_key: apiKey.value, model: model.value, effort: effort.value,
-        only_uncategorized: onlyUncat.input.checked, min_severity: minSev.value, max_calls_per_hour: Number(budget.value) || 120,
-      },
+    const engine = {
+      ...(cache.settings.engine || {}),
+      enabled: f.enabled.input.checked,
+      url: f.url.value.trim(),
+      api_key: f.apiKey.value,
+      model: f.model.value(),
+      min_confidence: numberIn(f.minConf, 'Minimum confidence', 0, 1, false),
+      min_severity: f.minSev.value,
+      only_uncategorized: f.onlyUncat.input.checked,
+      set_severity: f.setSev.input.checked,
+      max_in_flight: numberIn(f.inFlight, 'Max requests in flight', 1, 16, true),
+      timeout_seconds: numberIn(f.timeout, 'Timeout', 1, 300, true),
     };
+    const data = { ...cache.settings, public_url: publicURL.value.trim(), categories: cats.value(), engine };
     cache.settings = await api('PUT', '/api/settings', data);
+    cats.set(categoryList());
+    fill(cache.settings.engine || {});
     toast('Settings saved');
     renderStatus().catch(reportError);
   };
+
+  const busy = async (btn, fn) => {
+    btn.disabled = true;
+    try { await fn(); } catch (err) { reportError(err); } finally { btn.disabled = false; }
+  };
+
+  const healthOut = h('div');
+  const checkBtn = h('button', {
+    type: 'button',
+    onclick: () => busy(checkBtn, async () => {
+      clear(healthOut).append(h('p', { class: 'muted' }, 'Checking…'));
+      try {
+        renderHealth(healthOut, await GET('/api/engine/health'));
+      } catch (err) { clear(healthOut); throw err; }
+    }),
+  }, 'Check connection');
+
+  const sample = h('textarea', { rows: 3, placeholder: 'A log line to classify…', 'aria-label': 'Log line to classify' },
+    'kafka consumer group rebalancing took 48213ms, lag on orders topic now 120k messages');
+  const sampleSrc = select([['', 'No source (default checkpoint)'],
+    ...cache.sources.map((x) => [x.id, x.engine_model ? `As "${x.name}" (${x.engine_model})` : `As "${x.name}"`])], '', { 'aria-label': 'Classify as source' });
+  const testOut = h('div');
+  const tryBtn = h('button', {
+    type: 'button', class: 'primary',
+    onclick: () => busy(tryBtn, async () => {
+      if (!sample.value.trim()) { toast('Enter a log line to classify.', 'error'); return; }
+      clear(testOut).append(h('p', { class: 'muted' }, 'Asking the engine…'));
+      try {
+        const r = await api('POST', '/api/engine/classify', { message: sample.value, source_id: sampleSrc.value || undefined });
+        clear(testOut).append(engineAnswer(r));
+      } catch (err) { clear(testOut); throw err; }
+      renderStatus().catch(reportError);
+    }),
+  }, 'Classify');
 
   const importFile = h('input', { type: 'file', accept: 'application/json', hidden: true });
   importFile.addEventListener('change', async () => {
@@ -1308,48 +1563,151 @@ pages.settings = async (main) => {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
 
+  const saveBtn = () => h('button', { type: 'button', class: 'primary', onclick: (ev) => busy(ev.currentTarget, save) }, 'Save settings');
+
   append(main,
-    pageHead('Settings', null, h('button', { type: 'button', class: 'primary', onclick: () => save().catch(reportError) }, 'Save settings')),
-    h('div', { class: 'grid cols-2' },
+    pageHead('Settings', null, saveBtn()),
+    h('div', { class: 'grid cols-2 top' },
+      h('div', null,
+        h('div', { class: 'card' },
+          h('h2', null, 'General'),
+          field('Public URL', publicURL, 'How users and senders reach Laya (e.g. https://laya.example.com). Used for ingest URLs and links in notifications. Defaults to LAYA_PUBLIC_URL or the address you are using now.'),
+          h('h3', null, 'Backup'),
+          h('p', { class: 'small muted' }, 'Export the configuration as JSON (secrets masked unless included), or import a file to replace it — useful for promoting config between environments.'),
+          h('div', { class: 'row' },
+            h('button', { type: 'button', onclick: () => exportCfg(false).catch(reportError) }, 'Export'),
+            h('button', { type: 'button', onclick: () => exportCfg(true).catch(reportError) }, 'Export with secrets'),
+            h('button', { type: 'button', onclick: () => importFile.click() }, 'Import…'), importFile)),
+        h('div', { class: 'card mt' },
+          h('h2', null, 'Categories'),
+          h('p', { class: 'small muted' }, 'Rules set categories by name, and alert routes and filters use them. The Laya engine reads each description to decide where an event belongs, so say in plain words what the category covers. The order is kept: it is the order the engine sees and editors show. Events nothing categorizes are "uncategorized".'),
+          cats.el)),
       h('div', { class: 'card' },
-        h('h2', null, 'General'),
-        field('Public URL', publicURL, 'How users and senders reach Laya (e.g. https://laya.example.com). Used for ingest URLs and links in notifications. Defaults to LAYA_PUBLIC_URL or the address you are using now.'),
-        field('Categories', cats, 'Comma-separated. Offered in rule and route editors and used as the allowed answers for AI classification.'),
-        h('h3', null, 'Backup'),
-        h('p', { class: 'small muted' }, 'Export the configuration as JSON (secrets masked unless included), or import a file to replace it — useful for promoting config between environments.'),
-        h('div', { class: 'row' },
-          h('button', { type: 'button', onclick: () => exportCfg(false).catch(reportError) }, 'Export'),
-          h('button', { type: 'button', onclick: () => exportCfg(true).catch(reportError) }, 'Export with secrets'),
-          h('button', { type: 'button', onclick: () => importFile.click() }, 'Import…'), importFile)),
-      h('div', { class: 'card' },
-        h('h2', null, 'AI classification (optional)'),
-        h('p', { class: 'small muted' }, 'Sends qualifying log events to the Anthropic API for a category, severity and one-line summary. Results are cached per fingerprint for 24h, so repeats of the same problem cost one call. Rules always win over AI.'),
-        aiEnabled.el,
+        h('h2', null, 'Laya engine'),
+        h('p', { class: 'small muted' }, 'Rules run first. The Laya engine (laya-serve) classifies what they leave: it picks one of the categories by its description and, when the log has no level, judges the severity. It is asked once per message pattern and repeats reuse the answer. If it is down, slow or unsure, events go on with the rules\' result.'),
+        f.enabled.el,
         h('div', { class: 'mt' }),
-        field('Anthropic API key', apiKey, 'Prefer ${env:ANTHROPIC_API_KEY} and put the key in the nomad/jobs/laya Nomad Variable.'),
-        h('div', { class: 'fields-2' }, field('Model', model), field('Effort', effort)),
-        h('div', { class: 'fields-2' }, field('Minimum severity', minSev), field('Max calls per hour', budget)),
-        onlyUncat.el,
-        h('h3', null, 'Status'), aiStatus,
-        h('h3', null, 'Try it'), aiTestIn,
-        h('div', { class: 'row mt' }, h('button', {
-          type: 'button', class: 'small',
-          onclick: async (e) => {
-            const btn = e.currentTarget;
-            btn.disabled = true;
-            clear(aiTestOut).append(h('p', { class: 'muted' }, 'Asking Claude… (save settings first if you changed them)'));
-            try {
-              const r = await api('POST', '/api/ai/test', { message: aiTestIn.value });
-              clear(aiTestOut).append(r.ok
-                ? h('div', { class: 'kv mt' }, h('div', null, 'Category'), h('div', null, r.result.category), h('div', null, 'Severity'), h('div', null, sevBadge(r.result.severity)), h('div', null, 'Summary'), h('div', null, r.result.summary))
-                : h('div', { class: 'callout bad mt' }, r.error));
-              renderStatus().catch(reportError);
-            } catch (err) { clear(aiTestOut); reportError(err); } finally { btn.disabled = false; }
-          },
-        }, 'Classify sample')),
-        aiTestOut)));
+        field('Engine URL', f.url, 'Base URL of laya-serve. Several URLs, comma-separated, share the load and fail over. ${env:NAME} reads the value from Laya\'s environment.'),
+        field('API key', f.apiKey, 'The engine\'s LAYA_API_KEY, if it has one. Prefer ${env:LAYA_ENGINE_API_KEY} and keep the key in a Nomad Variable.'),
+        field('Checkpoint', f.model.el, 'english reads English logs and is the best calibrated; multilingual handles other languages and is faster on CPU. The engine must serve it (its LAYA_MODELS). Sources can pick their own.'),
+        h('div', { class: 'fields-2' },
+          field('Minimum confidence', f.minConf, 'How sure the engine must be (0–1) before its category or severity is used. Below it, the rules\' result stands.'),
+          field('Minimum severity', f.minSev, 'Less severe events are not sent to the engine.')),
+        h('div', { class: 'checks' }, f.onlyUncat.el, f.setSev.el),
+        h('div', { class: 'fields-2 mt' },
+          field('Max requests in flight', f.inFlight, 'Concurrent requests across all URLs (up to 16). Each engine works on one at a time, so raise it when you run several.'),
+          field('Timeout (seconds)', f.timeout, 'Events wait at most this long for the engine, then go on with the rules\' result.')),
+        h('h3', null, 'Status'), statusBox,
+        h('h3', null, 'Connection'),
+        h('div', { class: 'row' }, checkBtn, h('span', { class: 'small muted' }, 'Uses the saved settings.')),
+        healthOut,
+        h('h3', null, 'Try a log line'),
+        sample,
+        h('div', { class: 'row mt' }, sampleSrc, h('span', { class: 'spacer' }), tryBtn),
+        h('p', { class: 'small muted' }, 'Asks the engine now with the saved settings, and shows what the rules alone decide. Nothing is stored.'),
+        testOut)),
+    h('div', { class: 'row mt' }, h('span', { class: 'spacer' }), saveBtn()));
   await renderStatus();
 };
+
+// categoryEditor edits the ordered list of {name, description}.
+function categoryEditor(initial) {
+  let cats = initial.map((c) => ({ name: c.name, description: c.description || '' }));
+  const list = h('div', { class: 'cat-list' });
+  const note = h('div', { class: 'cat-note' });
+  const addBtn = h('button', {
+    type: 'button', class: 'small',
+    onclick: () => { cats.push({ name: '', description: '' }); render({ index: cats.length - 1, part: 'name' }); },
+  }, '+ Add category');
+
+  // focus: {index, part} of the control to focus after re-rendering.
+  const render = (focus) => {
+    clear(list);
+    const controls = [];
+    cats.forEach((c, i) => {
+      const move = (d, part) => {
+        [cats[i], cats[i + d]] = [cats[i + d], cats[i]];
+        render({ index: i + d, part });
+      };
+      const ctl = {
+        name: h('input', { value: c.name, placeholder: 'name', maxlength: 64, autocomplete: 'off', spellcheck: 'false', 'aria-label': `Category ${i + 1} name`, oninput: (e) => { c.name = e.target.value; } }),
+        desc: h('input', { class: 'cat-desc', value: c.description, title: c.description || null, placeholder: 'what belongs here, in plain words', maxlength: 300, 'aria-label': `Category ${i + 1} description`, oninput: (e) => { c.description = e.target.value; e.target.title = e.target.value; } }),
+        up: h('button', { type: 'button', disabled: i === 0, 'aria-label': 'Move up', title: 'Move up', onclick: () => move(-1, i - 1 === 0 ? 'down' : 'up') }, '▲'),
+        down: h('button', { type: 'button', disabled: i === cats.length - 1, 'aria-label': 'Move down', title: 'Move down', onclick: () => move(1, i + 1 === cats.length - 1 ? 'up' : 'down') }, '▼'),
+        remove: h('button', { type: 'button', class: 'small', 'aria-label': 'Remove category', title: 'Remove', onclick: () => { cats.splice(i, 1); render({ index: Math.min(i, cats.length - 1), part: 'remove' }); } }, '✕'),
+      };
+      controls.push(ctl);
+      list.append(h('div', { class: 'cat-row' }, h('div', { class: 'order-btns' }, ctl.up, ctl.down), ctl.name, ctl.desc, ctl.remove));
+    });
+    if (!cats.length) list.append(h('p', { class: 'muted small' }, 'No categories: events stay "uncategorized" unless a rule sets one, and the engine only judges severity.'));
+    clear(note);
+    if (cats.length > MANY_CATEGORIES) {
+      note.append(h('div', { class: 'callout warn' }, `${cats.length} categories. The engine is less accurate choosing among many options: consider merging some (more than ${MANY_CATEGORIES} is not recommended).`));
+    }
+    if (focus) {
+      const el = focus.index >= 0 && controls[focus.index] ? controls[focus.index][focus.part] : addBtn;
+      (el && !el.disabled ? el : addBtn).focus();
+    }
+  };
+  render();
+
+  return {
+    el: h('div', null, list, h('div', { class: 'row' }, addBtn), note),
+    set: (next) => { cats = next.map((c) => ({ name: c.name, description: c.description || '' })); render(); },
+    // value returns the list to save, or throws on a row that can't be saved.
+    value: () => {
+      const out = [];
+      for (const c of cats) {
+        const name = c.name.trim().toLowerCase();
+        const description = c.description.trim();
+        if (!name && !description) continue;
+        if (!name) throw new InputError(`The category described as "${description.slice(0, 40)}" needs a name.`);
+        if (name === 'uncategorized') throw new InputError('"uncategorized" is built in (events nothing categorizes get it): remove that row.');
+        if (out.some((x) => x.name === name)) throw new InputError(`The category "${name}" is listed twice.`);
+        out.push({ name, description });
+      }
+      return out;
+    },
+  };
+}
+
+// renderHealth shows GET /api/engine/health: each engine's reachability,
+// what it has loaded, and whether the configured checkpoint is resident.
+function renderHealth(out, r) {
+  clear(out);
+  if (!r.endpoints || !r.endpoints.length) {
+    out.append(h('div', { class: 'callout bad mt' }, r.error || 'No engine URL is configured.'));
+    return;
+  }
+  const model = r.model || engineSettings().model;
+  const others = [...new Set((cache.sources || []).map((x) => x.engine_model).filter((m) => m && m !== model))];
+  out.append(h('div', { class: `callout ${r.ok ? 'ok' : 'bad'} mt` }, r.ok
+    ? `Connected: ${r.endpoints.length > 1 ? 'every engine has' : 'the engine has'} ${model} loaded.`
+    : 'Not ready: see below.'));
+  for (const ep of r.endpoints) {
+    const kv = h('div', { class: 'kv' });
+    const row = (k, v) => kv.append(h('div', null, k), h('div', null, v));
+    const loadedBadge = (yes) => (yes ? h('span', { class: 'badge ok' }, 'loaded')
+      : h('span', null, h('span', { class: 'badge warn' }, 'not loaded'), ' The first request loads it: 20 s or more, about 2 GB of memory. Add it to the engine\'s LAYA_MODELS.'));
+    if (!ep.ok) {
+      row('Error', ep.error || 'unreachable');
+    } else if (ep.error) {
+      row('Problem', ep.error);
+    } else if (!(ep.loaded && ep.loaded.length) && !ep.device) {
+      row('Problem', 'The engine answers, but shows its checkpoints only to callers with its API key: check the API key.');
+    } else {
+      row('Loaded', (ep.loaded || []).join(', ') || 'none');
+      row('Device', ep.device || '—');
+      row(model, loadedBadge(ep.model_loaded));
+      if (ep.revision) row('Revision', h('span', { class: 'mono', title: ep.revision }, ep.revision.slice(0, 12)));
+      for (const m of others) row(`${m} (a source's)`, loadedBadge((ep.loaded || []).includes(m)));
+    }
+    out.append(h('div', { class: 'endpoint' },
+      h('div', { class: 'row' }, h('span', { class: `badge ${!ep.ok ? 'bad' : ep.error ? 'warn' : 'ok'}` }, ep.ok ? 'reachable' : 'error'),
+        h('span', { class: 'mono url' }, ep.url), h('span', { class: 'spacer' }), h('span', { class: 'muted small' }, `${num(ep.latency_ms)} ms`)),
+      kv));
+  }
+}
 
 // ---------- Log files ----------
 
@@ -1379,7 +1737,7 @@ function pumpUploads() {
   uploading = true;
   up.state = 'uploading';
   const q = new URLSearchParams({ id: up.id, name: up.file.name });
-  for (const k of ['source', 'format', 'tz']) if (up.opts[k]) q.set(k, up.opts[k]);
+  for (const k of ['source', 'format', 'tz', 'engine']) if (up.opts[k]) q.set(k, up.opts[k]);
   const xhr = new XMLHttpRequest();
   up.xhr = xhr;
   xhr.open('POST', `/api/imports?${q}`);
@@ -1474,6 +1832,7 @@ pages.files = async (main, arg, params) => {
     ? h('button', { type: 'button', class: 'link small', onclick: () => { tzIn.value = browser; } }, `Use ${browser}`) : null;
   const picker = h('input', { type: 'file', multiple: true, hidden: true });
   const msg = h('div');
+  const useEngine = checkbox('Ask the Laya engine about patterns no rule categorizes', false);
 
   const start = (fileList) => {
     clear(msg);
@@ -1485,7 +1844,7 @@ pages.files = async (main, arg, params) => {
     }
     const ok = files.filter((f) => !tooBig.includes(f));
     if (!ok.length) return;
-    const opts = { source: srcSel.value, format: fmtSel.value, tz: tzIn.value.trim() || 'UTC' };
+    const opts = { source: srcSel.value, format: fmtSel.value, tz: tzIn.value.trim() || 'UTC', engine: useEngine.input.checked ? '1' : '' };
     const ids = ok.map((f) => queueUpload(f, opts));
     location.hash = `#/files/${ids[0]}`;
   };
@@ -1511,6 +1870,8 @@ pages.files = async (main, arg, params) => {
         field('Parse as', srcSel, 'A source applies its parsing settings and tags.'),
         field('Format', fmtSel),
         h('div', { class: 'field' }, h('label', null, 'Time zone'), tzIn, tzList, h('div', { class: 'help' }, 'For timestamps without a zone. ', tzBrowser))),
+      engineSettings().enabled ? h('div', { class: 'field' }, useEngine.el,
+        h('div', { class: 'help' }, `One request per pattern, at most ${num(lim.engine_calls_per_file || 100)} per file and only while no live event is waiting for the engine, so it is slower. Without it, only answers the engine already gave for live events are used.`)) : null,
       h('p', { class: 'small muted' }, 'Very large files are faster with the command line: ', h('code', null, 'laya analyze -config config.json app.log'), '.')),
     list);
 
@@ -1657,7 +2018,8 @@ function renderReport(root, rep, filter) {
     kpi('Errors + critical', num(bad), `${num(bySev.critical || 0)} critical`, bad > 0),
     kpi('Time span', rep.first_timestamp ? fmtSpan(new Date(rep.last_timestamp) - new Date(rep.first_timestamp)) : '—',
       rep.first_timestamp ? `${fmtIn(rep.first_timestamp, tz)} → ${fmtIn(rep.last_timestamp, tz)} (${tz})` : 'no timestamps recognised'),
-    kpi('Patterns', num(rep.distinct_patterns), rep.other_pattern_events ? `+${num(rep.other_pattern_events)} events in rare patterns` : 'distinct messages')));
+    kpi('Patterns', num(rep.distinct_patterns), rep.other_pattern_events ? `+${num(rep.other_pattern_events)} events in rare patterns` : 'distinct messages'),
+    rep.engine_events ? kpi('Laya engine', num(rep.engine_events), `events answered · ${num(rep.engine_applied)} applied`) : null));
 
   const tl = rep.timeline;
   if (tl && tl.points && tl.points.length) {

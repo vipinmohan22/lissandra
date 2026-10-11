@@ -23,19 +23,19 @@ import (
 type Server struct {
 	*httptest.Server
 
-	Key     string   // required bearer key, if set
-	Models  []string // checkpoints it serves; others route to Models[0]
-	Decide  func(state string, q Question) Answer
-	Busy    atomic.Int32 // answer 503 to this many requests
-	Fail    atomic.Int32 // answer 500 to this many requests
+	Key    string   // required bearer key, if set
+	Models []string // checkpoints it serves; others route to Models[0]
+	Decide func(state string, q Question) Answer
+	Busy   atomic.Int32 // answer 503 to this many requests
+	Fail   atomic.Int32 // answer 500 to this many requests
 	// Collapse makes choice questions with more options than this report
 	// indistinguishable options in usage.options, as laya-serve does when
 	// options overflow its token budget.
 	Collapse int
-	Calls   atomic.Int32
-	mu      sync.Mutex
-	Last    Request // the last decision request
-	Headers http.Header
+	Calls    atomic.Int32
+	mu       sync.Mutex
+	Last     Request // the last decision request
+	Headers  http.Header
 }
 
 // Request is what the fake received.
