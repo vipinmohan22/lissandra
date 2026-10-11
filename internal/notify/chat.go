@@ -112,7 +112,7 @@ func (n *slack) Send(ctx context.Context, m *Message) error {
 	}
 	var ctxParts []string
 	for _, f := range m.Facts() {
-		if f.Name == "Fingerprint" || f.Name == "AI summary" {
+		if f.Name == "Fingerprint" {
 			continue
 		}
 		ctxParts = append(ctxParts, fmt.Sprintf("*%s:* %s", f.Name, esc(f.Value)))
@@ -120,9 +120,6 @@ func (n *slack) Send(ctx context.Context, m *Message) error {
 	blocks := []map[string]any{
 		{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": head}},
 		{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": "```" + esc(strings.ReplaceAll(m.Excerpt(2800), "```", "'''")) + "```"}},
-	}
-	if m.Event.Summary != "" {
-		blocks = append(blocks, map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": "*AI summary:* " + esc(m.Event.Summary)}})
 	}
 	blocks = append(blocks, map[string]any{"type": "context", "elements": []map[string]any{{"type": "mrkdwn", "text": model.Truncate(strings.Join(ctxParts, "  |  "), 2900)}}})
 	if m.Link != "" {

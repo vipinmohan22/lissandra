@@ -135,36 +135,109 @@ func Normalize(c *Config) error {
 		}
 	}
 	if st.Categories == nil {
-		st.Categories = []string{}
+		st.Categories = []Category{}
 	}
 	cats := st.Categories[:0]
 	for _, cat := range st.Categories {
-		cat = strings.ToLower(strings.TrimSpace(cat))
-		if cat != "" && !slices.Contains(cats, cat) {
-			cats = append(cats, cat)
+		cat.Name = strings.ToLower(strings.TrimSpace(cat.Name))
+		cat.Description = strings.TrimSpace(cat.Description)
+		if cat.Name == "" || cat.Name == model.Uncategorized || slices.ContainsFunc(cats, func(c Category) bool { return c.Name == cat.Name }) {
+			continue
 		}
+		if len(cat.Name) > 64 || len(cat.Description) > 300 {
+			return fmt.Errorf("settings: category %q: names are limited to 64 characters and descriptions to 300", model.Truncate(cat.Name, 64))
+		}
+		cats = append(cats, cat)
 	}
 	st.Categories = cats
-	ai := &st.AI
-	if ai.Model == "" {
-		ai.Model = DefaultAIModel
+	if len(cats) > MaxCategories {
+		return fmt.Errorf("settings: at most %d categories", MaxCategories)
 	}
-	if ai.Effort == "" {
-		ai.Effort = "low"
+	return normalizeEngine(&st.Engine)
+}
+
+// MaxCategories bounds the category list: the engine answers a choice over
+// all of them (plus "other") and accepts at most 100 options.
+const MaxCategories = 50
+
+var engineModelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+
+// engineModelAliases maps laya-serve's aliases to the checkpoint names it
+// reports in routing.model, so answers can be checked against the request.
+var engineModelAliases = map[string]string{
+	"en": "english", "laya": "english", "default": "english",
+	"multi": "multilingual", "ml": "multilingual",
+	"typed": "typed-decisions", "typed_decisions": "typed-decisions", "decisions": "typed-decisions",
+}
+
+// NormalizeEngineModel trims name, resolves laya-serve aliases and checks
+// it is a plain checkpoint name ("" stays "").
+func NormalizeEngineModel(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", nil
 	}
-	if !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, ai.Effort) {
-		return fmt.Errorf("settings: invalid AI effort %q", ai.Effort)
+	if a, ok := engineModelAliases[strings.ToLower(name)]; ok {
+		return a, nil
 	}
-	if ai.MinSeverity == "" {
-		ai.MinSeverity = model.SeverityWarning
+	if !engineModelName.MatchString(name) {
+		return "", fmt.Errorf("invalid engine checkpoint %q: use english, multilingual, typed-decisions or a name from the engine's LAYA_EXTRA_MODELS", name)
 	}
-	if !ai.MinSeverity.Valid() {
-		return fmt.Errorf("settings: invalid AI min_severity %q", ai.MinSeverity)
+	return name, nil
+}
+
+func normalizeEngine(e *EngineSettings) error {
+	e.URL = strings.TrimSpace(e.URL)
+	if !envRef.MatchString(e.URL) {
+		if _, err := ParseEngineURLs(e.URL); err != nil {
+			return fmt.Errorf("settings: engine url: %w", err)
+		}
 	}
-	if ai.MaxCallsPerHour <= 0 {
-		ai.MaxCallsPerHour = 120
+	m, err := NormalizeEngineModel(e.Model)
+	if err != nil {
+		return fmt.Errorf("settings: %w", err)
 	}
+	if m == "" {
+		m = DefaultEngineModel
+	}
+	e.Model = m
+	if e.MinSeverity == "" {
+		e.MinSeverity = model.SeverityWarning
+	}
+	if !e.MinSeverity.Valid() {
+		return fmt.Errorf("settings: invalid engine min_severity %q", e.MinSeverity)
+	}
+	if e.MinConfidence < 0 || e.MinConfidence > 1 {
+		return fmt.Errorf("settings: engine min_confidence must be between 0 and 1")
+	}
+	if e.MaxInFlight <= 0 {
+		e.MaxInFlight = 4
+	}
+	e.MaxInFlight = min(e.MaxInFlight, 16) // laya-serve answers 503 past 16
+	if e.TimeoutSeconds <= 0 {
+		e.TimeoutSeconds = 30
+	}
+	e.TimeoutSeconds = min(e.TimeoutSeconds, 300)
 	return nil
+}
+
+// ParseEngineURLs splits a comma-separated list of laya-serve base URLs
+// (after ${env:...} expansion). An empty list is valid: the engine is then
+// not configured.
+func ParseEngineURLs(list string) ([]string, error) {
+	var out []string
+	for _, raw := range strings.Split(list, ",") {
+		raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("%q is not an http(s) base URL", raw)
+		}
+		out = append(out, raw)
+	}
+	return out, nil
 }
 
 func normalizeSource(s *Source, now time.Time) error {
@@ -172,6 +245,11 @@ func normalizeSource(s *Source, now time.Time) error {
 	if s.Name == "" {
 		return fmt.Errorf("name is required")
 	}
+	m, err := NormalizeEngineModel(s.EngineModel)
+	if err != nil {
+		return err
+	}
+	s.EngineModel = m
 	if s.CreatedAt.IsZero() {
 		s.CreatedAt = now
 	}

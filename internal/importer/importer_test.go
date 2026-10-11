@@ -454,9 +454,9 @@ func TestRegistryByteBudget(t *testing.T) {
 
 func TestRetainedStringsOwnTheirBytes(t *testing.T) {
 	big := strings.Repeat("e", 1<<20)
-	ev := model.Event{Message: big[:20], Level: big[:5], Summary: big[:7]}
+	ev := model.Event{Message: big[:20], Level: big[:5]}
 	c := compact(ev)
-	for name, s := range map[string]string{"message": c.Message, "level": c.Level, "summary": c.Summary} {
+	for name, s := range map[string]string{"message": c.Message, "level": c.Level} {
 		if unsafe.StringData(s) == unsafe.StringData(big) {
 			t.Errorf("compacted %s still points into the original record", name)
 		}

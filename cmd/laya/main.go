@@ -17,8 +17,8 @@ import (
 	"time"
 	_ "time/tzdata" // time zones for log file analysis, even on minimal images
 
-	"github.com/vipinmohan22/layalogs/internal/ai"
 	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/engine"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/model"
@@ -97,8 +97,8 @@ func run() error {
 
 	store := events.NewStore(envInt("LAYA_EVENT_BUFFER", 5000))
 	dispatcher := notify.NewDispatcher(log)
-	aic := ai.New(log)
-	pipe := pipeline.New(envInt("LAYA_QUEUE_SIZE", 10000), store, dispatcher, aic)
+	laya := engine.New(log)
+	pipe := pipeline.New(envInt("LAYA_QUEUE_SIZE", 10000), store, dispatcher, laya)
 	pollers := poller.NewManager(ctx, log, pipe.SubmitWait)
 
 	cfg.Subscribe(func(c *config.Config) {
@@ -107,14 +107,14 @@ func run() error {
 		}
 		pipe.Configure(c)
 		dispatcher.Configure(c)
-		aic.Configure(c.Settings)
+		laya.Configure(c)
 		pollers.Configure(c)
 		log.Info("configuration applied", "version", c.Version, "sources", len(c.Sources), "rules", len(c.Rules), "notifiers", len(c.Notifiers), "routes", len(c.Routes))
 	})
 
 	done := make(chan struct{}, 2)
 	go func() { dispatcher.Run(ctx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
-	go func() { pipe.Run(ctx, envInt("LAYA_WORKERS", 4), envInt("LAYA_AI_WORKERS", 2)); done <- struct{}{} }()
+	go func() { pipe.Run(ctx, envInt("LAYA_WORKERS", 4), envInt("LAYA_ENGINE_WORKERS", 16)); done <- struct{}{} }()
 
 	importMemory := int64(envInt("LAYA_IMPORT_MEMORY_MB", 64)) << 20
 	imports := importer.NewRegistry(importer.RegistryConfig{
@@ -130,7 +130,7 @@ func run() error {
 		MaxIngestBytes: int64(envInt("LAYA_MAX_INGEST_BYTES", 10<<20)),
 		MaxImportBytes: int64(envInt("LAYA_MAX_IMPORT_BYTES", 100<<20)),
 		UI:             web.FS(),
-	}, log, cfg, store, pipe, dispatcher, aic, pollers, imports)
+	}, log, cfg, store, pipe, dispatcher, laya, pollers, imports)
 
 	httpSrv := &http.Server{
 		Addr:              listen,

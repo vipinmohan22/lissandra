@@ -16,8 +16,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/ai"
 	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/engine"
+	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/notify"
@@ -52,10 +53,10 @@ func newEnvWith(t *testing.T, mutate func(*Options)) *env {
 	t.Cleanup(cancel)
 	store := events.NewStore(1000)
 	d := notify.NewDispatcher(log)
-	a := ai.New(log)
+	a := engine.New(log)
 	p := pipeline.New(100, store, d, a)
 	pm := poller.NewManager(ctx, log, p.SubmitWait)
-	cfg.Subscribe(func(c *config.Config) { p.Configure(c); d.Configure(c); a.Configure(c.Settings); pm.Configure(c) })
+	cfg.Subscribe(func(c *config.Config) { p.Configure(c); d.Configure(c); a.Configure(c); pm.Configure(c) })
 	go d.Run(ctx, 1)
 	go p.Run(ctx, 1, 1)
 	ui := fstest.MapFS{"index.html": {Data: []byte("<html>laya</html>")}}
@@ -230,13 +231,17 @@ func TestSecretsAreMaskedAndPreserved(t *testing.T) {
 	}
 
 	var st config.Settings
-	e.admin("PUT", "/api/settings", map[string]any{"categories": []string{"x"}, "ai": map[string]any{"api_key": "sk-live-123"}}, &st)
-	if st.AI.APIKey != config.Mask {
-		t.Errorf("settings response leaks key: %q", st.AI.APIKey)
+	e.admin("PUT", "/api/settings", map[string]any{"categories": []string{"x"}, "engine": map[string]any{"api_key": "sk-live-123"}}, &st)
+	if st.Engine.APIKey != config.Mask {
+		t.Errorf("settings response leaks key: %q", st.Engine.APIKey)
 	}
-	e.admin("PUT", "/api/settings", map[string]any{"categories": []string{"x", "y"}, "ai": map[string]any{"api_key": config.Mask}}, nil)
-	if got := e.cfg.Get().Settings.AI.APIKey; got != "sk-live-123" {
-		t.Errorf("masked key not preserved: %q", got)
+	e.admin("PUT", "/api/settings", map[string]any{"categories": []map[string]string{{"name": "x", "description": "x things"}, {"name": "y"}}, "engine": map[string]any{"api_key": config.Mask}}, nil)
+	got := e.cfg.Get().Settings
+	if got.Engine.APIKey != "sk-live-123" {
+		t.Errorf("masked key not preserved: %q", got.Engine.APIKey)
+	}
+	if len(got.Categories) != 2 || got.Categories[0] != (config.Category{Name: "x", Description: "x things"}) {
+		t.Errorf("categories: %+v", got.Categories)
 	}
 }
 
@@ -304,5 +309,49 @@ func TestSourceLifecycle(t *testing.T) {
 	}
 	if code := e.admin("DELETE", "/api/sources/"+s.ID, nil, nil); code != 204 {
 		t.Errorf("delete: %d", code)
+	}
+}
+
+func TestEngineEndpoints(t *testing.T) {
+	fake := enginetest.New()
+	defer fake.Close()
+	e := newEnv(t)
+	var st config.Settings
+	e.admin("GET", "/api/settings", nil, &st)
+	st.Engine.URL = fake.URL
+	if code := e.admin("PUT", "/api/settings", st, nil); code != 200 {
+		t.Fatalf("settings: %d", code)
+	}
+	var health struct {
+		OK        bool                    `json:"ok"`
+		Model     string                  `json:"model"`
+		Endpoints []engine.EndpointHealth `json:"endpoints"`
+	}
+	e.admin("GET", "/api/engine/health", nil, &health)
+	if !health.OK || health.Model != "english" || len(health.Endpoints) != 1 || !health.Endpoints[0].ModelLoaded {
+		t.Errorf("health %+v", health)
+	}
+	var res struct {
+		OK     bool          `json:"ok"`
+		Error  string        `json:"error"`
+		Result engine.Result `json:"result"`
+	}
+	e.admin("POST", "/api/engine/classify", map[string]string{"message": "ERROR the database replica is lagging"}, &res)
+	if !res.OK || res.Result.Category != "database" || res.Result.Model != "english" {
+		t.Errorf("classify %+v", res)
+	}
+	if code := e.admin("POST", "/api/engine/classify", map[string]string{}, nil); code != 400 {
+		t.Errorf("empty request: %d", code)
+	}
+	var stats struct {
+		Engine engine.Status `json:"engine"`
+	}
+	e.admin("GET", "/api/stats", nil, &stats)
+	if !stats.Engine.Configured || stats.Engine.Calls != 1 {
+		t.Errorf("stats %+v", stats.Engine)
+	}
+	_, metrics := e.do("GET", "/metrics", nil, map[string]string{"Authorization": "Bearer " + adminToken})
+	if !bytes.Contains(metrics, []byte("laya_engine_calls_total 1")) {
+		t.Errorf("metrics missing engine counters")
 	}
 }

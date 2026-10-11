@@ -26,7 +26,7 @@ func init() {
 			{Key: "headers", Label: "Headers", Type: "textarea", Secret: true, Placeholder: "Authorization: Bearer ${env:HOOK_TOKEN}\nX-Team: platform", Help: "One \"Name: value\" per line."},
 			{Key: "content_type", Label: "Content type", Type: "text", Default: "application/json"},
 			{Key: "body_template", Label: "Body template", Type: "textarea", Placeholder: `{"text": {{ json .Title }}, "severity": {{ json .Event.Severity }}}`,
-				Help: "Fields: .Title .Text .Link .RouteName .Suppressed .Test .Event (.Message .Severity .Category .SourceName .Tags .Summary .Fingerprint .Fields …) and .Payload. Functions: json, upper, lower, truncate."},
+				Help: "Fields: .Title .Text .Link .RouteName .Suppressed .Test .Event (.Message .Severity .Category .SourceName .Tags .Engine .Fingerprint .Fields …) and .Payload. Functions: json, upper, lower, truncate."},
 		},
 		New: newWebhook,
 	})

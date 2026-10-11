@@ -39,9 +39,15 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf(`{status="throttled"} %d`, d.Throttled.Load()))
 	metric("laya_notification_queue_depth", "gauge", "Notifications waiting for delivery.", fmt.Sprintf(" %d", d.QueueDepth()))
 
-	metric("laya_ai_calls_total", "counter", "Claude API classification calls.", fmt.Sprintf(" %d", s.ai.Calls.Load()))
-	metric("laya_ai_errors_total", "counter", "Failed Claude API calls.", fmt.Sprintf(" %d", s.ai.Errors.Load()))
-	metric("laya_ai_cache_hits_total", "counter", "AI classifications served from cache.", fmt.Sprintf(" %d", s.ai.CacheHits.Load()))
+	e := s.laya
+	metric("laya_engine_calls_total", "counter", "Classification requests to the Laya engine.", fmt.Sprintf(" %d", e.Calls.Load()))
+	metric("laya_engine_errors_total", "counter", "Failed Laya engine requests.", fmt.Sprintf(" %d", e.Errors.Load()))
+	metric("laya_engine_cache_hits_total", "counter", "Laya engine answers served from the per-pattern cache.", fmt.Sprintf(" %d", e.CacheHits.Load()))
+	metric("laya_engine_applied_total", "counter", "Laya engine answers that set a category or severity.", fmt.Sprintf(" %d", e.Applied.Load()))
+	metric("laya_engine_low_confidence_total", "counter", "Laya engine answers below the confidence threshold.", fmt.Sprintf(" %d", e.LowConfidence.Load()))
+	metric("laya_engine_skipped_total", "counter", "Eligible events not sent to the Laya engine (busy, paused or waited too long).", fmt.Sprintf(" %d", e.Skipped.Load()))
+	metric("laya_engine_queue_depth", "gauge", "Events waiting for the Laya engine.", fmt.Sprintf(" %d", s.pipeline.EngineQueueDepth()))
+	metric("laya_engine_latency_avg_ms", "gauge", "Average Laya engine round trip.", fmt.Sprintf(" %d", e.Status().AvgLatencyMs))
 
 	metric("laya_imports_total", "counter", "Log file analyses by outcome.",
 		fmt.Sprintf(`{status="done"} %d`, s.imports.Succeeded.Load()),

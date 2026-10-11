@@ -78,7 +78,11 @@ func TestSeedFile(t *testing.T) {
 	if len(c.Sources) != 1 || c.Sources[0].Name != "from-seed" || c.Sources[0].IngestToken == "" {
 		t.Errorf("seed not applied: %+v", c.Sources)
 	}
-	if strings.Join(c.Settings.Categories, ",") != "a,b" {
+	var names []string
+	for _, cat := range c.Settings.Categories {
+		names = append(names, cat.Name)
+	}
+	if strings.Join(names, ",") != "a,b" {
 		t.Errorf("categories not normalized: %v", c.Settings.Categories)
 	}
 }

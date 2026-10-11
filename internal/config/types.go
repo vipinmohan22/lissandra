@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/vipinmohan22/layalogs/internal/model"
@@ -16,15 +17,18 @@ const (
 
 // Source is a place logs come from.
 type Source struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	Enabled     bool      `json:"enabled"`
-	Description string    `json:"description,omitempty"`
-	IngestToken string    `json:"ingest_token,omitempty"`
-	Pull        *Pull     `json:"pull,omitempty"`
-	Parse       Parse     `json:"parse"`
-	Tags        []string  `json:"tags,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Enabled     bool     `json:"enabled"`
+	Description string   `json:"description,omitempty"`
+	IngestToken string   `json:"ingest_token,omitempty"`
+	Pull        *Pull    `json:"pull,omitempty"`
+	Parse       Parse    `json:"parse"`
+	Tags        []string `json:"tags,omitempty"`
+	// EngineModel overrides the Laya engine checkpoint for this source's
+	// events (empty: Settings.Engine.Model).
+	EngineModel string    `json:"engine_model,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -172,25 +176,61 @@ type Route struct {
 	ThrottleSeconds int            `json:"throttle_seconds"`
 }
 
-// AISettings configures the optional Claude-backed classifier.
-type AISettings struct {
-	Enabled bool   `json:"enabled"`
-	APIKey  string `json:"api_key,omitempty"`
-	Model   string `json:"model"`
-	Effort  string `json:"effort"`
-	// OnlyUncategorized limits AI calls to events no rule categorized.
+// Category is a label events are classified into. Rules set it directly;
+// the Laya engine chooses among categories by their descriptions.
+type Category struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// UnmarshalJSON also accepts a plain name, as older configs stored them.
+func (c *Category) UnmarshalJSON(b []byte) error {
+	var name string
+	if json.Unmarshal(b, &name) == nil {
+		*c = Category{Name: name}
+		return nil
+	}
+	type plain Category
+	return json.Unmarshal(b, (*plain)(c))
+}
+
+// EngineSettings configures classification by the Laya engine
+// (laya-serve, github.com/NandhaKishorM/laya). Rules run first; the engine
+// classifies what they leave, once per message pattern.
+type EngineSettings struct {
+	Enabled bool `json:"enabled"`
+	// URL of laya-serve, e.g. http://127.0.0.1:8000. Several URLs may be
+	// given, comma-separated; requests go round-robin and fail over.
+	// ${env:NAME} references are expanded.
+	URL    string `json:"url"`
+	APIKey string `json:"api_key,omitempty"` // bearer key (LAYA_API_KEY on the engine)
+	// Model is the checkpoint pinned on every request: english,
+	// multilingual, typed-decisions, or a name from the engine's
+	// LAYA_EXTRA_MODELS. Sources may override it.
+	Model string `json:"model"`
+	// OnlyUncategorized sends only events no rule categorized.
 	OnlyUncategorized bool           `json:"only_uncategorized"`
 	MinSeverity       model.Severity `json:"min_severity"`
-	MaxCallsPerHour   int            `json:"max_calls_per_hour"`
+	// MinConfidence is the answer confidence (0-1) an engine answer needs
+	// before it is applied; below it the rules' result stands.
+	MinConfidence float64 `json:"min_confidence"`
+	// SetSeverity asks the engine for a severity when neither the log
+	// record nor a rule set one.
+	SetSeverity bool `json:"set_severity"`
+	MaxInFlight int  `json:"max_in_flight"` // concurrent requests to the engine
+	// TimeoutSeconds bounds how long an event waits for the engine,
+	// queueing included; then it goes on with the rules' result, so a slow
+	// engine never holds alerts back longer than this.
+	TimeoutSeconds int `json:"timeout_seconds"`
 }
 
 // Settings holds global options.
 type Settings struct {
 	// PublicURL is the externally reachable base URL of Laya, used for ingest
 	// URLs shown in the UI and for links in notifications.
-	PublicURL  string     `json:"public_url,omitempty"`
-	Categories []string   `json:"categories"`
-	AI         AISettings `json:"ai"`
+	PublicURL  string         `json:"public_url,omitempty"`
+	Categories []Category     `json:"categories"`
+	Engine     EngineSettings `json:"engine"`
 }
 
 // Config is the complete persisted configuration.

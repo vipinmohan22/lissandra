@@ -135,7 +135,6 @@ func (r *retainer) ordered() []model.Event {
 func compact(ev model.Event) model.Event {
 	ev.Message = strings.Clone(model.Truncate(ev.Message, retainedMsgBytes))
 	ev.Level = strings.Clone(model.Truncate(ev.Level, 64))
-	ev.Summary = strings.Clone(model.Truncate(ev.Summary, retainedMsgBytes))
 	if len(ev.Fields) > 0 && fieldsCost(ev.Fields, retainedFieldsBytes) > retainedFieldsBytes {
 		ev.Fields = map[string]any{"laya_fields_omitted": "structured fields were too large to keep for browsing"}
 	}
@@ -144,7 +143,10 @@ func compact(ev model.Event) model.Event {
 
 // cost approximates the memory a retained event holds.
 func cost(ev *model.Event) int64 {
-	n := int64(300 + len(ev.Message) + len(ev.Summary) + len(ev.Level))
+	n := int64(300 + len(ev.Message) + len(ev.Level))
+	if ev.Engine != nil {
+		n += 200
+	}
 	for _, t := range ev.Tags {
 		n += int64(len(t)) + 16
 	}

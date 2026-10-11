@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/ai"
 	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/engine"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/notify"
@@ -43,7 +43,7 @@ type Server struct {
 	store      *events.Store
 	pipeline   *pipeline.Pipeline
 	dispatcher *notify.Dispatcher
-	ai         *ai.Classifier
+	laya       *engine.Classifier
 	pollers    *poller.Manager
 	imports    *importer.Registry
 	started    time.Time
@@ -54,7 +54,7 @@ type Server struct {
 
 // New builds a Server and subscribes it to config changes.
 func New(opts Options, log *slog.Logger, cfg *config.Store, store *events.Store, p *pipeline.Pipeline,
-	d *notify.Dispatcher, a *ai.Classifier, pm *poller.Manager, imports *importer.Registry) *Server {
+	d *notify.Dispatcher, laya *engine.Classifier, pm *poller.Manager, imports *importer.Registry) *Server {
 	if opts.MaxIngestBytes <= 0 {
 		opts.MaxIngestBytes = 10 << 20
 	}
@@ -64,7 +64,7 @@ func New(opts Options, log *slog.Logger, cfg *config.Store, store *events.Store,
 	if opts.MaxImportDecompressed <= 0 {
 		opts.MaxImportDecompressed = 512 << 20
 	}
-	s := &Server{opts: opts, log: log, cfg: cfg, store: store, pipeline: p, dispatcher: d, ai: a, pollers: pm, imports: imports, started: time.Now()}
+	s := &Server{opts: opts, log: log, cfg: cfg, store: store, pipeline: p, dispatcher: d, laya: laya, pollers: pm, imports: imports, started: time.Now()}
 	cfg.Subscribe(func(c *config.Config) {
 		m := make(map[string]config.Source, len(c.Sources))
 		for _, src := range c.Sources {

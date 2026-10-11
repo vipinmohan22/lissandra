@@ -1,5 +1,5 @@
-// Package pipeline moves events from ingest through classification and
-// optional AI enrichment into the event store and notification dispatcher.
+// Package pipeline moves events from ingest through rule classification
+// and the Laya engine into the event store and notification dispatcher.
 package pipeline
 
 import (
@@ -7,10 +7,11 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/ai"
 	"github.com/vipinmohan22/layalogs/internal/classify"
 	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/engine"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/model"
 	"github.com/vipinmohan22/layalogs/internal/notify"
@@ -19,27 +20,41 @@ import (
 // ErrQueueFull is returned when the pipeline cannot accept more events.
 var ErrQueueFull = errors.New("pipeline queue full")
 
+// engineQueueSize bounds events waiting for the Laya engine; when it is
+// full, events go on with the rules' classification.
+const engineQueueSize = 256
+
+// queued is an event waiting for the Laya engine.
+type queued struct {
+	ev model.Event
+	at time.Time
+}
+
 // Pipeline is safe for concurrent use.
 type Pipeline struct {
-	in      chan model.Event
-	aiQueue chan model.Event
-	engine  atomic.Pointer[classify.Engine]
+	in          chan model.Event
+	engineQueue chan queued
+	engine      atomic.Pointer[classify.Engine]
 
 	store      *events.Store
 	dispatcher *notify.Dispatcher
-	ai         *ai.Classifier
+	laya       *engine.Classifier
+	// MaxEngineWait, when set, overrides how long an event may wait for the
+	// Laya engine (queue and request) before it goes on without it; by
+	// default it is the engine's configured timeout.
+	MaxEngineWait time.Duration
 
-	Received, Processed, Dropped, Rejected, AIQueued atomic.Uint64
+	Received, Processed, Dropped, Rejected, EngineQueued, EngineStale atomic.Uint64
 }
 
-// New builds a pipeline with a queue of queueSize events.
-func New(queueSize int, store *events.Store, d *notify.Dispatcher, a *ai.Classifier) *Pipeline {
+// New builds a pipeline with a queue of queueSize events. laya may be nil.
+func New(queueSize int, store *events.Store, d *notify.Dispatcher, laya *engine.Classifier) *Pipeline {
 	p := &Pipeline{
-		in:         make(chan model.Event, queueSize),
-		aiQueue:    make(chan model.Event, 256),
-		store:      store,
-		dispatcher: d,
-		ai:         a,
+		in:          make(chan model.Event, queueSize),
+		engineQueue: make(chan queued, engineQueueSize),
+		store:       store,
+		dispatcher:  d,
+		laya:        laya,
 	}
 	p.engine.Store(classify.New(nil))
 	return p
@@ -88,8 +103,12 @@ func (p *Pipeline) QueueDepth() int { return len(p.in) }
 // background work such as file analysis should pause.
 func (p *Pipeline) Busy() bool { return len(p.in) > cap(p.in)/4 }
 
-// Run processes events until ctx is cancelled.
-func (p *Pipeline) Run(ctx context.Context, workers, aiWorkers int) {
+// EngineQueueDepth reports events waiting for the Laya engine.
+func (p *Pipeline) EngineQueueDepth() int { return len(p.engineQueue) }
+
+// Run processes events until ctx is cancelled, with engineWorkers
+// goroutines waiting on the Laya engine.
+func (p *Pipeline) Run(ctx context.Context, workers, engineWorkers int) {
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -105,7 +124,7 @@ func (p *Pipeline) Run(ctx context.Context, workers, aiWorkers int) {
 			}
 		}()
 	}
-	for i := 0; i < aiWorkers; i++ {
+	for i := 0; i < engineWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -113,9 +132,8 @@ func (p *Pipeline) Run(ctx context.Context, workers, aiWorkers int) {
 				select {
 				case <-ctx.Done():
 					return
-				case ev := <-p.aiQueue:
-					p.ai.Enrich(ctx, &ev)
-					p.finish(ev)
+				case q := <-p.engineQueue:
+					p.enrich(ctx, q)
 				}
 			}
 		}()
@@ -123,15 +141,35 @@ func (p *Pipeline) Run(ctx context.Context, workers, aiWorkers int) {
 	wg.Wait()
 }
 
-// ClassifyOffline classifies ev for file analysis: rules plus any cached AI
-// result, but it never calls the AI API, stores the event or notifies. It
-// returns false when a rule drops the event.
-func (p *Pipeline) ClassifyOffline(engine *classify.Engine, ev *model.Event) bool {
-	if !engine.Classify(ev) {
+// enrich asks the Laya engine about a queued event, then records it. The
+// time from queueing to the answer is bounded, so a slow or hung engine
+// delays an event (and its alert) by at most the engine wait.
+func (p *Pipeline) enrich(ctx context.Context, q queued) {
+	wait := p.MaxEngineWait
+	if wait <= 0 {
+		wait = p.laya.MaxWait()
+	}
+	deadline := q.at.Add(wait)
+	if time.Now().After(deadline) {
+		p.EngineStale.Add(1)
+		p.laya.Skipped.Add(1)
+	} else {
+		ctx, cancel := context.WithDeadline(ctx, deadline)
+		p.laya.Enrich(ctx, &q.ev)
+		cancel()
+	}
+	p.finish(q.ev)
+}
+
+// ClassifyOffline classifies ev for file analysis: rules plus any cached
+// Laya engine answer for its pattern, but it never calls the engine, stores
+// the event or notifies. It returns false when a rule drops the event.
+func (p *Pipeline) ClassifyOffline(rules *classify.Engine, ev *model.Event) bool {
+	if !rules.Classify(ev) {
 		return false
 	}
-	if p.ai != nil && p.ai.Eligible(ev) {
-		p.ai.ApplyCachedQuiet(ev)
+	if p.laya != nil && p.laya.Eligible(ev) {
+		p.laya.ApplyCachedQuiet(ev)
 	}
 	return true
 }
@@ -141,12 +179,17 @@ func (p *Pipeline) process(ev model.Event) {
 		p.Dropped.Add(1)
 		return
 	}
-	if p.ai != nil && p.ai.Eligible(&ev) && !p.ai.ApplyCached(&ev) && p.ai.HasBudget() {
-		select {
-		case p.aiQueue <- ev:
-			p.AIQueued.Add(1)
-			return
-		default: // AI is backed up; don't hold the event.
+	if p.laya != nil && p.laya.Eligible(&ev) && !p.laya.ApplyCached(&ev) {
+		if !p.laya.Available() {
+			p.laya.Skipped.Add(1)
+		} else {
+			select {
+			case p.engineQueue <- queued{ev, time.Now()}:
+				p.EngineQueued.Add(1)
+				return
+			default: // the engine is backed up; don't hold the event
+				p.laya.Skipped.Add(1)
+			}
 		}
 	}
 	p.finish(ev)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vipinmohan22/layalogs/internal/classify"
@@ -57,7 +58,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.updateSettings)
-	mux.HandleFunc("POST /api/ai/test", s.testAI)
+	mux.HandleFunc("POST /api/engine/classify", s.engineClassify)
+	mux.HandleFunc("GET /api/engine/health", s.engineHealth)
 
 	mux.HandleFunc("GET /api/config/export", s.exportConfig)
 	mux.HandleFunc("POST /api/config/import", s.importConfig)
@@ -115,13 +117,14 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		"events": s.store.Stats(time.Now()),
 		"pipeline": map[string]any{
 			"queue_depth": p.QueueDepth(), "received": p.Received.Load(), "processed": p.Processed.Load(),
-			"dropped": p.Dropped.Load(), "rejected": p.Rejected.Load(), "ai_queued": p.AIQueued.Load(),
+			"dropped": p.Dropped.Load(), "rejected": p.Rejected.Load(), "engine_queued": p.EngineQueued.Load(),
+			"engine_queue_depth": p.EngineQueueDepth(), "engine_stale": p.EngineStale.Load(),
 		},
 		"notifications": map[string]any{
 			"queue_depth": d.QueueDepth(), "sent": d.Sent.Load(), "failed": d.Failed.Load(),
 			"dropped": d.Dropped.Load(), "throttled": d.Throttled.Load(),
 		},
-		"ai":             s.ai.Status(),
+		"engine":         s.laya.Status(),
 		"imports":        map[string]any{"active": s.imports.Active(), "done": s.imports.Succeeded.Load(), "failed": s.imports.Failed.Load()},
 		"sources":        s.pollers.Status(),
 		"uptime_seconds": int(time.Since(s.started).Seconds()),
@@ -614,7 +617,7 @@ func (s *Server) listDeliveries(w http.ResponseWriter, r *http.Request) {
 // --- settings ---
 
 func maskSettings(st config.Settings) config.Settings {
-	st.AI.APIKey = config.MaskValue(st.AI.APIKey)
+	st.Engine.APIKey = config.MaskValue(st.Engine.APIKey)
 	return st
 }
 
@@ -628,7 +631,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.update(w, func(c *config.Config) error {
-		st.AI.APIKey = config.Restore(st.AI.APIKey, c.Settings.AI.APIKey)
+		st.Engine.APIKey = config.Restore(st.Engine.APIKey, c.Settings.Engine.APIKey)
 		c.Settings = st
 		return nil
 	}) {
@@ -636,11 +639,13 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// testAI classifies one event (stored, or built from a message) with Claude.
-func (s *Server) testAI(w http.ResponseWriter, r *http.Request) {
+// engineClassify asks the Laya engine about one event (stored, or built
+// from a message) right now, bypassing the cache. Nothing is changed.
+func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		EventID string `json:"event_id"`
-		Message string `json:"message"`
+		EventID  string `json:"event_id"`
+		Message  string `json:"message"`
+		SourceID string `json:"source_id"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -653,21 +658,42 @@ func (s *Server) testAI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		if body.Message == "" {
+		if strings.TrimSpace(body.Message) == "" {
 			writeError(w, http.StatusBadRequest, "message or event_id is required")
 			return
 		}
-		ev = model.Event{ID: "test", SourceID: "test", SourceName: "test", Message: body.Message, ReceivedAt: time.Now().UTC(), Timestamp: time.Now().UTC()}
+		ev = model.Event{ID: "test", SourceID: body.SourceID, SourceName: "test", Message: body.Message, ReceivedAt: time.Now().UTC(), Timestamp: time.Now().UTC()}
+		if src, ok := s.lookupSource(body.SourceID); ok {
+			ev.SourceName = src.Name
+		}
 		s.pipeline.Engine().Classify(&ev)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
-	res, err := s.ai.Classify(ctx, &ev)
+	res, err := s.laya.Classify(ctx, &ev)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": res})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": res, "rules": map[string]any{
+		"category": ev.Category, "severity": ev.Severity, "matched_rules": ev.MatchedRules,
+	}})
+}
+
+// engineHealth checks every configured laya-serve instance.
+func (s *Server) engineHealth(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	eps, err := s.laya.Probe(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error(), "endpoints": []any{}})
+		return
+	}
+	ok := len(eps) > 0
+	for _, e := range eps {
+		ok = ok && e.OK && e.ModelLoaded
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "model": s.laya.Status().Model, "endpoints": eps})
 }
 
 // --- import / export ---
@@ -711,7 +737,7 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 				notify.Restore(&next.Notifiers[i], c.Notifiers[j])
 			}
 		}
-		next.Settings.AI.APIKey = config.Restore(next.Settings.AI.APIKey, c.Settings.AI.APIKey)
+		next.Settings.Engine.APIKey = config.Restore(next.Settings.Engine.APIKey, c.Settings.Engine.APIKey)
 		next.Version = c.Version
 		*c = next
 		return nil

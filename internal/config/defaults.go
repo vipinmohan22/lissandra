@@ -2,15 +2,23 @@ package config
 
 import "github.com/vipinmohan22/layalogs/internal/model"
 
-// DefaultAIModel is the Claude model used by the AI classifier unless the
-// operator picks another one in Settings.
-const DefaultAIModel = "claude-opus-5-5"
+// DefaultEngineModel is the Laya engine checkpoint used unless the operator
+// picks another one.
+const DefaultEngineModel = "english"
 
-// DefaultCategories seeds the category list shown in the UI and offered to
-// the AI classifier.
-var DefaultCategories = []string{
-	"security", "application", "database", "network", "resource",
-	"http", "performance", "deployment", "audit",
+// DefaultCategories seeds the category list shown in the UI. The
+// descriptions tell the Laya engine what belongs in each category.
+var DefaultCategories = []Category{
+	{"security", "attacks, intrusion attempts, malware, suspicious access, policy violations"},
+	{"auth", "login failures, invalid or expired credentials and tokens, permission denied"},
+	{"application", "unhandled exceptions, crashes, panics, null pointers, application bugs"},
+	{"database", "database connections, query errors and timeouts, deadlocks, replication"},
+	{"network", "DNS failures, connection refused or reset, TLS errors, upstream timeouts"},
+	{"resource", "out of memory, disk full, CPU throttling, file descriptor or quota limits"},
+	{"http", "HTTP request errors and unusual status codes from web servers and APIs"},
+	{"performance", "slow requests, high latency, timeouts caused by load, queue backlogs"},
+	{"deployment", "deploys, releases, rollbacks, configuration changes, restarts"},
+	{"audit", "records of who did what: account, permission and configuration changes"},
 }
 
 func cond(field, op, value string) Condition {
@@ -132,15 +140,18 @@ func Defaults() *Config {
 		Notifiers: []Notifier{},
 		Routes:    []Route{},
 		Settings: Settings{
-			Categories: append([]string{}, DefaultCategories...),
-			AI: AISettings{
-				Enabled:           false,
-				APIKey:            "${env:ANTHROPIC_API_KEY}",
-				Model:             DefaultAIModel,
-				Effort:            "low",
+			Categories: append([]Category{}, DefaultCategories...),
+			Engine: EngineSettings{
+				Enabled:           true, // idle until a URL is set (LAYA_ENGINE_URL in the Nomad job)
+				URL:               "${env:LAYA_ENGINE_URL}",
+				APIKey:            "${env:LAYA_ENGINE_API_KEY}",
+				Model:             DefaultEngineModel,
 				OnlyUncategorized: true,
 				MinSeverity:       model.SeverityWarning,
-				MaxCallsPerHour:   120,
+				MinConfidence:     0.6,
+				SetSeverity:       true,
+				MaxInFlight:       4,
+				TimeoutSeconds:    30,
 			},
 		},
 	}

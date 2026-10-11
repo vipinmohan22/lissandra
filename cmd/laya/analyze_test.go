@@ -125,8 +125,7 @@ func TestAnalyzeUsesConfigAndNeverCallsOut(t *testing.T) {
 	}
 	c.Routes = []config.Route{{ID: "r1", Name: "errors", Enabled: true, MinSeverity: model.SeverityError, NotifierIDs: []string{"n1", "n2"}}}
 	c.Sources = append(c.Sources, config.Source{Name: "pull", Type: config.SourcePull, Enabled: true, Pull: &config.Pull{URL: srv.URL, IntervalSeconds: 5}})
-	c.Settings.AI = config.AISettings{Enabled: true, APIKey: "sk-test", OnlyUncategorized: false, MinSeverity: model.SeverityDebug}
-	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
+	c.Settings.Engine = config.EngineSettings{Enabled: true, URL: srv.URL, OnlyUncategorized: false, MinSeverity: model.SeverityDebug}
 	if err := config.Normalize(c); err != nil {
 		t.Fatal(err)
 	}
