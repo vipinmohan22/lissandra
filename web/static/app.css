@@ -185,6 +185,9 @@ td.nowrap, .nowrap { white-space: nowrap; }
 .cat-row input { width: 100%; }
 .cat-list { margin-bottom: 8px; }
 .cat-note .callout { margin: 12px 0 0; }
+.cat-row.invalid input { border-color: var(--danger); }
+.cat-help { margin-top: 8px; }
+.warnings > div + div { margin-top: 4px; }
 .endpoint { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-top: 8px; }
 .endpoint > .row { margin-bottom: 8px; }
 .endpoint .url { overflow-wrap: anywhere; min-width: 0; }

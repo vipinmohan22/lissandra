@@ -232,11 +232,12 @@ job "laya" {
       }
 
       # Where the Laya engine is. The default engine settings read
-      # ${env:LAYA_ENGINE_URL}; it is unset here, so Laya reads the file
-      # named by LAYA_ENGINE_URL_FILE instead, and re-reads it every 30 s.
-      # Engine instances coming and going therefore never restart Laya
-      # (which would empty its in-memory events). While no instance is
-      # registered, Laya runs on rules alone.
+      # ${env:LAYA_ENGINE_URL}; it is unset here (don't add it to the
+      # variable above, it would win), so Laya reads the file named by
+      # LAYA_ENGINE_URL_FILE instead, and re-reads it every 30 s. Engine
+      # instances coming and going therefore never restart Laya (which
+      # would empty its in-memory events). While no instance is registered,
+      # Laya runs on rules alone.
       template {
         destination = "local/engine_urls"
         change_mode = "noop"
@@ -248,10 +249,12 @@ job "laya" {
         memory = var.memory
       }
 
-      # Give in-flight notifications time to finish and let service
-      # discovery drop the instance before it stops.
+      # Let service discovery drop the instance before it stops. On SIGTERM
+      # Laya drains for up to 25 s: it finishes the events it accepted and
+      # delivers queued notifications. kill_timeout covers that; Nomad
+      # clients cap it at their max_kill_timeout (30 s by default).
       shutdown_delay = "5s"
-      kill_timeout   = "20s"
+      kill_timeout   = "30s"
     }
   }
 }

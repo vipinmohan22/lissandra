@@ -6,7 +6,7 @@ Laya reads logs, classifies them, and alerts the right people. It runs as a sing
 - **Analyze log files.** Upload a log file on the **Log files** page (or with curl, or `laya analyze` in a terminal) to get a classified report: a timeline in the file's own time, top issues, the alert routes that would have fired, and searchable events. Analysis never touches live events or sends alerts.
 - **Classify.** Every event gets a severity, a category and tags. Built-in detection reads level fields and common log formats; an ordered rule engine that you edit in the UI does the rest. Repeats of the same problem are grouped by fingerprint.
 - **Notify.** Routes send matching events to pluggable notifiers: email (SMTP), Slack, Microsoft Teams, Discord, Google Chat, PagerDuty, or any HTTP endpoint through a templated webhook. Per-problem throttling keeps channels quiet.
-- **Laya engine for what the rules miss (optional).** Events the rules leave uncategorized can go to the [Laya engine](#laya-engine-optional), a small decision model you run yourself, which picks a category from your list by its descriptions. Rules always win, unsure answers are ignored, and each message pattern is asked about once.
+- **Laya engine for what the rules miss (optional).** Events the rules leave uncategorized can go to the [Laya engine](#laya-engine-optional), a small decision model you run yourself, which picks one of your categories. Rules always win, a severity the log states is never replaced, unsure answers are ignored, and each message pattern is asked about once.
 
 ```mermaid
 flowchart LR
@@ -62,7 +62,7 @@ Parsing is shared by both. Laya finds the message, level and timestamp automatic
 
 ### Log files (manual analysis)
 
-Open **Log files**, drop one or more files, and Laya parses and classifies them with your current rules, plus any Laya engine answers it already has cached for the same patterns (analysis never calls the engine). Each file gets a report:
+Open **Log files**, drop one or more files, and Laya parses and classifies them with your current rules, plus the answers the Laya engine already gave for the same message patterns (to live events or earlier files). Each file gets a report:
 
 - lines, events, errors, and the time span the file covers;
 - a timeline in the file's own time;
@@ -72,6 +72,8 @@ Open **Log files**, drop one or more files, and Laya parses and classifies them 
 - searchable, filterable events with line numbers.
 
 You can download the report (JSON) and the events (NDJSON), and re-run a file after changing rules.
+
+**With the Laya engine.** When the engine is configured, check **Ask the Laya engine about patterns no rule categorizes** (`engine=1` over HTTP) to have it classify the patterns it hasn't answered yet, as it would for live events. That is one request per pattern, at most 100 per file, and only while no live event is waiting for the engine, so live classification always comes first. Patterns it doesn't get to keep the rules' result. The report counts the events the engine answered and the ones its answer changed. Without the option, analysis never calls the engine.
 
 What it understands:
 
@@ -101,24 +103,33 @@ laya analyze -fail-on critical deploy.log    # exit status 2 if anything critica
 docker run --rm -i ghcr.io/vipinmohan22/laya analyze - < app.log
 ```
 
-Rules come from `-config`, else `$LAYA_CONFIG`, else `$LAYA_DATA_DIR/config.json`, else the built-in defaults. A config exported from **Settings → Backup** works, so you can analyze locally with your team's rules. `laya analyze` uses only rules, sources and route filters. It never builds notifiers or calls the Laya engine, so it makes no network calls.
+Rules come from `-config`, else `$LAYA_CONFIG`, else `$LAYA_DATA_DIR/config.json`, else the built-in defaults. A config exported from **Settings → Backup** works, so you can analyze locally with your team's rules. `laya analyze` uses only rules, sources and route filters. It never builds notifiers, and it makes no network calls unless you give it `-engine`.
+
+With `-engine`, the Laya engine classifies every pattern the rules leave, with no per-file limit, using the config's categories and engine settings (`min_severity`, `min_confidence` and so on). Only the text of those patterns is sent to the engine. Before reading any file it checks that every engine URL answers and has the checkpoints it needs loaded, and exits with an error otherwise:
+
+```sh
+laya analyze -config config.json -engine http://127.0.0.1:8000 -engine-key "$LAYA_ENGINE_API_KEY" app.log
+laya analyze -engine http://10.0.0.5:8000,http://10.0.0.6:8000 -engine-model multilingual app.log
+```
+
+`-engine` takes one or more comma-separated URLs, `-engine-model` overrides the config's checkpoint, and `-engine-key` defaults to `$LAYA_ENGINE_API_KEY`. The engine reads each event's source name, which here is the file's name unless `-source` names a source, and a name can sway the answer: in one test, a file named `app.log` pulled three different messages to `application`.
 
 **Over HTTP:**
 
 ```sh
 curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" -F file=@app.log https://laya.example.com/api/imports
 curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" --data-binary @app.log.gz \
-  "https://laya.example.com/api/imports?name=app.log.gz&source=<source id>&tz=UTC&format=auto"
+  "https://laya.example.com/api/imports?name=app.log.gz&source=<source id>&tz=UTC&format=auto&engine=1"
 ```
 
-The response is the finished report. `GET /api/imports/{id}/events` (and `?format=ndjson`), `/patterns` and `/events/{eventId}` return the details.
+The response is the finished report. `GET /api/imports/{id}/events` (and `?format=ndjson`), `/patterns` and `/events/{eventId}` return the details, and `/training-data` exports the file's rule-labelled patterns for [fine-tuning](#training-data-and-fine-tuning).
 
 ### Classification
 
-1. **Severity detection.** Laya reads explicit level fields (names, syslog 0–7, pino/bunyan 10–60), klog prefixes (`E1011 …`), `level=` key/values and leading level tokens, then falls back to keywords such as panic/fatal, error/exception/failed, and warn/deprecated.
+1. **Severity detection.** Laya reads explicit level fields (names, syslog 0–7, pino/bunyan 10–60), klog prefixes (`E1011 …`), `level=` key/values and level words in the first 96 characters of the message (`ERROR …`, `[crit]`, `[warn]`). A severity found this way is *stated* by the record. Otherwise Laya *guesses* it from keywords such as panic/fatal, error/exception/failed, and warn/deprecated/retrying, defaulting to *info*, and marks the event `severity_guessed`. A rule that sets a severity makes it stated.
 2. **Rules, top to bottom.** Conditions test `message`, `level`, `severity`, `source`, `category`, `tags`, or any structured field by dot path (`http.status_code`). The operators are contains, equals, starts/ends with, regex (RE2, so no catastrophic backtracking), exists/missing, and numeric `>`/`<`, each with a negated form where it makes sense. Every matching rule adds tags and can set the severity or raise it to a minimum. The first matching rule with a category decides the category. **Drop** discards the event and **Stop** ends evaluation. Rules can be limited to specific sources.
-3. **Fingerprint.** The message is reduced to a pattern (numbers, IPs, UUIDs, hex ids and timestamps replaced by placeholders) and hashed with the source. The fingerprint groups the dashboard's "Top issues" and drives notification throttling and the Laya engine's answer cache.
-4. **Laya engine (optional).** What the rules leave uncategorized, at *warning* or above, goes to the [Laya engine](#laya-engine-optional), which may fill in the category, and the severity when nothing else set one.
+3. **Fingerprint.** The message is reduced to a pattern (numbers, IPs, UUIDs, hex ids and timestamps replaced by placeholders) and hashed with the source. The fingerprint groups the dashboard's "Top issues" and drives notification throttling. The Laya engine's answers are cached by the pattern alone, so all sources share them.
+4. **Laya engine (optional).** What the rules leave uncategorized, at *warning* or above, goes to the [Laya engine](#laya-engine-optional), which may fill in the category, and the severity when it was only guessed.
 
 Laya ships with editable default rules for crashes and panics, resource exhaustion, security attacks, auth failures, HTTP 5xx, database, network, slow operations, exceptions and deployments. The **Rule tester** runs a pasted sample through the rules without storing it, and the rule editor can test a draft rule on its own.
 
@@ -136,7 +147,12 @@ A **route** selects events by minimum severity, categories, sources, tags and an
 | PagerDuty | Events API v2. The fingerprint is the dedup key, so repeats update one incident. |
 | Generic webhook | Any method, URL and headers. The body is a Go `text/template` (`{{ json .Title }}`, `.Event.Severity`, `.Event.Fields`, `.Link`, …). Leave it empty for Laya's standard JSON payload. Use it for Opsgenie, ntfy, Zulip, internal services and so on. |
 
-**Secrets.** Any setting, as well as pull-source credentials and headers, can be written as `${env:NAME}`. Laya reads the value from its environment at send time, so secrets can live in Nomad Variables or Vault rather than Laya's config file. Secret fields are masked in the API and UI, and saving a form with the masked value unchanged keeps the stored secret.
+**Secrets.** Any notifier setting, pull-source credentials, headers and POST body, and the Laya engine's URL and key can refer to a value kept outside Laya's config file, so secrets can live in Nomad Variables, Vault or a secrets file:
+
+- `${env:NAME}` is the environment variable `NAME`. When `NAME` is unset and `NAME_FILE` is set, it is the contents of the file `NAME_FILE` names (the `_FILE` convention of Docker and Kubernetes secrets).
+- `${file:/path}` is the contents of that file.
+
+File contents lose their trailing newline, and a file that can't be read gives an empty value. Notifiers read their references when the configuration is applied (at start and whenever it is saved), pull sources on every poll, and the engine URL and key every 30 seconds, so a file can change while Laya runs. Secret fields are masked in the API and UI (references themselves are shown), and saving a form with the masked value unchanged keeps the stored secret.
 
 **Adding a notifier type.** Create a file in `internal/notify/` that calls `Register(&Plugin{...})` from `init()`, declaring its fields (label, type, required, secret, help) and a constructor that returns a `Sender`. The UI renders the form from that schema and nothing else needs to change. See `chat.go` for compact examples.
 
@@ -145,16 +161,33 @@ A **route** selects events by minimum severity, categories, sources, tags and an
 The Laya engine is [`laya-serve`](https://github.com/NandhaKishorM/laya), a small Python/PyTorch decision model served over HTTP. You run it yourself, next to Laya (the Nomad deployment includes a job for it), so log text never leaves your infrastructure. Laya uses it for what the rules can't place:
 
 1. **Rules first.** Events go through severity detection and the rules as usual.
-2. **What goes to the engine.** An event is sent when its severity is at least `min_severity` (*warning*) and, with `only_uncategorized` on (the default), no rule gave it a category.
-3. **The questions.** Laya asks which of your categories the event belongs to: a choice over the categories in the order you list them, described by their descriptions, plus `uncategorized` for "none of these". When the record had no level field and no rule matched, so the severity was only read from the message text, it also asks how severe the event is, on the scale from *debug* to *critical*.
-4. **Confidence.** An answer is used only when its confidence is at least `min_confidence` (0.6). Below that it's recorded on the event and nothing changes.
-5. **Rules win.** The engine only fills in a missing category, and only sets the severity in the case above. It never overrides a rule.
-6. **Once per pattern.** Answers are cached per fingerprint and checkpoint for 24 hours (up to 5,000 patterns), and simultaneous events with the same pattern share one request, so a recurring error costs one call. Changing the categories, checkpoint, URL or key clears the cache.
-7. **Fallback.** If the engine is down, slow or paused, events go on with the rules' result. An event waits at most `timeout_seconds` (30) for an answer, queueing included, so the engine delays an alert by at most that. After errors Laya backs off (from 5 s up to 2 minutes). A rejected key, a missing endpoint or an answer from the wrong checkpoint pauses calls for 5 minutes.
+2. **What goes to the engine.** An event is sent when its severity, stated or guessed, is at least `min_severity` (*warning*) and, with `only_uncategorized` on (the default), no rule gave it a category. A message with no level and no telling keyword is guessed *info*, so at the default it isn't sent.
+3. **The questions.** Laya asks which of your categories the event belongs to: a choice over your categories in the order you list them, offered by name (with the description, where you gave one), plus `uncategorized` offered as "none of the above". When the severity was only guessed (`severity_guessed`, see [Classification](#classification)), it also asks how severe the event is, on the scale from *debug* to *critical*. A severity the record states or a rule sets is never questioned.
+4. **Confidence.** Each answer, category and severity, is used only when its confidence is at least `min_confidence` (0.6). Below that it's recorded on the event and nothing changes.
+5. **Applied.** An answer counts as *applied* only when it changed the event: an uncategorized event got one of your categories, or a guessed severity became another one. An answer of `uncategorized`, a severity equal to the guessed one, or an answer below the threshold changes nothing.
+6. **Rules win.** The engine only fills in a missing category and corrects a guessed severity. It never overrides a rule.
+7. **Once per pattern.** Answers are cached by message pattern and checkpoint (and whether the severity was asked) for 24 hours, up to 5,000 patterns, and simultaneous events with the same pattern share one request, so a recurring error costs one call. The cache is shared across sources and with file analysis, so an uploaded file reuses the answers given for live events, and the other way round. Changing the categories, a checkpoint (the default or a source's), the URL list or the key clears it. A new `min_confidence` applies to cached answers at once.
 
-Each event that was sent carries the engine's answer in `engine` (checkpoint, chosen category and its confidence, the top three categories, severity, whether it was applied, whether the event was cut to fit the model), and its `classifier` is `laya` when the answer was applied.
+Each event that was sent carries the engine's answer in `engine`: the checkpoint (`model`), the chosen `category` and its `confidence`, the `top` three categories, the `severity` and `severity_confidence` when it was asked, the `threshold` (`min_confidence` when the answer was used), whether it was `applied`, and whether the event was `truncated` to fit the model. Its `classifier` is `laya` when the answer was applied.
 
-**Categories.** Under **Settings → Categories**, each category has a name and a short description, and the engine chooses by the descriptions, so they matter. Keep them to a few keywords, like the defaults (`database`: "database connections, queries, deadlocks, replication"). With ten or more categories the engine reads only about 16 tokens of each option, and Laya warns in its engine status when it can't tell categories apart. Up to 50 categories. Configs that list categories as plain names still load; the name then serves as the description.
+**Load and waiting.** laya-serve computes one answer at a time; further requests wait inside it, where Laya can neither see them nor give up on them early. So `max_in_flight` is counted per engine instance and defaults to 1, and events wait in Laya's own queue (256 events) instead. An event waits at most `timeout_seconds` (30) for its answer, queueing included, so the engine delays an alert by at most that. From recent request times and the capacity (`max_in_flight` × instances), Laya estimates how long a new event would wait: one that would run out of time in the queue isn't queued at all, and goes on at once with the rules' result (it is *shed*). More instances add capacity: requests go round-robin to the instances that passed their last health check, with failover between them.
+
+**Failures.** Whenever the engine can't answer in time, the event goes on with the rules' result. Then:
+
+| What happened | What Laya does |
+| --- | --- |
+| The engine is busy (HTTP 503) | Retries after its `Retry-After` until the event's time is up. A busy engine is never paused. |
+| A request runs out of time | Moves on. Three in a row pause calls, with backoff from 5 s up to 2 minutes. |
+| An instance is unreachable or fails (5xx) | Tries the next instance, then pauses calls with the same backoff. Errors from requests already in flight count once. |
+| The key is rejected (401/403) or the endpoint is missing (404) | Pauses all calls for 5 minutes. |
+| The answer came from another checkpoint | laya-serve answers a checkpoint name it doesn't know with another checkpoint, without saying so. Laya checks the name in every answer and pauses that checkpoint alone for 5 minutes; other checkpoints carry on. |
+| The checkpoint isn't loaded on the engine (as it reported at the last health check) | Laya doesn't ask for it. laya-serve would load it on the first request: a second model in memory (about 2 GB more), which can exceed the instance's memory limit, evict another checkpoint (`LAYA_MAX_LOADED`) or start a download. Events that need it keep the rules' result, and the engine status warns. So load every checkpoint you use at startup (`LAYA_MODELS`), and don't let laya-serve unload them (`LAYA_IDLE_UNLOAD_SECONDS`, or `LAYA_MAX_LOADED` below the number of checkpoints): Laya won't ask for one again until the engine reports it loaded. |
+
+Laya checks every instance's `/health` every 30 seconds: which instances answer and which checkpoints they have loaded. A passing check lifts a pause caused by timeouts or connection failures. Changing the URL, key, checkpoints or categories lifts every pause at once.
+
+**Categories.** Under **Settings → Categories**, list your categories in the order you want them offered. Plain names work best, and the defaults are just names: `security`, `auth`, `application`, `database`, `network`, `resource`, `http`, `performance`, `deployment`, `audit`. Add a short description only to tell apart names the engine confuses. With ten or more categories the engine reads only about 16 tokens of each option, and Laya's engine status warns when the engine couldn't tell categories apart. On 23 hand-labelled log lines with the english checkpoint, plain names plus "none of the above" picked the right category 15 times, against 8 with a few keywords as each category's description (the earlier defaults), and answered faster. That is a small sample: read it as a hint, not a benchmark, and check your own logs with the tester below.
+
+Names are lower-cased and limited to 64 characters, descriptions to 300, and there can be up to 50 categories. A description needs a name, and `uncategorized` is reserved for events no category fits, so it is refused as a name. A name listed twice is merged, unless the two descriptions differ, which is an error. Blank rows are dropped. Configs that list categories as plain strings still load.
 
 **Checkpoints.** `model` selects the checkpoint laya-serve answers with, and Laya names it in every request:
 
@@ -163,9 +196,9 @@ Each event that was sent carries the engine's answer in `engine` (checkpoint, ch
 | `english` | The default. English text; reads about the first 460 tokens of an event. |
 | `multilingual` | Many languages, English included; reads about 980 tokens. |
 | `typed-decisions` | Fine-tuned on upstream's typed-decisions benchmark, not on logs. |
-| your name | A fine-tuned checkpoint registered on the engine with `LAYA_EXTRA_MODELS`. |
+| your name | A fine-tuned checkpoint registered on the engine with `LAYA_EXTRA_MODELS` (see [fine-tuning](#training-data-and-fine-tuning)). |
 
-Aliases such as `en`, `multi` and `typed` are accepted. A source can override the checkpoint (**Laya engine checkpoint** in the source editor, `engine_model` in the API), for example `multilingual` for a source whose logs aren't in English. The engine must load every checkpoint you use (`LAYA_MODELS`). laya-serve answers a name it doesn't know with another checkpoint without saying so, so Laya checks the checkpoint in each answer and treats a mismatch as an error.
+Aliases such as `en`, `multi` and `typed` are accepted. A source can override the checkpoint (**Laya engine checkpoint** in the source editor, `engine_model` in the API), for example `multilingual` for a source whose logs aren't in English. The engine must load every checkpoint you use at startup (`LAYA_MODELS`); Laya doesn't send events to a checkpoint the engine hasn't loaded (see **Failures**).
 
 Laya sends each event as compact text: the first line, the root cause of a stack trace (`Caused by:`, the exception line, `panic:`), level, source and structured fields, then the rest of the message. That way the model's limited input holds the telling parts.
 
@@ -174,34 +207,58 @@ Laya sends each event as compact text: the first line, the root cause of a stack
 | Setting | Default | |
 | --- | --- | --- |
 | `enabled` | `true` | Idle until a URL is set. |
-| `url` | `${env:LAYA_ENGINE_URL}` | laya-serve base URL. Several URLs, comma-separated, are used round-robin with failover. |
+| `url` | `${env:LAYA_ENGINE_URL}` | laya-serve base URL. Several URLs, comma-separated, are used round-robin with failover. [References](#notifiers-and-routes) (`${env:…}`, `${file:…}`) are re-read every 30 seconds. A password in a URL is masked in the API (`http://user:xxxxx@host`) and kept when sent back unchanged. Laya connects directly: `HTTP_PROXY`/`HTTPS_PROXY` don't apply to the engine. |
 | `api_key` | `${env:LAYA_ENGINE_API_KEY}` | The engine's `LAYA_API_KEY`. Masked like other secrets. |
 | `model` | `english` | The checkpoint (see above). |
 | `only_uncategorized` | `true` | `false` also asks about events a rule categorized. Rules still win, so that only records the engine's opinion on the event, at the cost of more calls. |
-| `min_severity` | `warning` | |
-| `min_confidence` | `0.6` | 0 to 1. |
-| `set_severity` | `true` | Ask for a severity when nothing else set one (step 3). |
-| `max_in_flight` | `4` | Concurrent requests across all engine instances, at most 16. |
-| `timeout_seconds` | `30` | The longest an event waits for an answer, at most 300. |
+| `min_severity` | `warning` | Compared with the stated or guessed severity. |
+| `min_confidence` | `0.6` | 0 to 1, for the category and the severity answer alike. |
+| `set_severity` | `true` | Ask for a severity when it was only guessed (step 3). |
+| `max_in_flight` | `1` | Concurrent requests per engine instance, at most 16. See **Load and waiting**. |
+| `timeout_seconds` | `30` | The longest an event waits for an answer, queueing included, at most 300. |
 
-**Accuracy: set your expectations.** The published checkpoints are general decision models that were not trained on logs, and zero-shot they are weak at log classification: they often answer `uncategorized`, or pick a plausible but wrong category, and their confidence is not calibrated. Upstream says the same of its own benchmark: the base checkpoints score near chance zero-shot (0.36 against a 0.32 random baseline) and 0.77 after fine-tuning, and it recommends fine-tuning for accuracy. So keep the rules as your main classifier, keep the confidence threshold, check what the engine says about your own logs with `POST /api/engine/classify` before you route alerts on its categories, and fine-tune for your categories if you rely on it. See upstream's [Fine-tuning Laya on your own decisions](https://github.com/NandhaKishorM/laya/blob/v0.4.2/docs/finetune.md): `laya-train` trains a checkpoint from CSV or JSONL. Train the question Laya asks, a choice named `category` with your categories and their descriptions as the options; events your rules already classify are a ready source of labels. Then register the result on the engine with `LAYA_EXTRA_MODELS` and select it as the checkpoint.
+Larger values are refused when you save.
 
-**Trying it.** **Settings → Laya engine** has **Check connection** and a **Classify** box for a log line. Over the API, `POST /api/engine/classify` asks the engine about a stored event or a pasted message right now, bypassing the cache, and changes nothing. The reply includes the rules' result for comparison:
+**Accuracy: set your expectations.** The published checkpoints are general decision models that were not trained on logs, and zero-shot they are weak at log classification: they often answer `uncategorized`, or pick a plausible but wrong category, and their confidence is not calibrated. Upstream says the same of its own benchmark: the base checkpoints score near chance zero-shot (0.36 against a 0.32 random baseline) and 0.77 after fine-tuning, and it recommends fine-tuning for accuracy. So keep the rules as your main classifier, keep the confidence threshold, check what the engine says about your own logs with `POST /api/engine/classify` before you route alerts on its categories, and [fine-tune](#training-data-and-fine-tuning) for your categories if you rely on it.
+
+**Trying it.** **Settings → Laya engine** has **Check connection** and a **Classify** box for a log line. Over the API, `POST /api/engine/classify` asks the engine about a pasted message or a stored event right now. It has no side effects in Laya: it neither reads nor fills the cache, isn't counted in the engine statistics, ignores pauses and never causes one, and changes no event. It also asks about events the live pipeline wouldn't send (below `min_severity`, or categorized by a rule), and for a checkpoint the engine hasn't loaded, which makes laya-serve load it. The reply includes the rules' result for comparison:
 
 ```sh
 curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" -X POST http://localhost:8080/api/engine/classify \
-  -d '{"message": "could not obtain JDBC connection from pool after 30000ms"}'
+  -d '{"message": "could not obtain JDBC connection from pool after 30000ms, request failed"}'
 ```
 
 ```json
 {"ok": true,
- "result": {"model": "english", "category": "database", "category_confidence": 0.9638,
-            "probabilities": {"database": 0.9638, "performance": 0.0192, "application": 0.0082, "…": 0},
-            "severity": "error", "severity_confidence": 0.54, "…": "…"},
- "rules": {"category": "uncategorized", "severity": "info", "matched_rules": null}}
+ "result": {"model": "english", "category": "database", "category_confidence": 0.9979,
+            "probabilities": {"database": 0.9979, "application": 0.0018, "performance": 0.0002, "…": 0},
+            "severity": "error", "severity_confidence": 0.5911, "latency_ms": 1338, "inference_ms": 1335},
+ "rules": {"category": "uncategorized", "severity": "error", "matched_rules": null}}
 ```
 
-Add `"source_id"` to classify a message as that source would (its name and checkpoint), or pass `{"event_id": "…"}` instead for a stored event. Here the answer cleared the threshold; for `replica lag on orders-db is 45s, reads may be stale` the same checkpoint split between `database` (0.38) and `performance` (0.37), so the answer wouldn't be applied. Errors come back as `{"ok": false, "error": "…"}`. `GET /api/engine/health` checks every configured engine: `ok` is true when each one answers and has the configured checkpoint loaded, and each endpoint lists its `loaded` checkpoints, `device`, `revision` and latency. `/api/stats` has an `engine` section with counters (calls, cache hits, errors, applied, low confidence, skipped), average latency, the last error and `paused_until`.
+The rules guessed *error* from "failed", so the severity was asked too. The category answer clears the threshold and would be applied; the severity answer is below it (and the same as the guess). For `canary analysis failed for checkout-api: error rate 4.2% above threshold` the same checkpoint split between `application` (0.58) and `http` (0.33), so nothing would be applied; "error rate" counts as a stated level there, so no severity was asked. Add `"source_id"` to classify a message as that source would (its name and checkpoint), or pass `{"event_id": "…"}` instead for a stored event. For a stored event, `rules` is what the rules alone decide today, not the event's stored result, which may include the engine's answer. Errors come back as `{"ok": false, "error": "…"}`.
+
+**Health and status.** `GET /api/engine/health` checks every configured instance now. `ok` is true when each one answers, lists its checkpoints (laya-serve shows them only to callers with its key, so a wrong or missing key makes `ok` false, with an error saying so) and has every checkpoint in use loaded. Each endpoint reports `url`, `ok`, `error`, `loaded`, `missing` (checkpoints in use that it hasn't loaded), `model_loaded` (nothing missing), `device`, `revision` and `latency_ms`. The `engine` section of `GET /api/stats`:
+
+| Field | |
+| --- | --- |
+| `enabled`, `configured`, `config_error` | Whether the engine is on, whether a usable URL is set (after expanding references), and why not. |
+| `urls` | The instances in use, passwords hidden. |
+| `model`, `models_in_use` | The default checkpoint, and every checkpoint in use: the default and the sources' own. |
+| `loaded` | The checkpoints the engine reported at its last health check, across instances. |
+| `capacity`, `in_flight` | `max_in_flight` × instances, and the requests open now. |
+| `calls_total` | Requests made, for live events and file analysis. |
+| `cache_hits` | Live events answered from the cache or by another event's request. |
+| `applied`, `low_confidence` | Live answers that changed the event; live category answers below `min_confidence`. |
+| `errors`, `timed_out` | Failed requests; events whose request ran out of time. |
+| `skipped` | Eligible live events not sent: no free slot in time, the queue full or the wait too long (shed), calls paused, or the checkpoint not loaded. |
+| `truncated` | Events cut to fit the model. |
+| `avg_latency_ms`, `avg_inference_ms` | Recent round trips (including time queued inside the engine), and the engine's own compute time. |
+| `cached_results` | Patterns in the cache. |
+| `last_error`, `last_error_at`, `paused_until` | The last failure, and until when all calls are paused. |
+| `warnings` | Setup problems: checkpoints in use but not loaded, checkpoints paused because the engine answered with another, categories the engine can't tell apart. |
+
+The `pipeline` section of `/api/stats` adds `engine_queued`, `engine_queue_depth`, `engine_stale` (events whose time ran out while queued, or that were queued at shutdown) and `engine_shed` (events not queued because they would have run out of time).
 
 **Running the engine for development.** laya-serve needs Python 3.10 or newer. Install the CPU build of PyTorch first unless you have a GPU:
 
@@ -222,6 +279,37 @@ LAYA_ENGINE_URL=http://127.0.0.1:8000 LAYA_ENGINE_API_KEY=dev-engine-key \
   LAYA_ADMIN_TOKEN=change-me-to-something-long make run
 ```
 
+#### Training data and fine-tuning
+
+Fine-tuning is where the engine's accuracy comes from, and your rules already label many events. Two endpoints export them in `laya-train`'s JSONL format:
+
+- `GET /api/engine/training-data`: from the live events in memory;
+- `GET /api/imports/{id}/training-data`: from the events kept for browsing an analyzed file, which include examples of every pattern.
+
+Each line is one message pattern (per source) that a rule gave one of your categories; events the engine classified are left out. `state` is exactly the text Laya sends the engine for that event, `questions` is the category question Laya asks (your current categories in order, plus `uncategorized`), and `expected` is the rule's category:
+
+```json
+{"state": "java.lang.NullPointerException at com.example.Foo.bar(Foo.java:42)\nlevel: error, source: default\nlevel=error service=api",
+ "questions": {"category": {"type": "choice", "instructions": "Which category does this log event belong to?",
+               "criteria": {"security": null, "auth": null, "application": null, "…": null, "uncategorized": "none of the above"}}},
+ "expected": {"category": "application"}}
+```
+
+`laya-train` comes with laya-serve's package; upstream's [Fine-tuning Laya on your own decisions](https://github.com/NandhaKishorM/laya/blob/v0.4.2/docs/finetune.md) describes it. It runs on CUDA, MPS or CPU. A full fine-tune is slow on a CPU; `--freeze-encoder` trains only the decision head, which fits a CPU but gains much less.
+
+```sh
+curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" -o train.jsonl http://localhost:8080/api/engine/training-data
+laya-train --data train.jsonl --base english --dry-run     # counts usable items; loads no weights
+laya-train --data train.jsonl --base english --out ./laya-logs --eval held-out.jsonl
+```
+
+Then copy `./laya-logs` to the engine, register it with `LAYA_EXTRA_MODELS='{"logs": "/path/to/laya-logs"}'`, add `logs` to `LAYA_MODELS` (on Nomad: `extra_models` and `models`), and select `logs` as the checkpoint in **Settings → Laya engine** or on a source.
+
+- The labels are your rules' decisions, mistakes included. What you gain is a model that also recognizes similar messages the rules don't match.
+- The export has no `uncategorized` examples. To keep the model answering "none of the above" for messages that fit no category, add lines of the same shape with `"expected": {"category": "uncategorized"}`.
+- The question is the one for your current categories. After changing them, export and train again, since Laya then asks a different question.
+- One line per pattern makes for small files: combine exports from several days and files. With fewer than about 100 lines, laya-train can't fit calibration (it warns `not fitted`) and the checkpoint's confidences are unreliable for `min_confidence`. Keep some lines out of training and pass them with `--eval` to compare the base checkpoint with yours.
+
 ## Configuration
 
 Runtime configuration (sources, rules, notifiers, routes, settings) is edited in the UI and stored in `$LAYA_DATA_DIR/config.json`, which is written atomically with mode 0600. **Settings → Backup** exports and imports it as JSON.
@@ -235,27 +323,47 @@ Runtime configuration (sources, rules, notifiers, routes, settings) is edited in
 | `LAYA_CONFIG_SEED` | — | JSON config file used on first start only, when `config.json` doesn't exist yet. |
 | `LAYA_EVENT_BUFFER` | `5000` | Recent events kept in memory for the UI. |
 | `LAYA_QUEUE_SIZE` | `10000` | Pipeline queue. When it's full, ingest returns 503 with `Retry-After`. |
-| `LAYA_WORKERS` / `LAYA_ENGINE_WORKERS` / `LAYA_NOTIFY_WORKERS` | `4` / `16` / `4` | Concurrency. Engine workers hold events waiting for the Laya engine; requests to it are capped by `max_in_flight`. |
-| `LAYA_ENGINE_URL` | — | Laya engine (laya-serve) base URL, or several comma-separated. Read by the default engine settings; unset means rules only. The Nomad job sets it from service discovery. |
-| `LAYA_ENGINE_API_KEY` | — | The engine's bearer key (its `LAYA_API_KEY`), read by the default engine settings. |
+| `LAYA_WORKERS` / `LAYA_ENGINE_WORKERS` / `LAYA_NOTIFY_WORKERS` | `4` / `16` / `4` | Concurrency. Engine workers hold events waiting for the Laya engine; requests to it are capped by `max_in_flight` per engine instance. |
+| `LAYA_ENGINE_URL` | — | Laya engine (laya-serve) base URL, or several comma-separated. Read by the default engine settings (`${env:LAYA_ENGINE_URL}`); unset (and no file below) means rules only. |
+| `LAYA_ENGINE_URL_FILE` | — | Used when `LAYA_ENGINE_URL` is unset: a file holding the URL(s), re-read every 30 seconds. The Nomad job renders engine addresses from service discovery into one. |
+| `LAYA_ENGINE_API_KEY` / `LAYA_ENGINE_API_KEY_FILE` | — | The engine's bearer key (its `LAYA_API_KEY`), or a file holding it, read by the default engine settings. |
 | `LAYA_MAX_INGEST_BYTES` | `10485760` | Maximum request body (compressed). Decompressed bodies may be up to 4× this. |
 | `LAYA_MAX_IMPORT_BYTES` | `104857600` | Largest log file upload on the Log files page (as sent, so possibly gzipped). |
 | `LAYA_IMPORT_MEMORY_MB` | `64` | Memory for browsable events across kept log file analyses. |
 | `LAYA_LOG_LEVEL` / `LAYA_LOG_FORMAT` | `info` / `json` | Laya's own logs (`text` for humans). |
 
-Endpoints outside the UI:
+Endpoints:
 
 - `GET /healthz` returns liveness (used by the Nomad check).
-- `GET /metrics` serves Prometheus metrics: events received, processed, dropped and rejected; queue depths; last-hour events by severity; notification outcomes; pull-source health; and the Laya engine: `laya_engine_calls_total`, `laya_engine_errors_total`, `laya_engine_cache_hits_total`, `laya_engine_applied_total`, `laya_engine_low_confidence_total`, `laya_engine_skipped_total`, `laya_engine_queue_depth` and `laya_engine_latency_avg_ms`.
+- `GET /metrics` serves Prometheus metrics: events received, processed, dropped and rejected; queue depths; last-hour events by severity; notification outcomes; log file analyses; pull-source health; and the Laya engine (below).
 - `POST /ingest/{source}` accepts logs.
-- `POST /api/imports` analyzes a log file (admin token required, like the rest of `/api/*`).
-- `GET /api/engine/health` checks the Laya engine, and `POST /api/engine/classify` asks it about one message or event (see [Laya engine](#laya-engine-optional)).
-- `/api/*` is the REST API the UI uses. Everything requires `Authorization: Bearer $LAYA_ADMIN_TOKEN`.
+- `/api/*` is the REST API the UI uses. Everything requires `Authorization: Bearer $LAYA_ADMIN_TOKEN`. Besides the configuration (`/api/sources`, `/api/rules`, `/api/notifiers`, `/api/routes`, `/api/settings`, `/api/config/export` and `/import`):
+  - `GET /api/stats` (counters and engine status) and `GET /api/events`;
+  - `POST /api/imports` analyzes a log file (`?engine=1` to ask the Laya engine), and `GET /api/imports/{id}` (with `/events`, `/patterns` and `/training-data`) returns the results;
+  - `GET /api/engine/health` checks the Laya engine, `POST /api/engine/classify` asks it about one message or event, and `GET /api/engine/training-data` exports laya-train data (see [Laya engine](#laya-engine-optional)).
+
+The Laya engine's metrics:
+
+| Metric | |
+| --- | --- |
+| `laya_engine_calls_total` | Requests to the engine, for live events and file analysis. |
+| `laya_engine_errors_total` | Failed requests. |
+| `laya_engine_timed_out_total` | Events whose request ran out of time. |
+| `laya_engine_cache_hits_total` | Live events answered from the cache or by another event's request. |
+| `laya_engine_applied_total` | Live answers that changed a category or severity. |
+| `laya_engine_low_confidence_total` | Live category answers below `min_confidence`. |
+| `laya_engine_skipped_total` | Eligible live events not sent: busy, shed, paused, or the checkpoint not loaded. |
+| `laya_engine_queue_depth` | Events waiting for the engine. |
+| `laya_engine_requests_completed_total` | Requests answered. |
+| `laya_engine_request_seconds_total` | Time spent on answered requests, including time queued inside the engine. Divide its rate by the rate of `…_requests_completed_total` for the average. |
+| `laya_engine_inference_seconds_total` | The engine's compute time for answered requests (its `X-Inference-Time-Ms`). |
+| `laya_engine_paused` | 1 while all calls are paused after errors (a single checkpoint's pause shows in the engine status instead). |
 
 ## Operational notes
 
 - **Single instance.** Configuration is one file on one volume, so the Nomad job runs `count = 1` and Nomad reschedules it if the node fails. Recent events and delivery history live in memory and reset on restart. Laya is a classifier and alerter, not long-term log storage; keep shipping logs to your log store as well (a webhook notifier can forward classified events).
-- **Laya engine.** The engine is a separate service with its own needs: about 3.5 GB of memory and 4 CPU cores per instance on CPU, roughly 1–2 new message patterns per second each, or an NVIDIA GPU for far more. Laya never depends on it: without it, or while it's down, classification is the rules' alone. On Nomad, Laya restarts when engine instances come or go, which empties the in-memory events; see [deploy/nomad/README.md](deploy/nomad/README.md#6-run-the-laya-engine-optional).
+- **Laya engine.** The engine is a separate service with its own needs: about 3.5 GB of memory and 4 CPU cores per instance on CPU, roughly 1–2 new message patterns per second each, or an NVIDIA GPU for far more. Laya never depends on it: without it, or while it's down, classification is the rules' alone. On Nomad, Laya re-reads the engine addresses from a file, so engine instances coming and going don't restart it; see [deploy/nomad/README.md](deploy/nomad/README.md#6-run-the-laya-engine-optional).
+- **Shutdown.** On SIGTERM or Ctrl-C, Laya stops accepting requests and stops polling, finishes the events it already accepted (engine requests are cancelled, so those events keep the rules' result), then delivers the notifications still queued. It gives this 25 seconds in all, and logs what was left if time runs out. A request still running, such as a log file upload, counts against those 25 seconds.
 - **Security.** The UI sends a strict Content-Security-Policy and renders all log content as text, never HTML. Ingest and admin tokens are compared in constant time. Pull sources and webhooks can reach any URL the admin enters, so treat the admin token like infrastructure credentials and put Laya behind TLS (for example Traefik or another load balancer).
 
 ## Development
