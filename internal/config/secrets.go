@@ -1,28 +1,59 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"regexp"
+	"strings"
 )
 
 // Mask replaces secret values in API responses. A client that sends Mask
 // back unchanged keeps the stored value.
 const Mask = "********"
 
-var envRef = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}`)
+var envRef = regexp.MustCompile(`\$\{(env|file):([^}]+)\}`)
+
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ExpandEnv replaces ${env:NAME} references with the value of the
-// environment variable NAME. This lets secrets live in Nomad Variables (or
-// Vault) and reach Laya through the job's template block instead of being
-// stored in the config file.
+// environment variable NAME (or, when NAME is unset and NAME_FILE is set,
+// the contents of that file), and ${file:/path} references with the
+// contents of that file. File contents have trailing newlines trimmed and
+// are empty if the file can't be read. This lets secrets and addresses live
+// in Nomad Variables (or Vault) and reach Laya through the job's template
+// block instead of the config file; files can change while Laya runs.
 func ExpandEnv(s string) string {
 	if s == "" {
 		return s
 	}
 	return envRef.ReplaceAllStringFunc(s, func(m string) string {
-		return os.Getenv(envRef.FindStringSubmatch(m)[1])
+		sub := envRef.FindStringSubmatch(m)
+		if sub[1] == "file" {
+			return readRef(sub[2])
+		}
+		if !envName.MatchString(sub[2]) {
+			return m
+		}
+		if v, ok := os.LookupEnv(sub[2]); ok {
+			return v
+		}
+		if path := os.Getenv(sub[2] + "_FILE"); path != "" {
+			return readRef(path)
+		}
+		return ""
 	})
 }
+
+func readRef(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(b), "\r\n")
+}
+
+// HasRef reports whether s contains an ${env:…} or ${file:…} reference.
+func HasRef(s string) bool { return envRef.MatchString(s) }
 
 // MaskValue hides v unless it is empty or an ${env:...} reference, which is
 // not itself secret.
@@ -36,6 +67,27 @@ func MaskValue(v string) string {
 // Restore returns old when the client sent the mask back unchanged.
 func Restore(newV, old string) string {
 	if newV == Mask {
+		return old
+	}
+	return newV
+}
+
+// MaskURLs hides passwords embedded in a comma-separated URL list.
+func MaskURLs(list string) string {
+	parts := strings.Split(list, ",")
+	for i, p := range parts {
+		if u, err := url.Parse(strings.TrimSpace(p)); err == nil && u.User != nil {
+			if _, has := u.User.Password(); has {
+				parts[i] = strings.Replace(p, strings.TrimSpace(p), u.Redacted(), 1)
+			}
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+// RestoreURLs keeps old when the client sent back its masked form.
+func RestoreURLs(newV, old string) string {
+	if newV != old && newV == MaskURLs(old) {
 		return old
 	}
 	return newV

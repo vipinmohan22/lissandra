@@ -75,13 +75,16 @@ type Event struct {
 	Fields     map[string]any `json:"fields,omitempty"`
 
 	// Classification results.
-	Severity     Severity      `json:"severity"`
-	Category     string        `json:"category"`
-	Tags         []string      `json:"tags,omitempty"`
-	MatchedRules []string      `json:"matched_rules,omitempty"`
-	Classifier   string        `json:"classifier"`
-	Engine       *EngineResult `json:"engine,omitempty"` // the Laya engine's answer, when it was asked
-	Fingerprint  string        `json:"fingerprint"`
+	Severity Severity `json:"severity"`
+	// SeverityGuessed is set when Severity was inferred from keywords: the
+	// record stated no level and no rule set one.
+	SeverityGuessed bool          `json:"severity_guessed,omitempty"`
+	Category        string        `json:"category"`
+	Tags            []string      `json:"tags,omitempty"`
+	MatchedRules    []string      `json:"matched_rules,omitempty"`
+	Classifier      string        `json:"classifier"`
+	Engine          *EngineResult `json:"engine,omitempty"` // the Laya engine's answer, when it was asked
+	Fingerprint     string        `json:"fingerprint"`
 
 	// Set on events read from an uploaded log file rather than a live source.
 	ImportID   string `json:"import_id,omitempty"`
@@ -92,13 +95,15 @@ type Event struct {
 
 // EngineResult records what the Laya engine answered for an event.
 type EngineResult struct {
-	Model      string             `json:"model"`               // checkpoint that answered
-	Category   string             `json:"category"`            // its choice (Uncategorized: none fits)
-	Confidence float64            `json:"confidence"`          // answer confidence of Category
-	Top        map[string]float64 `json:"top,omitempty"`       // most likely categories
-	Severity   Severity           `json:"severity,omitempty"`  // when asked
-	Applied    bool               `json:"applied"`             // the answer set the category or severity
-	Truncated  bool               `json:"truncated,omitempty"` // the event was cut to fit the model
+	Model              string             `json:"model"`                         // checkpoint that answered
+	Category           string             `json:"category"`                      // its choice (Uncategorized: none fits)
+	Confidence         float64            `json:"confidence"`                    // answer confidence of Category
+	Top                map[string]float64 `json:"top,omitempty"`                 // most likely categories
+	Severity           Severity           `json:"severity,omitempty"`            // when asked
+	SeverityConfidence float64            `json:"severity_confidence,omitempty"` // answer confidence of Severity
+	Threshold          float64            `json:"threshold"`                     // min_confidence when it was applied
+	Applied            bool               `json:"applied"`                       // the answer changed the category or severity
+	Truncated          bool               `json:"truncated,omitempty"`           // the event was cut to fit the model
 }
 
 // TimeSource values for events whose record had no timestamp.

@@ -44,7 +44,12 @@ type Pipeline struct {
 	// default it is the engine's configured timeout.
 	MaxEngineWait time.Duration
 
-	Received, Processed, Dropped, Rejected, EngineQueued, EngineStale atomic.Uint64
+	// engineCtx carries engine requests; Drain cancels it.
+	engineCtx    context.Context
+	engineCancel context.CancelFunc
+	draining     atomic.Bool
+
+	Received, Processed, Dropped, Rejected, EngineQueued, EngineStale, EngineShed atomic.Uint64
 }
 
 // New builds a pipeline with a queue of queueSize events. laya may be nil.
@@ -56,6 +61,7 @@ func New(queueSize int, store *events.Store, d *notify.Dispatcher, laya *engine.
 		dispatcher:  d,
 		laya:        laya,
 	}
+	p.engineCtx, p.engineCancel = context.WithCancel(context.Background())
 	p.engine.Store(classify.New(nil))
 	return p
 }
@@ -109,6 +115,8 @@ func (p *Pipeline) EngineQueueDepth() int { return len(p.engineQueue) }
 // Run processes events until ctx is cancelled, with engineWorkers
 // goroutines waiting on the Laya engine.
 func (p *Pipeline) Run(ctx context.Context, workers, engineWorkers int) {
+	stop := context.AfterFunc(ctx, p.engineCancel)
+	defer stop()
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -133,7 +141,7 @@ func (p *Pipeline) Run(ctx context.Context, workers, engineWorkers int) {
 				case <-ctx.Done():
 					return
 				case q := <-p.engineQueue:
-					p.enrich(ctx, q)
+					p.enrich(q)
 				}
 			}
 		}()
@@ -141,20 +149,44 @@ func (p *Pipeline) Run(ctx context.Context, workers, engineWorkers int) {
 	wg.Wait()
 }
 
+// Drain finishes every event already accepted: engine requests are
+// cancelled and waiting events go on with the rules' result. Stop ingest
+// first. It returns when nothing is left, or when ctx ends.
+func (p *Pipeline) Drain(ctx context.Context) error {
+	p.draining.Store(true)
+	p.engineCancel()
+	t := time.NewTicker(10 * time.Millisecond)
+	defer t.Stop()
+	for {
+		if len(p.in) == 0 && len(p.engineQueue) == 0 && p.Received.Load() == p.Processed.Load()+p.Dropped.Load() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+}
+
+// maxEngineWait is how long an event may wait for the engine.
+func (p *Pipeline) maxEngineWait() time.Duration {
+	if p.MaxEngineWait > 0 {
+		return p.MaxEngineWait
+	}
+	return p.laya.MaxWait()
+}
+
 // enrich asks the Laya engine about a queued event, then records it. The
 // time from queueing to the answer is bounded, so a slow or hung engine
 // delays an event (and its alert) by at most the engine wait.
-func (p *Pipeline) enrich(ctx context.Context, q queued) {
-	wait := p.MaxEngineWait
-	if wait <= 0 {
-		wait = p.laya.MaxWait()
-	}
-	deadline := q.at.Add(wait)
-	if time.Now().After(deadline) {
+func (p *Pipeline) enrich(q queued) {
+	deadline := q.at.Add(p.maxEngineWait())
+	if time.Now().After(deadline) || p.draining.Load() {
 		p.EngineStale.Add(1)
 		p.laya.Skipped.Add(1)
 	} else {
-		ctx, cancel := context.WithDeadline(ctx, deadline)
+		ctx, cancel := context.WithDeadline(p.engineCtx, deadline)
 		p.laya.Enrich(ctx, &q.ev)
 		cancel()
 	}
@@ -176,8 +208,8 @@ func (p *Pipeline) ClassifyOffline(rules *classify.Engine, ev *model.Event) bool
 
 // ClassifyFile classifies ev for file analysis: rules, then the Laya engine
 // for what they leave. A cached answer is used when there is one; otherwise
-// the engine is asked while calls (shared by the analysis) remain and live
-// events are not waiting for it, so file analysis never delays live
+// the engine is asked while calls (shared by the analysis) remain and no
+// live event is waiting for it, so file analysis never delays live
 // classification. It never stores the event or notifies. It returns false
 // when a rule drops the event.
 func (p *Pipeline) ClassifyFile(ctx context.Context, rules *classify.Engine, ev *model.Event, calls *atomic.Int64) bool {
@@ -187,12 +219,12 @@ func (p *Pipeline) ClassifyFile(ctx context.Context, rules *classify.Engine, ev 
 	if p.laya == nil || !p.laya.Eligible(ev) || p.laya.ApplyCachedQuiet(ev) {
 		return true
 	}
-	if p.EngineQueueDepth() > 0 || !p.laya.Available() || calls.Add(-1) < 0 {
+	if p.EngineQueueDepth() > 0 || !p.laya.Available(ev) || calls.Add(-1) < 0 {
 		return true
 	}
 	ctx, cancel := context.WithTimeout(ctx, p.laya.MaxWait())
 	defer cancel()
-	p.laya.Enrich(ctx, ev)
+	p.laya.EnrichFile(ctx, ev)
 	return true
 }
 
@@ -201,15 +233,20 @@ func (p *Pipeline) process(ev model.Event) {
 		p.Dropped.Add(1)
 		return
 	}
-	if p.laya != nil && p.laya.Eligible(&ev) && !p.laya.ApplyCached(&ev) {
-		if !p.laya.Available() {
+	if p.laya != nil && !p.draining.Load() && p.laya.Eligible(&ev) && !p.laya.ApplyCached(&ev) {
+		switch {
+		case !p.laya.Available(&ev):
 			p.laya.Skipped.Add(1)
-		} else {
+		case p.laya.WouldWait(len(p.engineQueue)) > p.maxEngineWait():
+			// It would time out in the queue anyway: don't hold it.
+			p.EngineShed.Add(1)
+			p.laya.Skipped.Add(1)
+		default:
 			select {
 			case p.engineQueue <- queued{ev, time.Now()}:
 				p.EngineQueued.Add(1)
 				return
-			default: // the engine is backed up; don't hold the event
+			default: // the queue is full; don't hold the event
 				p.laya.Skipped.Add(1)
 			}
 		}

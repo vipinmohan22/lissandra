@@ -141,8 +141,22 @@ func Normalize(c *Config) error {
 	for _, cat := range st.Categories {
 		cat.Name = strings.ToLower(strings.TrimSpace(cat.Name))
 		cat.Description = strings.TrimSpace(cat.Description)
-		if cat.Name == "" || cat.Name == model.Uncategorized || slices.ContainsFunc(cats, func(c Category) bool { return c.Name == cat.Name }) {
-			continue
+		switch {
+		case cat.Name == "" && cat.Description == "":
+			continue // a blank row
+		case cat.Name == "":
+			return fmt.Errorf("settings: a category with a description needs a name")
+		case cat.Name == model.Uncategorized:
+			return fmt.Errorf("settings: %q is reserved for events no category fits", model.Uncategorized)
+		}
+		if i := slices.IndexFunc(cats, func(c Category) bool { return c.Name == cat.Name }); i >= 0 {
+			if cat.Description != "" && cats[i].Description != "" && cat.Description != cats[i].Description {
+				return fmt.Errorf("settings: category %q is listed twice with different descriptions", cat.Name)
+			}
+			if cats[i].Description == "" {
+				cats[i].Description = cat.Description
+			}
+			continue // the same category again (names are case-insensitive)
 		}
 		if len(cat.Name) > 64 || len(cat.Description) > 300 {
 			return fmt.Errorf("settings: category %q: names are limited to 64 characters and descriptions to 300", model.Truncate(cat.Name, 64))
@@ -165,9 +179,18 @@ var engineModelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 // engineModelAliases maps laya-serve's aliases to the checkpoint names it
 // reports in routing.model, so answers can be checked against the request.
 var engineModelAliases = map[string]string{
-	"en": "english", "laya": "english", "default": "english",
-	"multi": "multilingual", "ml": "multilingual",
-	"typed": "typed-decisions", "typed_decisions": "typed-decisions", "decisions": "typed-decisions",
+	"en":                                     "english",
+	"laya":                                   "english",
+	"default":                                "english",
+	"multi":                                  "multilingual",
+	"ml":                                     "multilingual",
+	"laya-multilingual":                      "multilingual",
+	"convaiinnovations/laya-multilingual":    "multilingual",
+	"typed":                                  "typed-decisions",
+	"typed_decisions":                        "typed-decisions",
+	"decisions":                              "typed-decisions",
+	"laya-typed-decisions":                   "typed-decisions",
+	"convaiinnovations/laya-typed-decisions": "typed-decisions",
 }
 
 // NormalizeEngineModel trims name, resolves laya-serve aliases and checks
@@ -188,7 +211,7 @@ func NormalizeEngineModel(name string) (string, error) {
 
 func normalizeEngine(e *EngineSettings) error {
 	e.URL = strings.TrimSpace(e.URL)
-	if !envRef.MatchString(e.URL) {
+	if !HasRef(e.URL) {
 		if _, err := ParseEngineURLs(e.URL); err != nil {
 			return fmt.Errorf("settings: engine url: %w", err)
 		}
@@ -211,13 +234,17 @@ func normalizeEngine(e *EngineSettings) error {
 		return fmt.Errorf("settings: engine min_confidence must be between 0 and 1")
 	}
 	if e.MaxInFlight <= 0 {
-		e.MaxInFlight = 4
+		e.MaxInFlight = 1
 	}
-	e.MaxInFlight = min(e.MaxInFlight, 16) // laya-serve answers 503 past 16
+	if e.MaxInFlight > 16 { // laya-serve answers 503 past 16
+		return fmt.Errorf("settings: engine max_in_flight is at most 16 per instance")
+	}
 	if e.TimeoutSeconds <= 0 {
 		e.TimeoutSeconds = 30
 	}
-	e.TimeoutSeconds = min(e.TimeoutSeconds, 300)
+	if e.TimeoutSeconds > 300 {
+		return fmt.Errorf("settings: engine timeout_seconds is at most 300")
+	}
 	return nil
 }
 

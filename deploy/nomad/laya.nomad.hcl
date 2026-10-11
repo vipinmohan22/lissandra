@@ -106,16 +106,16 @@ variable "engine_url" {
 }
 
 locals {
-  # LAYA_ENGINE_URL for the task: every instance of the engine service as
-  # http://address:port, comma-separated (Laya spreads requests over them
-  # and fails over), or nothing when no instance is registered, in which
-  # case Laya classifies with its rules alone.
+  # The engine's address list for the task: every instance of the engine
+  # service as http://address:port, comma-separated (Laya spreads requests
+  # over them and fails over), or nothing when no instance is registered,
+  # in which case Laya classifies with its rules alone.
   engine_lookup = var.service_provider == "consul" ? "service" : "nomadService"
-  engine_env = (
-    var.engine_url != "" ? "LAYA_ENGINE_URL=${var.engine_url}\n" :
-    var.engine_service == "" ? "LAYA_ENGINE_URL=\n" :
+  engine_urls = (
+    var.engine_url != "" ? "${var.engine_url}\n" :
+    var.engine_service == "" ? "\n" :
     <<-EOT
-      LAYA_ENGINE_URL={{ range $i, $s := ${local.engine_lookup} "${var.engine_service}" }}{{ if $i }},{{ end }}http://{{ if .Address | regexMatch ":" }}[{{ .Address }}]{{ else }}{{ .Address }}{{ end }}:{{ .Port }}{{ end }}
+      {{ range $i, $s := ${local.engine_lookup} "${var.engine_service}" }}{{ if $i }},{{ end }}http://{{ if .Address | regexMatch ":" }}[{{ .Address }}]{{ else }}{{ .Address }}{{ end }}:{{ .Port }}{{ end }}
     EOT
   )
 }
@@ -207,6 +207,8 @@ job "laya" {
         LAYA_IMPORT_MEMORY_MB = var.import_memory_mb
         # Let the Go runtime collect garbage before the task hits its limit.
         GOMEMLIMIT = "${floor(var.memory * 0.8)}MiB"
+        # Engine addresses, rendered by the template below.
+        LAYA_ENGINE_URL_FILE = "$${NOMAD_TASK_DIR}/engine_urls"
       }
 
       # Secrets come from the Nomad Variable at nomad/jobs/laya, which this
@@ -229,15 +231,16 @@ job "laya" {
         EOT
       }
 
-      # Where the Laya engine is: LAYA_ENGINE_URL, which the default engine
-      # settings read (${env:LAYA_ENGINE_URL}). Laya reads its environment
-      # at startup, so it restarts when engine instances come or go; while
-      # none is registered it runs on rules alone.
+      # Where the Laya engine is. The default engine settings read
+      # ${env:LAYA_ENGINE_URL}; it is unset here, so Laya reads the file
+      # named by LAYA_ENGINE_URL_FILE instead, and re-reads it every 30 s.
+      # Engine instances coming and going therefore never restart Laya
+      # (which would empty its in-memory events). While no instance is
+      # registered, Laya runs on rules alone.
       template {
-        destination = "local/engine.env"
-        env         = true
-        change_mode = "restart"
-        data        = local.engine_env
+        destination = "local/engine_urls"
+        change_mode = "noop"
+        data        = local.engine_urls
       }
 
       resources {

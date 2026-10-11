@@ -72,7 +72,8 @@ type Dispatcher struct {
 	tmu      sync.Mutex
 	throttle map[string]*throttleState
 
-	queue chan job
+	queue   chan job
+	pending atomic.Int64 // queued or being delivered
 
 	dmu        sync.Mutex
 	deliveries []Delivery
@@ -199,9 +200,11 @@ func (d *Dispatcher) Handle(ev model.Event) {
 				continue
 			}
 			msg := &Message{Event: ev, RouteName: r.Name, Suppressed: suppressed, Link: d.eventLink(ev.ID)}
+			d.pending.Add(1)
 			select {
 			case d.queue <- job{ch: ch, msg: msg}:
 			default:
+				d.pending.Add(-1)
 				d.Dropped.Add(1)
 				d.record(ch, msg, "dropped", "notification queue full", 0, 0)
 			}
@@ -239,6 +242,21 @@ func (d *Dispatcher) eventLink(id string) string {
 }
 
 // Run starts delivery workers and blocks until ctx is cancelled.
+// Drain waits until every queued notification has been delivered (or has
+// failed), or until ctx ends. Stop handing it events first.
+func (d *Dispatcher) Drain(ctx context.Context) error {
+	t := time.NewTicker(10 * time.Millisecond)
+	defer t.Stop()
+	for d.pending.Load() > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+	return nil
+}
+
 func (d *Dispatcher) Run(ctx context.Context, workers int) {
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -251,6 +269,7 @@ func (d *Dispatcher) Run(ctx context.Context, workers int) {
 					return
 				case j := <-d.queue:
 					d.deliver(ctx, j.ch, j.msg)
+					d.pending.Add(-1)
 				}
 			}
 		}()

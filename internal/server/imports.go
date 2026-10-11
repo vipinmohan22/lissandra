@@ -56,6 +56,7 @@ func (s *Server) importRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/imports/{id}/events", s.listImportEvents)
 	mux.HandleFunc("GET /api/imports/{id}/events/{eid}", s.getImportEvent)
 	mux.HandleFunc("GET /api/imports/{id}/patterns", s.listImportPatterns)
+	mux.HandleFunc("GET /api/imports/{id}/training-data", s.importTrainingData)
 	mux.HandleFunc("DELETE /api/imports/{id}", s.deleteImport)
 }
 
@@ -344,6 +345,15 @@ func (s *Server) findImport(w http.ResponseWriter, r *http.Request) (*importer.I
 func (s *Server) getImport(w http.ResponseWriter, r *http.Request) {
 	if im, ok := s.findImport(w, r); ok {
 		writeJSON(w, http.StatusOK, im.Report(true))
+	}
+}
+
+// importTrainingData downloads laya-train JSONL from the file's retained
+// events that a rule categorized (one record per pattern).
+func (s *Server) importTrainingData(w http.ResponseWriter, r *http.Request) {
+	if im, ok := s.findImport(w, r); ok {
+		evs, _ := im.Events(importer.Query{Limit: -1})
+		writeTrainingData(w, s.laya, evs, "laya-training-file")
 	}
 }
 

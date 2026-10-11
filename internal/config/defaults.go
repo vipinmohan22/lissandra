@@ -6,21 +6,13 @@ import "github.com/vipinmohan22/layalogs/internal/model"
 // picks another one.
 const DefaultEngineModel = "english"
 
-// DefaultCategories seeds the category list shown in the UI. The
-// descriptions tell the Laya engine what belongs in each category; they are
-// kept to a few keywords because the engine reads only about 16 tokens per
-// option once there are ten or more.
+// DefaultCategories seeds the category list shown in the UI. They have no
+// descriptions: the engine tells plain names apart better than descriptions
+// it can only read about 16 tokens of. Add a description only to settle a
+// name that is ambiguous.
 var DefaultCategories = []Category{
-	{"security", "attacks, intrusions, malware, suspicious access"},
-	{"auth", "login failures, invalid tokens, permission denied"},
-	{"application", "exceptions, crashes, panics, application bugs"},
-	{"database", "database connections, queries, deadlocks, replication"},
-	{"network", "DNS, connection refused, TLS errors, upstream timeouts"},
-	{"resource", "out of memory, disk full, CPU or quota limits"},
-	{"http", "HTTP 4xx and 5xx responses from servers and APIs"},
-	{"performance", "slow requests, high latency, backlogs"},
-	{"deployment", "deploys, releases, rollbacks, restarts, config changes"},
-	{"audit", "who changed what: accounts, permissions, settings"},
+	{Name: "security"}, {Name: "auth"}, {Name: "application"}, {Name: "database"}, {Name: "network"},
+	{Name: "resource"}, {Name: "http"}, {Name: "performance"}, {Name: "deployment"}, {Name: "audit"},
 }
 
 func cond(field, op, value string) Condition {
@@ -152,7 +144,7 @@ func Defaults() *Config {
 				MinSeverity:       model.SeverityWarning,
 				MinConfidence:     0.6,
 				SetSeverity:       true,
-				MaxInFlight:       4,
+				MaxInFlight:       1,
 				TimeoutSeconds:    30,
 			},
 		},

@@ -32,10 +32,13 @@ type Server struct {
 	// indistinguishable options in usage.options, as laya-serve does when
 	// options overflow its token budget.
 	Collapse int
-	Calls    atomic.Int32
-	mu       sync.Mutex
-	Last     Request // the last decision request
-	Headers  http.Header
+	// HideLoaded makes /health report only {"status":"ok"}, as laya-serve
+	// does for callers without its key.
+	HideLoaded bool
+	Calls      atomic.Int32
+	mu         sync.Mutex
+	Last       Request // the last decision request
+	Headers    http.Header
 }
 
 // Request is what the fake received.
@@ -106,7 +109,7 @@ func (s *Server) authorized(r *http.Request) bool {
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
+	if !s.authorized(r) || s.HideLoaded {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		return
 	}

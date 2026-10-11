@@ -21,6 +21,7 @@ import (
 	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/importer"
+	"github.com/vipinmohan22/layalogs/internal/model"
 	"github.com/vipinmohan22/layalogs/internal/notify"
 	"github.com/vipinmohan22/layalogs/internal/pipeline"
 	"github.com/vipinmohan22/layalogs/internal/poller"
@@ -346,12 +347,86 @@ func TestEngineEndpoints(t *testing.T) {
 	var stats struct {
 		Engine engine.Status `json:"engine"`
 	}
-	e.admin("GET", "/api/stats", nil, &stats)
-	if !stats.Engine.Configured || stats.Engine.Calls != 1 {
-		t.Errorf("stats %+v", stats.Engine)
+	// The engine's checkpoints are learned by a background health check.
+	for deadline := time.Now().Add(5 * time.Second); len(stats.Engine.Loaded) == 0 && time.Now().Before(deadline); {
+		e.admin("GET", "/api/stats", nil, &stats)
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !stats.Engine.Configured || stats.Engine.Calls != 0 || strings.Join(stats.Engine.Loaded, ",") != "english,multilingual" {
+		t.Errorf("test calls must not count as live calls: %+v", stats.Engine)
 	}
 	_, metrics := e.do("GET", "/metrics", nil, map[string]string{"Authorization": "Bearer " + adminToken})
-	if !bytes.Contains(metrics, []byte("laya_engine_calls_total 1")) {
+	if !bytes.Contains(metrics, []byte("laya_engine_calls_total 0")) || !bytes.Contains(metrics, []byte("laya_engine_paused 0")) {
 		t.Errorf("metrics missing engine counters")
+	}
+}
+
+func TestEngineTrainingDataAndRulesView(t *testing.T) {
+	fake := enginetest.New()
+	defer fake.Close()
+	e := newEnv(t)
+	var st config.Settings
+	e.admin("GET", "/api/settings", nil, &st)
+	st.Engine.URL = "http://user:s3cret@" + strings.TrimPrefix(fake.URL, "http://")
+	e.admin("PUT", "/api/settings", st, nil)
+	e.admin("GET", "/api/settings", nil, &st)
+	if strings.Contains(st.Engine.URL, "s3cret") {
+		t.Errorf("engine URL password not masked: %q", st.Engine.URL)
+	}
+	e.admin("PUT", "/api/settings", st, nil) // masked URL sent back
+	if got := e.cfg.Get().Settings.Engine.URL; !strings.Contains(got, "s3cret") {
+		t.Errorf("masked URL not restored: %q", got)
+	}
+
+	var sources []config.Source
+	e.admin("GET", "/api/sources", nil, &sources)
+	push := func(line string) {
+		req, _ := http.NewRequest("POST", e.srv.URL+"/ingest/"+sources[0].Name, strings.NewReader(line))
+		req.Header.Set("Authorization", "Bearer "+sources[0].IngestToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	push("ERROR java.lang.OutOfMemoryError: Java heap space\n") // rule: resource
+	push("ERROR java.lang.OutOfMemoryError: Java heap space\n") // same pattern
+	push("ERROR the replica of the database is lagging\n")      // engine: database
+	deadline := time.Now().Add(5 * time.Second)
+	var evs []model.Event
+	for len(evs) < 3 && time.Now().Before(deadline) {
+		e.admin("GET", "/api/events", nil, &evs)
+		time.Sleep(20 * time.Millisecond)
+	}
+	var byEngine model.Event
+	for _, ev := range evs {
+		if ev.Classifier == engine.ByEngine {
+			byEngine = ev
+		}
+	}
+	if byEngine.Category != "database" {
+		t.Fatalf("engine did not classify: %+v", evs)
+	}
+	// The rules' view of an engine-classified event is "uncategorized".
+	var res struct {
+		OK    bool `json:"ok"`
+		Rules struct {
+			Category string `json:"category"`
+		} `json:"rules"`
+	}
+	e.admin("POST", "/api/engine/classify", map[string]string{"event_id": byEngine.ID}, &res)
+	if !res.OK || res.Rules.Category != model.Uncategorized {
+		t.Errorf("rules view: %+v", res)
+	}
+
+	code, body := e.do("GET", "/api/engine/training-data", nil, authHeaders(nil))
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if code != 200 || len(lines) != 1 {
+		t.Fatalf("training data %d: %q", code, body)
+	}
+	var rec engine.TrainingRecord
+	json.Unmarshal([]byte(lines[0]), &rec)
+	if rec.Expected["category"] != "resource" || !strings.Contains(rec.State, "OutOfMemoryError") || rec.Questions["category"].Type != "choice" {
+		t.Errorf("record %+v", rec)
 	}
 }

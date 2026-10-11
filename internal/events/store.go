@@ -165,6 +165,17 @@ func (s *Store) Find(q Query) []model.Event {
 	return out
 }
 
+// All returns every retained event, newest first.
+func (s *Store) All() []model.Event {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]model.Event, 0, s.size)
+	for i := 0; i < s.size; i++ {
+		out = append(out, s.buf[(s.next-1-i+len(s.buf))%len(s.buf)])
+	}
+	return out
+}
+
 // Get returns the stored event with id.
 func (s *Store) Get(id string) (model.Event, bool) {
 	s.mu.RLock()

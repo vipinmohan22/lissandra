@@ -193,3 +193,28 @@ func TestDefaultRulesCompileAndClassify(t *testing.T) {
 		}
 	}
 }
+
+func TestSeverityGuessed(t *testing.T) {
+	e := New([]config.Rule{{Name: "sev", Enabled: true, Match: config.MatchAll,
+		Conditions: []config.Condition{{Field: "message", Op: config.OpContains, Value: "quota"}}, Severity: model.SeverityCritical}})
+	cases := []struct {
+		level, msg string
+		guessed    bool
+	}{
+		{"ERROR", "anything", false},
+		{"", "2026/10/11 09:40:03 [crit] SSL_do_handshake() failed", false},
+		{"", "WARN disk at 91%", false},
+		{"", "level=error msg=boom", false},
+		{"", "E1011 04:10:03.123456 1 controller.go:88] failed", false},
+		{"", "x509: certificate has expired", true},
+		{"", "payment failed for order 7", true},
+		{"", "quota exceeded for tenant", false}, // a rule set it
+	}
+	for _, c := range cases {
+		ev := model.Event{Level: c.level, Message: c.msg}
+		e.Classify(&ev)
+		if ev.SeverityGuessed != c.guessed {
+			t.Errorf("%q %q: guessed=%v", c.level, c.msg, ev.SeverityGuessed)
+		}
+	}
+}

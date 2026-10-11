@@ -75,7 +75,9 @@ func New(rules []config.Rule) *Engine {
 // Classify sets ev's severity, category, tags, matched rules and fingerprint.
 // It returns false when a rule says the event should be dropped.
 func (e *Engine) Classify(ev *model.Event) bool {
-	ev.Severity = DetectSeverity(ev.Level, ev.Message)
+	var stated bool
+	ev.Severity, stated = detectSeverity(ev.Level, ev.Message)
+	ev.SeverityGuessed = !stated
 	ev.Classifier = ByHeuristic
 	ev.Category = ""
 	ev.MatchedRules = nil
@@ -97,6 +99,7 @@ func (e *Engine) Classify(ev *model.Event) bool {
 			ev.AddTag(t)
 		}
 		if r.Severity != "" {
+			ev.SeverityGuessed = false
 			if r.SeverityMode == config.SeverityAtLeast {
 				if !ev.Severity.AtLeast(r.Severity) {
 					ev.Severity = r.Severity
@@ -246,29 +249,37 @@ var (
 // DetectSeverity infers a severity from an explicit level value when there
 // is one, otherwise from the message text.
 func DetectSeverity(level, message string) model.Severity {
+	s, _ := detectSeverity(level, message)
+	return s
+}
+
+// detectSeverity also reports whether the record stated its level: a level
+// field, or a level token in the text (klog prefix, level=…, "ERROR …",
+// "[crit]"). Otherwise the severity is a guess from keywords.
+func detectSeverity(level, message string) (model.Severity, bool) {
 	if level != "" {
 		if s, ok := model.ParseSeverity(level); ok {
-			return s
+			return s, true
 		}
 		if n, err := strconv.Atoi(strings.TrimSpace(level)); err == nil {
-			return numericSeverity(n)
+			return numericSeverity(n), true
 		}
 	}
 	if m := klogPrefix.FindStringSubmatch(message); m != nil {
 		switch m[1] {
 		case "I":
-			return model.SeverityInfo
+			return model.SeverityInfo, true
 		case "W":
-			return model.SeverityWarning
+			return model.SeverityWarning, true
 		case "E":
-			return model.SeverityError
+			return model.SeverityError, true
 		case "F":
-			return model.SeverityCritical
+			return model.SeverityCritical, true
 		}
 	}
 	if m := kvLevel.FindStringSubmatch(message); m != nil {
 		if s, ok := model.ParseSeverity(m[1]); ok {
-			return s
+			return s, true
 		}
 	}
 	head := message
@@ -277,18 +288,18 @@ func DetectSeverity(level, message string) model.Severity {
 	}
 	if m := leadingLevel.FindStringSubmatch(head); m != nil {
 		if s, ok := model.ParseSeverity(m[1]); ok {
-			return s
+			return s, true
 		}
 	}
 	switch {
 	case kwCritical.MatchString(message):
-		return model.SeverityCritical
+		return model.SeverityCritical, false
 	case kwError.MatchString(message):
-		return model.SeverityError
+		return model.SeverityError, false
 	case kwWarning.MatchString(message):
-		return model.SeverityWarning
+		return model.SeverityWarning, false
 	}
-	return model.SeverityInfo
+	return model.SeverityInfo, false
 }
 
 // numericSeverity maps syslog priorities (0-7) and pino/bunyan levels

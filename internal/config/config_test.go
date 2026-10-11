@@ -134,3 +134,33 @@ func TestSecrets(t *testing.T) {
 		t.Errorf("restore failed: %+v", masked.Pull)
 	}
 }
+
+func TestFileRefsAndURLMasking(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "urls")
+	os.WriteFile(path, []byte("http://10.0.0.1:8000,http://10.0.0.2:8000\n"), 0o600)
+	if got := ExpandEnv("${file:" + path + "}"); got != "http://10.0.0.1:8000,http://10.0.0.2:8000" {
+		t.Errorf("file ref: %q", got)
+	}
+	if got := ExpandEnv("${file:/does/not/exist}"); got != "" {
+		t.Errorf("missing file: %q", got)
+	}
+	t.Setenv("LAYA_TEST_URLS_FILE", path)
+	if got := ExpandEnv("${env:LAYA_TEST_URLS}"); got != "http://10.0.0.1:8000,http://10.0.0.2:8000" {
+		t.Errorf("NAME_FILE fallback: %q", got)
+	}
+	t.Setenv("LAYA_TEST_URLS", "http://set")
+	if got := ExpandEnv("${env:LAYA_TEST_URLS}"); got != "http://set" {
+		t.Errorf("NAME wins over NAME_FILE: %q", got)
+	}
+	if MaskValue("${file:/run/secrets/key}") != "${file:/run/secrets/key}" {
+		t.Error("a file reference is not itself secret")
+	}
+	raw := "http://user:s3cret@a:8000, http://b:8000"
+	masked := MaskURLs(raw)
+	if strings.Contains(masked, "s3cret") || !strings.Contains(masked, "http://b:8000") {
+		t.Errorf("masked %q", masked)
+	}
+	if RestoreURLs(masked, raw) != raw || RestoreURLs("http://c:1", raw) != "http://c:1" {
+		t.Error("restore")
+	}
+}

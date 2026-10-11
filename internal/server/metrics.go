@@ -40,14 +40,23 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	metric("laya_notification_queue_depth", "gauge", "Notifications waiting for delivery.", fmt.Sprintf(" %d", d.QueueDepth()))
 
 	e := s.laya
-	metric("laya_engine_calls_total", "counter", "Classification requests to the Laya engine.", fmt.Sprintf(" %d", e.Calls.Load()))
+	est := e.Status()
+	metric("laya_engine_calls_total", "counter", "Requests to the Laya engine (live and file events).", fmt.Sprintf(" %d", e.Calls.Load()))
 	metric("laya_engine_errors_total", "counter", "Failed Laya engine requests.", fmt.Sprintf(" %d", e.Errors.Load()))
-	metric("laya_engine_cache_hits_total", "counter", "Laya engine answers served from the per-pattern cache.", fmt.Sprintf(" %d", e.CacheHits.Load()))
-	metric("laya_engine_applied_total", "counter", "Laya engine answers that set a category or severity.", fmt.Sprintf(" %d", e.Applied.Load()))
-	metric("laya_engine_low_confidence_total", "counter", "Laya engine answers below the confidence threshold.", fmt.Sprintf(" %d", e.LowConfidence.Load()))
-	metric("laya_engine_skipped_total", "counter", "Eligible events not sent to the Laya engine (busy, paused or waited too long).", fmt.Sprintf(" %d", e.Skipped.Load()))
+	metric("laya_engine_timed_out_total", "counter", "Events whose engine request ran out of time.", fmt.Sprintf(" %d", e.TimedOut.Load()))
+	metric("laya_engine_cache_hits_total", "counter", "Live events answered from the per-pattern cache or a shared request.", fmt.Sprintf(" %d", e.CacheHits.Load()))
+	metric("laya_engine_applied_total", "counter", "Live engine answers that changed a category or severity.", fmt.Sprintf(" %d", e.Applied.Load()))
+	metric("laya_engine_low_confidence_total", "counter", "Live engine category answers below the confidence threshold.", fmt.Sprintf(" %d", e.LowConfidence.Load()))
+	metric("laya_engine_skipped_total", "counter", "Eligible live events not sent to the engine (busy, paused, checkpoint not loaded, or waited too long).", fmt.Sprintf(" %d", e.Skipped.Load()))
 	metric("laya_engine_queue_depth", "gauge", "Events waiting for the Laya engine.", fmt.Sprintf(" %d", s.pipeline.EngineQueueDepth()))
-	metric("laya_engine_latency_avg_ms", "gauge", "Average Laya engine round trip.", fmt.Sprintf(" %d", e.Status().AvgLatencyMs))
+	metric("laya_engine_requests_completed_total", "counter", "Engine requests answered.", fmt.Sprintf(" %d", e.Completed.Load()))
+	metric("laya_engine_request_seconds_total", "counter", "Time spent on answered engine requests, queueing on the engine included.", fmt.Sprintf(" %.3f", float64(e.LatencyMsTotal.Load())/1000))
+	metric("laya_engine_inference_seconds_total", "counter", "Engine compute time of answered requests (X-Inference-Time-Ms).", fmt.Sprintf(" %.3f", float64(e.InferMsTotal.Load())/1000))
+	paused := 0
+	if !est.PausedUntil.IsZero() {
+		paused = 1
+	}
+	metric("laya_engine_paused", "gauge", "1 while engine requests are paused after errors.", fmt.Sprintf(" %d", paused))
 
 	metric("laya_imports_total", "counter", "Log file analyses by outcome.",
 		fmt.Sprintf(`{status="done"} %d`, s.imports.Succeeded.Load()),

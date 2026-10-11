@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/quotedprintable"
@@ -341,5 +342,33 @@ func TestDispatcherRoutingAndThrottle(t *testing.T) {
 	suppressed, ok := d.admit(r, "n1", "fp1", time.Now().Add(2*time.Hour))
 	if !ok || suppressed != 1 {
 		t.Errorf("admit after window = %d, %v", suppressed, ok)
+	}
+}
+
+func TestDispatcherDrain(t *testing.T) {
+	fake.mu.Lock()
+	fake.msgs, fake.fails = nil, 0
+	fake.mu.Unlock()
+	d := NewDispatcher(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.Configure(&config.Config{
+		Notifiers: []config.Notifier{{ID: "n1", Name: "fake", Type: "fake-test", Enabled: true}},
+		Routes:    []config.Route{{ID: "r1", Name: "all", Enabled: true, MinSeverity: model.SeverityDebug, NotifierIDs: []string{"n1"}}},
+	})
+	for i := 0; i < 5; i++ {
+		d.Handle(model.Event{ID: fmt.Sprint(i), Severity: model.SeverityError, Fingerprint: fmt.Sprint("fp", i)})
+	}
+	// Nothing delivers until Run starts: Drain waits for it.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	if err := d.Drain(ctx); err == nil {
+		t.Error("drain returned with notifications still queued")
+	}
+	cancel()
+	runCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go d.Run(runCtx, 2)
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := d.Drain(ctx); err != nil || fake.count() != 5 {
+		t.Errorf("drain: %v delivered=%d", err, fake.count())
 	}
 }

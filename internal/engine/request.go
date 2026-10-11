@@ -13,9 +13,9 @@ import (
 )
 
 // stateBudget caps the text sent per event. The english checkpoint reads
-// about 460 tokens of state and the multilingual one about 980; the most
-// telling lines go first so truncation only drops detail.
-const stateBudget = 2000
+// about 460 tokens of state; a full window costs about three times a short
+// line, so the most telling lines go first and the rest is cut early.
+const stateBudget = 1200
 
 // severityLevels describes model.Severities, lowest first, for the score
 // question.
@@ -33,16 +33,7 @@ var severityLevels = []string{
 func buildRequest(ev *model.Event, cats []config.Category, checkpoint string, askSeverity bool) Request {
 	q := map[string]Question{}
 	if len(cats) > 0 {
-		crit := make(criteria, 0, len(cats)+1)
-		for _, c := range cats {
-			desc := c.Description
-			if desc == "" {
-				desc = c.Name
-			}
-			crit = append(crit, label{c.Name, desc})
-		}
-		crit = append(crit, label{model.Uncategorized, "none of the categories above: routine operation, or something else"})
-		q[qCategory] = Question{Type: TypeChoice, Instructions: "Which category does this log event belong to?", Criteria: crit}
+		q[qCategory] = categoryQuestion(cats)
 	}
 	if askSeverity {
 		q[qSeverity] = Question{Type: TypeScore, Instructions: "How severe is this log event?", Criteria: severityLevels}
@@ -50,7 +41,19 @@ func buildRequest(ev *model.Event, cats []config.Category, checkpoint string, as
 	return Request{State: buildState(ev), Questions: q, Model: checkpoint}
 }
 
-// label is one choice option.
+// categoryQuestion asks which category an event belongs to. Categories
+// without a description are offered by name alone, which the engine tells
+// apart better than long descriptions it can only read the start of.
+func categoryQuestion(cats []config.Category) Question {
+	crit := make(criteria, 0, len(cats)+1)
+	for _, c := range cats {
+		crit = append(crit, label{c.Name, c.Description})
+	}
+	crit = append(crit, label{model.Uncategorized, "none of the above"})
+	return Question{Type: TypeChoice, Instructions: "Which category does this log event belong to?", Criteria: crit}
+}
+
+// label is one choice option; an empty desc is sent as null (name only).
 type label struct{ name, desc string }
 
 // criteria marshals as a JSON object in the configured order (Go maps
@@ -65,7 +68,10 @@ func (c criteria) MarshalJSON() ([]byte, error) {
 			b.WriteByte(',')
 		}
 		k, _ := json.Marshal(l.name)
-		v, _ := json.Marshal(l.desc)
+		v := []byte("null")
+		if l.desc != "" {
+			v, _ = json.Marshal(l.desc)
+		}
 		b.Write(k)
 		b.WriteByte(':')
 		b.Write(v)
@@ -144,4 +150,29 @@ func clip(s string, n int) string {
 		n--
 	}
 	return s[:n]
+}
+
+// TrainingRecord is one line of laya-train JSONL: the state and question
+// Laya sends for an event, and the answer to learn.
+type TrainingRecord struct {
+	State     string              `json:"state"`
+	Questions map[string]Question `json:"questions"`
+	Expected  map[string]string   `json:"expected"`
+}
+
+// TrainingRecord builds a laya-train record from a categorized event,
+// with the same state and category question Laya asks the engine. ok is
+// false when ev's category is not one of the configured categories.
+func (c *Classifier) TrainingRecord(ev *model.Event) (TrainingRecord, bool) {
+	c.mu.Lock()
+	cats := c.categories
+	c.mu.Unlock()
+	if len(cats) == 0 || !slices.ContainsFunc(cats, func(x config.Category) bool { return x.Name == ev.Category }) {
+		return TrainingRecord{}, false
+	}
+	return TrainingRecord{
+		State:     buildState(ev),
+		Questions: map[string]Question{qCategory: categoryQuestion(cats)},
+		Expected:  map[string]string{qCategory: ev.Category},
+	}, true
 }

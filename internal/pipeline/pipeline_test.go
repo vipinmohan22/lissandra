@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -115,8 +116,8 @@ func TestSlowEngineDoesNotHoldEventsBack(t *testing.T) {
 		return enginetest.Answer{Choice: q.Labels[0], Probs: map[string]float64{q.Labels[0]: 1}}
 	}
 	p, store, _ := run(t, fake.URL, 100*time.Millisecond)
-	// MaxInFlight is 4: the first four block in the engine; the rest wait
-	// in the queue, then go on without it.
+	// One request is with the engine (max_in_flight 1); the rest wait in
+	// the queue, then go on without it.
 	var evs []model.Event
 	for i := 0; i < 8; i++ {
 		evs = append(evs, model.Event{ID: string(rune('a' + i)), SourceID: "s", Message: "ERROR distinct failure " + string(rune('a'+i))})
@@ -125,5 +126,56 @@ func TestSlowEngineDoesNotHoldEventsBack(t *testing.T) {
 	waitFor(t, store, 4)
 	if p.EngineStale.Load() == 0 {
 		t.Error("queued events should time out of the engine queue")
+	}
+}
+
+func TestDrainFinishesEverything(t *testing.T) {
+	fake := enginetest.New()
+	defer fake.Close()
+	block := make(chan struct{})
+	defer close(block)
+	fake.Decide = func(state string, q enginetest.Question) enginetest.Answer { <-block; return enginetest.Answer{} }
+	p, store, _ := run(t, fake.URL, time.Minute)
+	var evs []model.Event
+	for i := 0; i < 6; i++ {
+		evs = append(evs, model.Event{ID: fmt.Sprint(i), SourceID: "s", Message: fmt.Sprint("ERROR distinct failure ", i)})
+	}
+	p.Submit(evs)
+	time.Sleep(100 * time.Millisecond) // one is with the engine, the rest queued
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := p.Drain(ctx); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if time.Since(start) > 2*time.Second || len(store.Find(events.Query{Limit: 100})) != 6 {
+		t.Errorf("drain took %v and stored %d of 6", time.Since(start), len(store.Find(events.Query{Limit: 100})))
+	}
+}
+
+func TestShedsWhenTheEngineCannotKeepUp(t *testing.T) {
+	fake := enginetest.New()
+	defer fake.Close()
+	release := make(chan struct{})
+	fake.Decide = func(state string, q enginetest.Question) enginetest.Answer {
+		select {
+		case <-release:
+		case <-time.After(300 * time.Millisecond):
+		}
+		return enginetest.Answer{Choice: q.Labels[0], Probs: map[string]float64{q.Labels[0]: 1}}
+	}
+	p, store, _ := run(t, fake.URL, time.Second)
+	// One answer measures the engine at ~300ms per event.
+	p.Submit([]model.Event{{ID: "warm", SourceID: "s", Message: "ERROR warm up"}})
+	waitFor(t, store, 1)
+	var evs []model.Event
+	for i := 0; i < 20; i++ {
+		evs = append(evs, model.Event{ID: fmt.Sprint(i), SourceID: "s", Message: fmt.Sprint("ERROR burst failure ", i)})
+	}
+	p.Submit(evs)
+	waitFor(t, store, 21)
+	close(release)
+	if p.EngineShed.Load() == 0 {
+		t.Error("events that would time out in the queue should not be queued")
 	}
 }

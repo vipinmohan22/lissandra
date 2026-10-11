@@ -112,10 +112,14 @@ func run() error {
 		log.Info("configuration applied", "version", c.Version, "sources", len(c.Sources), "rules", len(c.Rules), "notifiers", len(c.Notifiers), "routes", len(c.Routes))
 	})
 
+	// The pipeline and dispatcher outlive the signal: on shutdown they
+	// first finish what was accepted (see below).
+	runCtx, stopRun := context.WithCancel(context.Background())
+	defer stopRun()
 	done := make(chan struct{}, 2)
-	go func() { dispatcher.Run(ctx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
+	go func() { dispatcher.Run(runCtx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
 	go func() {
-		pipe.Run(ctx, envInt("LAYA_WORKERS", 4), envInt("LAYA_ENGINE_WORKERS", 16))
+		pipe.Run(runCtx, envInt("LAYA_WORKERS", 4), envInt("LAYA_ENGINE_WORKERS", 16))
 		done <- struct{}{}
 	}()
 
@@ -157,9 +161,19 @@ func run() error {
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
+	// Stop ingest (pollers stopped with ctx), then finish every accepted
+	// event, engine requests cancelled, and deliver its alerts.
 	_ = httpSrv.Shutdown(shutdownCtx)
+	if err := pipe.Drain(shutdownCtx); err != nil {
+		log.Warn("events still queued at shutdown", "queued", pipe.QueueDepth()+pipe.EngineQueueDepth())
+	}
+	if err := dispatcher.Drain(shutdownCtx); err != nil {
+		log.Warn("notifications still queued at shutdown", "queued", dispatcher.QueueDepth())
+	}
+	laya.Close()
+	stopRun()
 	for i := 0; i < 2; i++ {
 		select {
 		case <-done:

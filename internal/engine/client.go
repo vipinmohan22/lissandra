@@ -125,10 +125,11 @@ var ErrWrongModel = errors.New("laya engine answered with a different checkpoint
 // Client calls one or more laya-serve instances, round-robin with failover.
 // It is safe for concurrent use.
 type Client struct {
-	urls []string
-	key  string
-	http *http.Client
-	next atomic.Uint32
+	urls  []string
+	key   string
+	http  *http.Client
+	next  atomic.Uint32
+	ready atomic.Pointer[map[string]bool]
 }
 
 // maxResponseBytes bounds a reply; real ones are a few KB.
@@ -137,7 +138,9 @@ const maxResponseBytes = 4 << 20
 // NewClient returns a client for the given base URLs.
 func NewClient(urls []string, apiKey string, timeout time.Duration, maxConns int) *Client {
 	tr := &http.Transport{
-		Proxy:               http.ProxyFromEnvironment,
+		// No proxy: the engine runs next to Laya, and HTTP(S)_PROXY settings
+		// meant for outbound traffic (notifications) would capture it.
+		Proxy:               nil,
 		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		MaxIdleConnsPerHost: maxConns,
 		// uvicorn closes idle keep-alive connections after 5s; reusing one
@@ -155,17 +158,18 @@ func (c *Client) URLs() []string { return c.urls }
 func (c *Client) Close() { c.http.CloseIdleConnections() }
 
 // Decide sends req and returns the answers. A 503 (engine busy) is retried
-// after its Retry-After; connection errors and 5xx move on to the next
-// instance. 4xx replies are returned at once: retrying won't help.
+// after its Retry-After for as long as ctx allows; connection errors and
+// 5xx move on to the next instance; a timeout or a 4xx is returned at once,
+// since retrying would only add to the engine's queue or fail again.
 func (c *Client) Decide(ctx context.Context, req Request) (Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return Response{}, err
 	}
 	start := time.Now()
-	attempts := max(3, len(c.urls)+1)
+	failovers := len(c.urls)
 	var last error
-	for i := 0; i < attempts; i++ {
+	for attempt := 0; attempt < 30; attempt++ {
 		base := c.pick()
 		resp, err := c.post(ctx, base, body)
 		if err == nil {
@@ -182,21 +186,38 @@ func (c *Client) Decide(ctx context.Context, req Request) (Response, error) {
 		case ctx.Err() != nil:
 			return Response{}, err
 		case errors.As(err, &netErr) && netErr.Timeout():
-			return Response{}, err // the engine is slow; retrying adds to its queue
+			return Response{}, err
 		case errors.As(err, &apiErr) && apiErr.Status == http.StatusServiceUnavailable:
 			if !sleep(ctx, apiErr.RetryAfter) {
 				return Response{}, err
 			}
+			continue
 		case errors.As(err, &apiErr) && apiErr.Status < 500:
 			return Response{}, err
+		}
+		if failovers--; failovers < 0 {
+			break
 		}
 	}
 	return Response{}, last
 }
 
-// pick returns the next base URL, round-robin.
+// SetReady records which instances passed their last health check.
+// Requests go to those, or to all of them when none did.
+func (c *Client) SetReady(ready map[string]bool) { c.ready.Store(&ready) }
+
+// pick returns the next base URL, round-robin over ready instances.
 func (c *Client) pick() string {
-	return c.urls[int(c.next.Add(1)-1)%len(c.urls)]
+	n := len(c.urls)
+	start := int(c.next.Add(1) - 1)
+	if ready := c.ready.Load(); ready != nil {
+		for i := 0; i < n; i++ {
+			if u := c.urls[(start+i)%n]; (*ready)[u] {
+				return u
+			}
+		}
+	}
+	return c.urls[start%n]
 }
 
 func (c *Client) post(ctx context.Context, base string, body []byte) (Response, error) {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/vipinmohan22/layalogs/internal/classify"
 	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/engine"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/ingest"
 	"github.com/vipinmohan22/layalogs/internal/model"
@@ -60,6 +62,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/settings", s.updateSettings)
 	mux.HandleFunc("POST /api/engine/classify", s.engineClassify)
 	mux.HandleFunc("GET /api/engine/health", s.engineHealth)
+	mux.HandleFunc("GET /api/engine/training-data", s.engineTrainingData)
 
 	mux.HandleFunc("GET /api/config/export", s.exportConfig)
 	mux.HandleFunc("POST /api/config/import", s.importConfig)
@@ -119,7 +122,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		"pipeline": map[string]any{
 			"queue_depth": p.QueueDepth(), "received": p.Received.Load(), "processed": p.Processed.Load(),
 			"dropped": p.Dropped.Load(), "rejected": p.Rejected.Load(), "engine_queued": p.EngineQueued.Load(),
-			"engine_queue_depth": p.EngineQueueDepth(), "engine_stale": p.EngineStale.Load(),
+			"engine_queue_depth": p.EngineQueueDepth(), "engine_stale": p.EngineStale.Load(), "engine_shed": p.EngineShed.Load(),
 		},
 		"notifications": map[string]any{
 			"queue_depth": d.QueueDepth(), "sent": d.Sent.Load(), "failed": d.Failed.Load(),
@@ -619,6 +622,7 @@ func (s *Server) listDeliveries(w http.ResponseWriter, r *http.Request) {
 
 func maskSettings(st config.Settings) config.Settings {
 	st.Engine.APIKey = config.MaskValue(st.Engine.APIKey)
+	st.Engine.URL = config.MaskURLs(st.Engine.URL)
 	return st
 }
 
@@ -633,6 +637,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.update(w, func(c *config.Config) error {
 		st.Engine.APIKey = config.Restore(st.Engine.APIKey, c.Settings.Engine.APIKey)
+		st.Engine.URL = config.RestoreURLs(st.Engine.URL, c.Settings.Engine.URL)
 		c.Settings = st
 		return nil
 	}) {
@@ -658,6 +663,10 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "event not found")
 			return
 		}
+		// Ask about the event as the rules alone classify it today, and
+		// report that, not its stored (possibly engine-set) result.
+		ev.Engine, ev.Tags = nil, nil
+		s.pipeline.Engine().Classify(&ev)
 	} else {
 		if strings.TrimSpace(body.Message) == "" {
 			writeError(w, http.StatusBadRequest, "message or event_id is required")
@@ -679,6 +688,38 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": res, "rules": map[string]any{
 		"category": ev.Category, "severity": ev.Severity, "matched_rules": ev.MatchedRules,
 	}})
+}
+
+// engineTrainingData downloads laya-train JSONL from live events the rules
+// categorized: one record per message pattern, with the state and category
+// question Laya sends the engine, so a checkpoint can be fine-tuned on
+// exactly what it will be asked.
+func (s *Server) engineTrainingData(w http.ResponseWriter, r *http.Request) {
+	writeTrainingData(w, s.laya, s.store.All(), "laya-training-live")
+}
+
+// writeTrainingData writes one record per pattern of events whose category
+// came from a rule.
+func writeTrainingData(w http.ResponseWriter, laya *engine.Classifier, evs []model.Event, name string) {
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.jsonl"`, name, time.Now().UTC().Format("20060102-150405")))
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	seen := map[string]bool{}
+	for i := range evs {
+		ev := &evs[i]
+		if len(ev.MatchedRules) == 0 || ev.Classifier == engine.ByEngine || seen[ev.Fingerprint] {
+			continue
+		}
+		rec, ok := laya.TrainingRecord(ev)
+		if !ok {
+			continue
+		}
+		seen[ev.Fingerprint] = true
+		if enc.Encode(rec) != nil {
+			return
+		}
+	}
 }
 
 // engineHealth checks every configured laya-serve instance.
@@ -739,6 +780,7 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		next.Settings.Engine.APIKey = config.Restore(next.Settings.Engine.APIKey, c.Settings.Engine.APIKey)
+		next.Settings.Engine.URL = config.RestoreURLs(next.Settings.Engine.URL, c.Settings.Engine.URL)
 		next.Version = c.Version
 		*c = next
 		return nil

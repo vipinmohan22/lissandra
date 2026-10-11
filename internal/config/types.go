@@ -201,7 +201,8 @@ type EngineSettings struct {
 	Enabled bool `json:"enabled"`
 	// URL of laya-serve, e.g. http://127.0.0.1:8000. Several URLs may be
 	// given, comma-separated; requests go round-robin and fail over.
-	// ${env:NAME} references are expanded.
+	// ${env:NAME} and ${file:/path} references are expanded; a file is
+	// re-read while Laya runs (Nomad renders engine addresses into one).
 	URL    string `json:"url"`
 	APIKey string `json:"api_key,omitempty"` // bearer key (LAYA_API_KEY on the engine)
 	// Model is the checkpoint pinned on every request: english,
@@ -217,7 +218,9 @@ type EngineSettings struct {
 	// SetSeverity asks the engine for a severity when neither the log
 	// record nor a rule set one.
 	SetSeverity bool `json:"set_severity"`
-	MaxInFlight int  `json:"max_in_flight"` // concurrent requests to the engine
+	// MaxInFlight is concurrent requests per engine instance. laya-serve
+	// computes one answer at a time, so more only queue inside it.
+	MaxInFlight int `json:"max_in_flight"`
 	// TimeoutSeconds bounds how long an event waits for the engine,
 	// queueing included; then it goes on with the rules' result, so a slow
 	// engine never holds alerts back longer than this.
