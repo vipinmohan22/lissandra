@@ -7,18 +7,20 @@ import "github.com/vipinmohan22/layalogs/internal/model"
 const DefaultEngineModel = "english"
 
 // DefaultCategories seeds the category list shown in the UI. The
-// descriptions tell the Laya engine what belongs in each category.
+// descriptions tell the Laya engine what belongs in each category; they are
+// kept to a few keywords because the engine reads only about 16 tokens per
+// option once there are ten or more.
 var DefaultCategories = []Category{
-	{"security", "attacks, intrusion attempts, malware, suspicious access, policy violations"},
-	{"auth", "login failures, invalid or expired credentials and tokens, permission denied"},
-	{"application", "unhandled exceptions, crashes, panics, null pointers, application bugs"},
-	{"database", "database connections, query errors and timeouts, deadlocks, replication"},
-	{"network", "DNS failures, connection refused or reset, TLS errors, upstream timeouts"},
-	{"resource", "out of memory, disk full, CPU throttling, file descriptor or quota limits"},
-	{"http", "HTTP request errors and unusual status codes from web servers and APIs"},
-	{"performance", "slow requests, high latency, timeouts caused by load, queue backlogs"},
-	{"deployment", "deploys, releases, rollbacks, configuration changes, restarts"},
-	{"audit", "records of who did what: account, permission and configuration changes"},
+	{"security", "attacks, intrusions, malware, suspicious access"},
+	{"auth", "login failures, invalid tokens, permission denied"},
+	{"application", "exceptions, crashes, panics, application bugs"},
+	{"database", "database connections, queries, deadlocks, replication"},
+	{"network", "DNS, connection refused, TLS errors, upstream timeouts"},
+	{"resource", "out of memory, disk full, CPU or quota limits"},
+	{"http", "HTTP 4xx and 5xx responses from servers and APIs"},
+	{"performance", "slow requests, high latency, backlogs"},
+	{"deployment", "deploys, releases, rollbacks, restarts, config changes"},
+	{"audit", "who changed what: accounts, permissions, settings"},
 }
 
 func cond(field, op, value string) Condition {

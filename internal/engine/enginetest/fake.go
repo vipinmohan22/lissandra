@@ -28,6 +28,10 @@ type Server struct {
 	Decide  func(state string, q Question) Answer
 	Busy    atomic.Int32 // answer 503 to this many requests
 	Fail    atomic.Int32 // answer 500 to this many requests
+	// Collapse makes choice questions with more options than this report
+	// indistinguishable options in usage.options, as laya-serve does when
+	// options overflow its token budget.
+	Collapse int
 	Calls   atomic.Int32
 	mu      sync.Mutex
 	Last    Request // the last decision request
@@ -201,13 +205,23 @@ func (s *Server) systemone(w http.ResponseWriter, r *http.Request) {
 	s.Last, s.Headers = req, r.Header.Clone()
 	s.mu.Unlock()
 	truncated := len(state) > 1800
+	usage := map[string]any{"input_tokens": 100, "output_tokens": 0, "state_tokens": len(state) / 4,
+		"state_tokens_dropped": 0, "truncated": truncated, "truncated_questions": []string{}}
+	options := map[string]any{}
+	for id, labels := range req.Order {
+		if s.Collapse > 0 && len(labels) > s.Collapse {
+			options[id] = map[string]int{"total": len(labels), "distinct": s.Collapse, "tokens_per_option": 4}
+		}
+	}
+	if len(options) > 0 {
+		usage["options"] = options
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Inference-Time-Ms", "12.5")
 	json.NewEncoder(w).Encode(map[string]any{
 		"model":   "laya-rl-agent",
 		"answers": answers,
-		"usage": map[string]any{"input_tokens": 100, "output_tokens": 0, "state_tokens": len(state) / 4,
-			"state_tokens_dropped": 0, "truncated": truncated, "truncated_questions": []string{}},
+		"usage":   usage,
 		"routing": map[string]any{"model": model, "repo": "convaiinnovations/laya", "reason": "pinned", "detection": nil, "workflow": nil},
 	})
 }

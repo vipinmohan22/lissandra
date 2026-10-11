@@ -61,6 +61,17 @@ type Usage struct {
 	StateTokensDropped int      `json:"state_tokens_dropped"`
 	Truncated          bool     `json:"truncated"`
 	TruncatedQuestions []string `json:"truncated_questions,omitempty"`
+	// Options is reported for questions whose options had to be cut to fit
+	// the model's option budget; Distinct < Total means some options became
+	// indistinguishable.
+	Options map[string]OptionUsage `json:"options,omitempty"`
+}
+
+// OptionUsage describes how a question's options were cut.
+type OptionUsage struct {
+	Total           int `json:"total"`
+	Distinct        int `json:"distinct"`
+	TokensPerOption int `json:"tokens_per_option"`
 }
 
 // Routing names the checkpoint that answered.
@@ -166,9 +177,12 @@ func (c *Client) Decide(ctx context.Context, req Request) (Response, error) {
 		}
 		last = err
 		var apiErr *APIError
+		var netErr net.Error
 		switch {
 		case ctx.Err() != nil:
 			return Response{}, err
+		case errors.As(err, &netErr) && netErr.Timeout():
+			return Response{}, err // the engine is slow; retrying adds to its queue
 		case errors.As(err, &apiErr) && apiErr.Status == http.StatusServiceUnavailable:
 			if !sleep(ctx, apiErr.RetryAfter) {
 				return Response{}, err

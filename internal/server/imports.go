@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -38,6 +39,11 @@ const (
 	// uploadSourceName names events analyzed with default parsing. The file
 	// name is kept separately (Event.File) because it is user-controlled.
 	uploadSourceName = "file upload"
+
+	// maxImportEngineCalls bounds the Laya engine requests one analysis may
+	// make (one per pattern the rules leave): about a minute or two of
+	// engine time on CPU.
+	maxImportEngineCalls = 100
 )
 
 // ImportFormats lists the formats accepted for file analysis.
@@ -56,7 +62,7 @@ func (s *Server) importRoutes(mux *http.ServeMux) {
 // importParams are the options of an upload, from the query string or from
 // multipart form fields sent before the file.
 type importParams struct {
-	id, name, source, format, tz string
+	id, name, source, format, tz, engine string
 }
 
 func (p *importParams) set(key, value string) {
@@ -71,6 +77,8 @@ func (p *importParams) set(key, value string) {
 		p.format = value
 	case "tz":
 		p.tz = value
+	case "engine":
+		p.engine = value
 	}
 }
 
@@ -92,7 +100,7 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 	}
 	var p importParams
 	q := r.URL.Query()
-	for _, k := range []string{"id", "name", "source", "format", "tz"} {
+	for _, k := range []string{"id", "name", "source", "format", "tz", "engine"} {
 		if q.Has(k) {
 			p.set(k, q.Get(k))
 		}
@@ -156,7 +164,13 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	engine := s.pipeline.Engine()
+	rules := s.pipeline.Engine()
+	classify := func(ev *model.Event) bool { return s.pipeline.ClassifyOffline(rules, ev) }
+	if opts.engine {
+		var calls atomic.Int64
+		calls.Store(maxImportEngineCalls)
+		classify = func(ev *model.Event) bool { return s.pipeline.ClassifyFile(r.Context(), rules, ev, &calls) }
+	}
 	err = importer.Run(r.Context(), im, uploadReader{file, limit}, importer.Options{
 		FileName:       opts.name,
 		Source:         opts.src,
@@ -167,7 +181,7 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 		Deadline:       time.Now().Add(importDeadline),
 		Workers:        1, // leave the other cores to live ingest
 	}, importer.Deps{
-		Classify: func(ev *model.Event) bool { return s.pipeline.ClassifyOffline(engine, ev) },
+		Classify: classify,
 		Routes:   s.dispatcher.Matches,
 		Busy:     s.pipeline.Busy,
 	})
@@ -194,6 +208,7 @@ type importOptions struct {
 	name, format string
 	loc          *time.Location
 	src          config.Source
+	engine       bool // ask the Laya engine about patterns the rules leave
 }
 
 func (s *Server) importOptions(p importParams) (importOptions, error) {
@@ -215,6 +230,13 @@ func (s *Server) importOptions(p importParams) (importOptions, error) {
 			return o, fmt.Errorf("unknown time zone %q", p.tz)
 		}
 		o.loc = loc
+	}
+	switch strings.ToLower(p.engine) {
+	case "", "0", "false", "off":
+	case "1", "true", "on":
+		o.engine = true
+	default:
+		return o, fmt.Errorf("engine must be true or false, not %q", p.engine)
 	}
 	if p.source != "" {
 		found, ok := s.lookupSource(p.source)

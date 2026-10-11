@@ -75,6 +75,9 @@ type Status struct {
 	LastError     string    `json:"last_error,omitempty"`
 	LastErrorAt   time.Time `json:"last_error_at,omitzero"`
 	PausedUntil   time.Time `json:"paused_until,omitzero"`
+	// Warning is a problem with the questions themselves, such as category
+	// descriptions too long for the model to tell categories apart.
+	Warning string `json:"warning,omitempty"`
 }
 
 // Classifier classifies events with laya-serve. All methods are safe for
@@ -94,6 +97,7 @@ type Classifier struct {
 	flights      map[string]*flight
 	lastErr      string
 	lastErrAt    time.Time
+	warning      string
 	pausedUntil  time.Time
 	failures     int
 
@@ -124,6 +128,7 @@ func (c *Classifier) Configure(cfg *config.Config) {
 	defer c.mu.Unlock()
 	if s.Model != c.settings.Model || !maps.Equal(models, c.sourceModels) || !slices.Equal(cfg.Settings.Categories, c.categories) {
 		c.cache = map[string]cached{}
+		c.warning = ""
 	}
 	clientKey := fmt.Sprint(urls, "\x00", key, "\x00", s.TimeoutSeconds, "\x00", s.MaxInFlight)
 	if clientKey != c.clientKey {
@@ -336,6 +341,11 @@ func (c *Classifier) call(ctx context.Context, client *Client, sem chan struct{}
 	if r.Truncated {
 		c.Truncated.Add(1)
 	}
+	if o, ok := resp.Usage.Options[qCategory]; ok && o.Distinct < o.Total {
+		c.mu.Lock()
+		c.warning = fmt.Sprintf("the engine could only tell %d of %d categories apart (options cut to %d tokens each): shorten the category names and descriptions or use fewer categories", o.Distinct, o.Total, o.TokensPerOption)
+		c.mu.Unlock()
+	}
 	return r, nil
 }
 
@@ -496,6 +506,10 @@ func (c *Classifier) Probe(ctx context.Context) ([]EndpointHealth, error) {
 				eh.Loaded, eh.Device = h.Loaded, h.Device
 				eh.Revision = h.Revisions[s.Model]
 				eh.ModelLoaded = slices.Contains(h.Loaded, s.Model)
+				if h.Loaded == nil {
+					// laya-serve shows its checkpoints only to callers with its key.
+					eh.Error = "the engine did not list its checkpoints: check the API key"
+				}
 			}
 			out[i] = eh
 		}()
@@ -525,6 +539,7 @@ func (c *Classifier) Status() Status {
 		CachedResults: len(c.cache),
 		LastError:     c.lastErr,
 		LastErrorAt:   c.lastErrAt,
+		Warning:       c.warning,
 	}
 	if c.client != nil {
 		for _, u := range c.client.URLs() {

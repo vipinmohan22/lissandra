@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
 	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/model"
 )
@@ -216,5 +217,30 @@ func TestParseInterspersed(t *testing.T) {
 		if err != nil || strings.Join(files, ",") != c.files {
 			t.Errorf("%q: %v %q", c.args, err, files)
 		}
+	}
+}
+
+func TestAnalyzeWithEngine(t *testing.T) {
+	fake := enginetest.New()
+	defer fake.Close()
+	dir := t.TempDir()
+	f := writeFile(t, dir, "app.log", "2026-10-11 10:00:00 ERROR replica lag on the database is 40s\n"+
+		"2026-10-11 10:00:01 ERROR replica lag on the database is 41s\n"+
+		"2026-10-11 10:00:02 INFO started\n")
+	code, out, errOut := analyze(t, "", "-engine", fake.URL, f)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(errOut, "checkpoint english") || !strings.Contains(out, "database 2") || !strings.Contains(out, "engine      answered for 2 events, applied to 2") {
+		t.Errorf("engine not used:\n%s\n%s", out, errOut)
+	}
+	if n := fake.Calls.Load(); n != 1 {
+		t.Errorf("one pattern, %d engine calls", n)
+	}
+	if code, _, errOut := analyze(t, "", "-engine", fake.URL, "-engine-model", "mystery", f); code != 1 || !strings.Contains(errOut, `checkpoint "mystery"`) {
+		t.Errorf("unloaded checkpoint: %d %s", code, errOut)
+	}
+	if code, _, _ := analyze(t, "", "-engine", "ftp://nope", f); code != 1 {
+		t.Errorf("bad engine URL: %d", code)
 	}
 }

@@ -301,3 +301,45 @@ func TestConfigValidation(t *testing.T) {
 		t.Errorf("urls %v", urls)
 	}
 }
+
+func TestWarningsAndHints(t *testing.T) {
+	cl, fake, _ := setup(t, nil)
+	fake.Collapse = 5
+	ev := event("database down")
+	if _, err := cl.Classify(context.Background(), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if w := cl.Status().Warning; !strings.Contains(w, "5 of 11 categories") {
+		t.Errorf("option collapse not reported: %q", w)
+	}
+
+	keyed, fake2, _ := setup(t, nil)
+	fake2.Key = "secret" // our client sends none
+	eps, _ := keyed.Probe(context.Background())
+	if len(eps) != 1 || !eps[0].OK || eps[0].ModelLoaded || !strings.Contains(eps[0].Error, "API key") {
+		t.Errorf("health without the key: %+v", eps)
+	}
+}
+
+func TestTimeoutIsNotRetried(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer slow.Close()
+	c := NewClient([]string{slow.URL}, "", 100*time.Millisecond, 2)
+	start := time.Now()
+	_, err := c.Decide(context.Background(), Request{State: "x", Questions: map[string]Question{}, Model: "english"})
+	if err == nil || time.Since(start) > 250*time.Millisecond {
+		t.Errorf("timeout: %v after %v", err, time.Since(start))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("a timed-out request was retried: %d calls", calls)
+	}
+}

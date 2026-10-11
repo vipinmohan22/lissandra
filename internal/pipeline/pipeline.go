@@ -174,6 +174,28 @@ func (p *Pipeline) ClassifyOffline(rules *classify.Engine, ev *model.Event) bool
 	return true
 }
 
+// ClassifyFile classifies ev for file analysis: rules, then the Laya engine
+// for what they leave. A cached answer is used when there is one; otherwise
+// the engine is asked while calls (shared by the analysis) remain and live
+// events are not waiting for it, so file analysis never delays live
+// classification. It never stores the event or notifies. It returns false
+// when a rule drops the event.
+func (p *Pipeline) ClassifyFile(ctx context.Context, rules *classify.Engine, ev *model.Event, calls *atomic.Int64) bool {
+	if !rules.Classify(ev) {
+		return false
+	}
+	if p.laya == nil || !p.laya.Eligible(ev) || p.laya.ApplyCachedQuiet(ev) {
+		return true
+	}
+	if p.EngineQueueDepth() > 0 || !p.laya.Available() || calls.Add(-1) < 0 {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, p.laya.MaxWait())
+	defer cancel()
+	p.laya.Enrich(ctx, ev)
+	return true
+}
+
 func (p *Pipeline) process(ev model.Event) {
 	if !p.engine.Load().Classify(&ev) {
 		p.Dropped.Add(1)

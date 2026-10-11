@@ -107,6 +107,7 @@ func (s *Server) getInfo(w http.ResponseWriter, r *http.Request) {
 			"concurrency":            s.imports.Config().Concurrency,
 			"keep":                   s.imports.Config().Keep,
 			"formats":                ImportFormats,
+			"engine_calls_per_file":  maxImportEngineCalls,
 		},
 	})
 }

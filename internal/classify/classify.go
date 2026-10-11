@@ -16,7 +16,6 @@ import (
 const (
 	ByHeuristic = "heuristic"
 	ByRules     = "rules"
-	ByAI        = "ai"
 )
 
 // Engine is an immutable, compiled rule set. Build a new one when rules change.

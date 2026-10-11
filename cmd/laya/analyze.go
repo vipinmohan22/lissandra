@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/vipinmohan22/layalogs/internal/classify"
 	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/engine"
 	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/ingest"
 	"github.com/vipinmohan22/layalogs/internal/model"
@@ -31,7 +33,11 @@ const analyzeUsage = `Usage: laya analyze [flags] FILE...
 Parse and classify log files locally with the same parsing and rules as the
 server, and print a report. FILE may be "-" for standard input; gzip files are
 detected automatically. Nothing is stored or sent anywhere: no notifications,
-no AI calls, no network access.
+and no network access unless -engine is given.
+
+With -engine URL, the Laya engine (laya-serve) classifies what the rules
+leave, once per message pattern, using the config's categories and engine
+settings; only the log text of those patterns is sent to that URL.
 
 Rules come from -config, else $LAYA_CONFIG, else $LAYA_DATA_DIR/config.json
 (./data/config.json) if it exists, else the built-in defaults. A config
@@ -56,6 +62,9 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	output := fs.String("output", "text", "text (summary), json (one report per file) or ndjson (every classified event)")
 	minSev := fs.String("min-severity", "", "with -output ndjson, only print events at or above this severity")
 	failOn := fs.String("fail-on", "", "exit with status 2 if any event is at or above this severity")
+	engineURL := fs.String("engine", "", "laya-serve URL(s), comma-separated: classify what the rules leave with the Laya engine")
+	engineModel := fs.String("engine-model", "", "engine checkpoint (default: the config's, else english)")
+	engineKey := fs.String("engine-key", "", "engine API key (default $LAYA_ENGINE_API_KEY)")
 	files, err := parseInterspersed(fs, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -118,10 +127,28 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return fail("no source %q in the config", *sourceKey)
 		}
 	}
-	// Only rules and route filters are used; notifiers, pollers and the AI
-	// client are never constructed, so analysis makes no network calls.
-	engine := classify.New(cfg.Rules)
+	// Only rules, route filters and (with -engine) the Laya engine are used;
+	// notifiers and pollers are never constructed.
+	rules := classify.New(cfg.Rules)
 	routes := notify.RouteMatcher(cfg)
+	classifyFn := rules.Classify
+	if *engineURL != "" {
+		laya, err := analyzeEngine(cfg, *engineURL, *engineModel, *engineKey, stderr)
+		if err != nil {
+			return fail("%v", err)
+		}
+		classifyFn = func(ev *model.Event) bool {
+			if !rules.Classify(ev) {
+				return false
+			}
+			if laya.Eligible(ev) {
+				ctx, cancel := context.WithTimeout(context.Background(), laya.MaxWait())
+				laya.Enrich(ctx, ev)
+				cancel()
+			}
+			return true
+		}
+	}
 
 	out := bufio.NewWriter(stdout)
 	defer out.Flush()
@@ -130,7 +157,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	code := 0
 	for _, path := range files {
-		rep, err := analyzeOne(path, stdin, source, *format, loc, engine, routes, *output, min, enc)
+		rep, err := analyzeOne(path, stdin, source, *format, loc, classifyFn, routes, *output, min, enc)
 		if err != nil {
 			fmt.Fprintf(stderr, "laya analyze: %s: %s\n", terminalSafe(path), terminalSafe(err.Error()))
 			code = 1
@@ -151,6 +178,41 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	return code
+}
+
+// analyzeEngine connects to the Laya engine for -engine and checks that the
+// checkpoint is loaded before any file is read.
+func analyzeEngine(cfg *config.Config, urls, checkpoint, key string, stderr io.Writer) (*engine.Classifier, error) {
+	e := &cfg.Settings.Engine
+	e.Enabled, e.URL = true, urls
+	e.APIKey = key
+	if key == "" {
+		e.APIKey = "${env:LAYA_ENGINE_API_KEY}"
+	}
+	if checkpoint != "" {
+		e.Model = checkpoint
+	}
+	if err := config.Normalize(cfg); err != nil {
+		return nil, fmt.Errorf("-engine: %w", err)
+	}
+	laya := engine.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	laya.Configure(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	eps, err := laya.Probe(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("-engine: %w", err)
+	}
+	for _, ep := range eps {
+		switch {
+		case !ep.OK || ep.Error != "":
+			return nil, fmt.Errorf("-engine: %s: %s", ep.URL, ep.Error)
+		case !ep.ModelLoaded:
+			return nil, fmt.Errorf("-engine: %s has not loaded checkpoint %q (loaded: %s)", ep.URL, e.Model, strings.Join(ep.Loaded, ", "))
+		}
+	}
+	fmt.Fprintf(stderr, "engine: %s, checkpoint %s, %d categories\n", strings.Join(laya.Status().URLs, ", "), e.Model, len(cfg.Settings.Categories))
+	return laya, nil
 }
 
 // parseInterspersed parses flags that may appear before, between or after
@@ -206,7 +268,7 @@ func loadAnalyzeConfig(flagPath string) (*config.Config, string, error) {
 // analyzeOne analyzes one file. The report is returned even when the file
 // was only partly read; it is nil if the file couldn't be opened.
 func analyzeOne(path string, stdin io.Reader, source *config.Source, format string, loc *time.Location,
-	engine *classify.Engine, routes func(*model.Event) []string, output string, min model.Severity, enc *json.Encoder) (*importer.Report, error) {
+	classifyFn func(*model.Event) bool, routes func(*model.Event) []string, output string, min model.Severity, enc *json.Encoder) (*importer.Report, error) {
 	name := filepath.Base(path)
 	var r io.Reader
 	if path == "-" {
@@ -224,7 +286,7 @@ func analyzeOne(path string, stdin io.Reader, source *config.Source, format stri
 		src = *source
 	}
 	im := importer.New(name, importer.Limits{}, time.Now()) // streaming only: retain nothing
-	deps := importer.Deps{Classify: engine.Classify, Routes: routes}
+	deps := importer.Deps{Classify: classifyFn, Routes: routes}
 	if output == "ndjson" {
 		deps.OnEvent = func(ev model.Event) error {
 			if min != "" && !ev.Severity.AtLeast(min) {
@@ -332,6 +394,9 @@ func writeTextReport(w io.Writer, rep importer.Report) {
 	}
 	if cats := sortedCounts(rep.ByCategory); len(cats) > 0 {
 		fmt.Fprintf(w, "  categories  %s\n", terminalSafe(strings.Join(cats, " · ")))
+	}
+	if rep.EngineEvents > 0 {
+		fmt.Fprintf(w, "  engine      answered for %d events, applied to %d\n", rep.EngineEvents, rep.EngineApplied)
 	}
 	if len(rep.Routes) > 0 {
 		var parts []string

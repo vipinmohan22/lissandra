@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
 	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/model"
 )
@@ -370,5 +372,37 @@ func TestEarlyStopDoesNotDrainMultipartUpload(t *testing.T) {
 	}
 	if n := e.imports.Active(); n != 0 {
 		t.Errorf("slot still held: %d", n)
+	}
+}
+
+func TestImportAsksEngineWhenRequested(t *testing.T) {
+	fake := enginetest.New()
+	defer fake.Close()
+	e := newEnv(t)
+	var st config.Settings
+	e.admin("GET", "/api/settings", nil, &st)
+	st.Engine.URL = fake.URL
+	e.admin("PUT", "/api/settings", st, nil)
+
+	log := "2026-10-11T10:00:00Z ERROR replica lag on the database is 40s\n" +
+		"2026-10-11T10:00:01Z ERROR replica lag on the database is 41s\n" +
+		"2026-10-11T10:00:02Z ERROR certificate x509 expired for upstream network peer\n" +
+		"2026-10-11T10:00:03Z INFO started\n"
+	var rep importer.Report
+	code, raw := e.do("POST", "/api/imports", log, authHeaders(nil))
+	json.Unmarshal(raw, &rep)
+	if code != 201 || rep.EngineEvents != 0 || fake.Calls.Load() != 0 {
+		t.Fatalf("without engine=1 nothing is asked: %d %+v calls=%d", code, rep, fake.Calls.Load())
+	}
+	code, raw = e.do("POST", "/api/imports?engine=1", log, authHeaders(nil))
+	json.Unmarshal(raw, &rep)
+	if code != 201 || rep.EngineApplied != 3 || rep.ByCategory["database"] != 2 || rep.ByCategory["network"] != 1 {
+		t.Errorf("engine=1: %d %+v", code, rep)
+	}
+	if n := fake.Calls.Load(); n != 2 {
+		t.Errorf("two patterns, %d engine calls", n)
+	}
+	if code, _ := e.do("POST", "/api/imports?engine=maybe", log, authHeaders(nil)); code != 400 {
+		t.Errorf("bad engine value: %d", code)
 	}
 }

@@ -114,7 +114,10 @@ func run() error {
 
 	done := make(chan struct{}, 2)
 	go func() { dispatcher.Run(ctx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
-	go func() { pipe.Run(ctx, envInt("LAYA_WORKERS", 4), envInt("LAYA_ENGINE_WORKERS", 16)); done <- struct{}{} }()
+	go func() {
+		pipe.Run(ctx, envInt("LAYA_WORKERS", 4), envInt("LAYA_ENGINE_WORKERS", 16))
+		done <- struct{}{}
+	}()
 
 	importMemory := int64(envInt("LAYA_IMPORT_MEMORY_MB", 64)) << 20
 	imports := importer.NewRegistry(importer.RegistryConfig{
