@@ -1,0 +1,1348 @@
+'use strict';
+
+// Laya admin UI. No framework and no build step: the DOM is built with the
+// h() helper, which only ever inserts text nodes for content, so log data
+// can never be interpreted as HTML.
+
+// ---------- DOM helpers ----------
+
+function h(tag, props, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+    else if (k === 'value') el.value = v;
+    else if (k === 'checked') el.checked = Boolean(v);
+    else if (k === 'selected') el.selected = Boolean(v);
+    else if (k === 'disabled') el.disabled = Boolean(v);
+    else el.setAttribute(k, v === true ? '' : String(v));
+  }
+  append(el, ...children);
+  return el;
+}
+
+function append(el, ...children) {
+  for (const c of children.flat(Infinity)) {
+    if (c === null || c === undefined || c === false) continue;
+    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return el;
+}
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+function s(tag, attrs, ...children) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, String(v));
+  for (const c of children) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return el;
+}
+
+function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+
+const SEVERITIES = ['debug', 'info', 'notice', 'warning', 'error', 'critical'];
+const sevRank = (sv) => SEVERITIES.indexOf(sv);
+
+function sevBadge(sv) { return h('span', { class: `badge sev sev-${SEVERITIES.includes(sv) ? sv : 'debug'}` }, sv || '?'); }
+function tags(list) { return (list || []).map((t) => h('span', { class: 'tag' }, t)); }
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return isNaN(d) ? '—' : d.toLocaleString();
+}
+
+function ago(iso) {
+  if (!iso) return 'never';
+  const sec = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (sec < 5) return 'just now';
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function timeCell(iso) { return h('span', { title: fmtTime(iso), class: 'nowrap' }, ago(iso)); }
+
+function num(n) { return Number(n || 0).toLocaleString(); }
+
+function toast(msg, kind) {
+  const t = h('div', { class: `toast ${kind || ''}` }, msg);
+  document.getElementById('toasts').append(t);
+  setTimeout(() => t.remove(), kind === 'error' ? 7000 : 3500);
+}
+
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // Plain-HTTP deployments have no Clipboard API.
+      const ta = h('textarea', { readonly: true }, text);
+      document.body.append(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (!ok) throw new Error('copy failed');
+    }
+    toast('Copied to clipboard');
+  } catch {
+    toast('Copy failed — select the text manually', 'error');
+  }
+}
+
+function codeBox(text) {
+  return h('div', { class: 'code-box' },
+    h('button', { type: 'button', class: 'small copy', onclick: () => copyText(text) }, 'Copy'),
+    h('pre', null, text));
+}
+
+function field(label, input, help) {
+  return h('div', { class: 'field' }, h('label', null, label), input, help ? h('div', { class: 'help' }, help) : null);
+}
+
+function checkbox(label, checked, onchange) {
+  const input = h('input', { type: 'checkbox', checked, onchange: onchange ? (e) => onchange(e.target.checked) : null });
+  return { el: h('label', { class: 'check' }, input, label), input };
+}
+
+function select(options, value, props) {
+  const el = h('select', props || {});
+  for (const o of options) {
+    const [v, label] = Array.isArray(o) ? o : [o, o];
+    el.append(h('option', { value: v, selected: v === value }, label));
+  }
+  return el;
+}
+
+// Secret inputs stay readable when they hold an ${env:NAME} reference,
+// which is not itself a secret.
+function secretInput(value, props) {
+  const isRef = (v) => /^\$\{env:[A-Za-z_][A-Za-z0-9_]*\}$/.test(v);
+  const input = h('input', { ...props, type: isRef(value) ? 'text' : 'password', value, autocomplete: 'off' });
+  input.addEventListener('input', () => { input.type = isRef(input.value) || input.value === '' ? 'text' : 'password'; });
+  return input;
+}
+
+function splitList(text) {
+  return String(text || '').split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+function headersToText(obj) {
+  return Object.entries(obj || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+}
+
+function textToHeaders(text) {
+  const out = {};
+  for (const line of String(text || '').split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+
+// ---------- API ----------
+
+let token = sessionStorage.getItem('laya.token') || '';
+
+class AuthError extends Error {}
+
+async function api(method, path, body) {
+  const opts = { method, headers: { Authorization: `Bearer ${token}` } };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  if (res.status === 401) {
+    showLogin();
+    throw new AuthError('Sign in required');
+  }
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((data && data.error) || `${res.status} ${res.statusText}`);
+  return data;
+}
+
+const GET = (p) => api('GET', p);
+
+function reportError(err) {
+  if (err instanceof AuthError) return;
+  console.error(err);
+  toast(err.message || String(err), 'error');
+}
+
+// Shared lookups, refreshed when a page needs them.
+const cache = {};
+async function load(...keys) {
+  const paths = {
+    info: '/api/info', sources: '/api/sources', notifiers: '/api/notifiers', settings: '/api/settings',
+    types: '/api/notifier-types', rules: '/api/rules', routes: '/api/routes',
+  };
+  await Promise.all(keys.map(async (k) => { cache[k] = await GET(paths[k]); }));
+}
+
+function sourceName(id) {
+  const src = (cache.sources || []).find((x) => x.id === id);
+  return src ? src.name : id;
+}
+
+function categories() {
+  return (cache.settings && cache.settings.categories) || [];
+}
+
+// ---------- Modal ----------
+
+function openModal({ title, body, actions, wide, left, onClose }) {
+  const prevFocus = document.activeElement;
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    back.remove();
+    document.removeEventListener('keydown', onKey);
+    if (prevFocus && prevFocus.focus) prevFocus.focus();
+    if (onClose) onClose();
+  };
+  const onKey = (e) => {
+    const open = document.querySelectorAll('.modal-back');
+    if (e.key === 'Escape' && open[open.length - 1] === back) close();
+  };
+  const foot = h('div', { class: 'modal-foot' });
+  if (left) foot.append(h('div', { class: 'left' }, left));
+  for (const a of actions || []) {
+    foot.append(h('button', {
+      type: 'button',
+      class: a.primary ? 'primary' : a.danger ? 'danger' : '',
+      onclick: async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          const keepOpen = await a.onClick(close);
+          if (keepOpen === false) return;
+        } catch (err) {
+          reportError(err);
+        } finally {
+          btn.disabled = false;
+        }
+      },
+    }, a.label));
+  }
+  const modal = h('div', { class: `modal ${wide ? 'wide' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+    h('div', { class: 'modal-head' }, h('h2', null, title), h('button', { type: 'button', class: 'x', 'aria-label': 'Close', onclick: close }, '×')),
+    h('div', { class: 'modal-body' }, body),
+    foot);
+  const back = h('div', { class: 'modal-back', onmousedown: (e) => { if (e.target === back) close(); } }, modal);
+  document.body.append(back);
+  document.addEventListener('keydown', onKey);
+  const first = modal.querySelector('input, select, textarea');
+  if (first) first.focus();
+  return { close };
+}
+
+function confirmDialog(message, label = 'Delete') {
+  return new Promise((resolve) => {
+    openModal({
+      title: 'Are you sure?',
+      body: h('p', null, message),
+      onClose: () => resolve(false),
+      actions: [
+        { label: 'Cancel', onClick: (close) => close() },
+        { label, danger: true, onClick: (close) => { resolve(true); close(); } },
+      ],
+    });
+  });
+}
+
+// ---------- Login ----------
+
+function showLogin() {
+  if (document.querySelector('.login-back')) return;
+  const input = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'LAYA_ADMIN_TOKEN' });
+  const err = h('div', { class: 'help' });
+  const form = h('form', {
+    onsubmit: async (e) => {
+      e.preventDefault();
+      token = input.value.trim();
+      try {
+        await GET('/api/info');
+        sessionStorage.setItem('laya.token', token);
+        back.remove();
+        boot();
+      } catch (ex) {
+        err.textContent = ex instanceof AuthError ? 'That token was not accepted.' : ex.message;
+      }
+    },
+  },
+  h('div', { class: 'brand' }, h('img', { src: 'favicon.svg', alt: '', width: 26, height: 26 }), h('span', null, 'Laya')),
+  field('Admin token', input, 'Set with the LAYA_ADMIN_TOKEN environment variable (in Nomad, via the nomad/jobs/laya variable).'),
+  err,
+  h('button', { type: 'submit', class: 'primary' }, 'Sign in'));
+  const back = h('div', { class: 'login-back' }, h('div', { class: 'card login' }, form));
+  document.body.append(back);
+  input.focus();
+}
+
+// ---------- Router ----------
+
+const pages = {};
+let cleanup = null;
+
+function parseHash() {
+  const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';
+  const [path, query] = raw.split('?');
+  const [page, ...rest] = path.split('/');
+  return { page, arg: rest.join('/'), params: new URLSearchParams(query || '') };
+}
+
+async function route() {
+  if (cleanup) { cleanup(); cleanup = null; }
+  const { page, arg, params } = parseHash();
+  const render = pages[page] || pages.dashboard;
+  document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
+  const main = clear(document.getElementById('main'));
+  try {
+    cleanup = (await render(main, arg, params)) || null;
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+function every(ms, fn) {
+  const id = setInterval(() => { if (!document.hidden) fn().catch(reportError); }, ms);
+  return () => clearInterval(id);
+}
+
+function pageHead(title, subtitle, ...actions) {
+  return h('div', { class: 'page-head' },
+    h('div', null, h('h1', null, title), subtitle ? h('p', null, subtitle) : null),
+    h('div', { class: 'row' }, actions));
+}
+
+// ---------- Dashboard ----------
+
+pages.dashboard = async (main) => {
+  await load('sources', 'settings');
+  const body = h('div');
+  append(main, pageHead('Dashboard', 'Last 60 minutes of classified log activity.'), body);
+  const refresh = async () => {
+    const st = await GET('/api/stats');
+    renderDashboard(body, st);
+  };
+  await refresh();
+  return every(10000, refresh);
+};
+
+function renderDashboard(root, st) {
+  const ev = st.events;
+  const bySev = ev.by_severity || {};
+  const bad = (bySev.error || 0) + (bySev.critical || 0);
+  const pulls = (cache.sources || []).filter((x) => x.type === 'pull' && x.enabled);
+  const healthy = pulls.filter((x) => { const ps = st.sources[x.id]; return ps && !ps.last_error && ps.last_success; }).length;
+  const n = st.notifications;
+
+  const kpi = (label, value, sub, alert) => h('div', { class: `card kpi ${alert ? 'alert' : ''}` },
+    h('div', { class: 'label' }, label), h('div', { class: 'value' }, value), h('div', { class: 'sub' }, sub));
+
+  const kpis = h('div', { class: 'kpis' },
+    kpi('Events (1h)', num(ev.last_hour), `${num(ev.total_since_start)} since start`),
+    kpi('Errors + critical (1h)', num(bad), `${num(bySev.critical || 0)} critical`, bad > 0),
+    kpi('Notifications', num(n.sent), `${num(n.failed)} failed · ${num(n.throttled)} throttled`, n.failed > 0),
+    kpi('Pull sources', pulls.length ? `${healthy}/${pulls.length}` : '—', pulls.length ? 'healthy' : 'none configured', healthy < pulls.length),
+    st.ai.enabled
+      ? kpi('AI classifications', num(st.ai.calls_total), `${st.ai.calls_this_hour}/${st.ai.budget_per_hour} this hour · ${num(st.ai.cache_hits)} cached`, Boolean(st.ai.last_error))
+      : kpi('Pipeline queue', num(st.pipeline.queue_depth), `${num(st.pipeline.dropped)} dropped by rules`));
+
+  const timeline = h('div', { class: 'card' }, h('h2', null, 'Events per minute'), timelineChart(ev.timeline));
+
+  const patterns = h('div', { class: 'card flush mt' },
+    h('div', { class: 'list-item' }, h('div', { class: 'main' },
+      h('h2', null, 'Top issues'),
+      h('div', { class: 'meta' }, 'Grouped by fingerprint (same message pattern from the same source). Errors first.'))));
+  if (!ev.top_patterns || !ev.top_patterns.length) {
+    patterns.append(h('div', { class: 'empty' }, 'No events in the last hour. Send some logs to a source to get started.'));
+  } else {
+    const tbl = h('table', null, h('tr', null, h('th', null, 'Severity'), h('th', null, 'Pattern'), h('th', null, 'Source'), h('th', null, 'Count'), h('th', null, 'Last seen')));
+    for (const p of ev.top_patterns) {
+      tbl.append(h('tr', { class: 'clickable', onclick: () => { location.hash = `#/events?fingerprint=${encodeURIComponent(p.fingerprint)}`; } },
+        h('td', null, sevBadge(p.severity)),
+        h('td', { class: 'msg', title: p.sample }, p.sample),
+        h('td', { class: 'nowrap' }, p.source_name, h('div', { class: 'muted small' }, p.category)),
+        h('td', null, num(p.count)),
+        h('td', null, timeCell(p.last_seen))));
+    }
+    patterns.append(tbl);
+  }
+
+  const bars = (title, obj, link) => {
+    const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const max = Math.max(1, ...entries.map((e) => e[1]));
+    const card = h('div', { class: 'card' }, h('h2', null, title));
+    if (!entries.length) card.append(h('div', { class: 'muted' }, 'Nothing yet.'));
+    for (const [k, v] of entries) {
+      const fill = h('div', { class: 'fill' });
+      fill.style.width = `${(v / max) * 100}%`;
+      card.append(h('div', { class: 'hbar' }, link ? h('a', { class: 'name', href: link(k) }, k) : h('span', { class: 'name' }, k), h('div', { class: 'track' }, fill), h('span', { class: 'n' }, num(v))));
+    }
+    return card;
+  };
+
+  clear(root);
+  append(root, kpis, timeline,
+    h('div', { class: 'grid cols-2 mt' },
+      bars('By category', ev.by_category, (k) => `#/events?category=${encodeURIComponent(k)}`),
+      bars('By source', ev.by_source)),
+    patterns);
+}
+
+function timelineChart(points) {
+  const W = 600, H = 160;
+  const max = Math.max(1, ...points.map((p) => p.total));
+  const bw = W / points.length;
+  const svg = s('svg', { class: 'chart', viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': 'Events per minute by severity' });
+  for (const frac of [0.25, 0.5, 0.75, 1]) {
+    svg.append(s('line', { class: 'grid-line', x1: 0, x2: W, y1: H - frac * H, y2: H - frac * H, 'vector-effect': 'non-scaling-stroke' }));
+  }
+  points.forEach((p, i) => {
+    let y = H;
+    const g = s('g', null);
+    const lines = [new Date(p.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ` — ${p.total} events`];
+    for (const sv of SEVERITIES) {
+      const c = (p.by_severity || {})[sv] || 0;
+      if (!c) continue;
+      const bh = (c / max) * H;
+      y -= bh;
+      g.append(s('rect', { class: `bar-${sv}`, x: i * bw + 1, y, width: Math.max(bw - 2, 1), height: bh }));
+      lines.push(`${sv}: ${c}`);
+    }
+    g.append(s('rect', { x: i * bw, y: 0, width: bw, height: H, fill: 'transparent' }));
+    g.append(s('title', null, lines.join('\n')));
+    svg.append(g);
+  });
+  return h('div', null,
+    h('div', { class: 'row small muted' }, h('span', null, `max ${max}/min`)),
+    svg,
+    h('div', { class: 'row small muted' }, h('span', null, '60 min ago'), h('span', { class: 'spacer' }), h('span', null, '30 min'), h('span', { class: 'spacer' }), h('span', null, 'now')),
+    h('div', { class: 'legend' }, SEVERITIES.map((sv) => h('span', null, h('i', { class: sv }), sv))));
+}
+
+// ---------- Events ----------
+
+const eventFilter = { min_severity: '', category: '', source: '', q: '', fingerprint: '', tag: '' };
+
+pages.events = async (main, arg, params) => {
+  await load('sources', 'settings');
+  for (const k of Object.keys(eventFilter)) if (params.has(k)) eventFilter[k] = params.get(k);
+  if ([...params.keys()].length) history.replaceState(null, '', '#/events');
+
+  let live = true;
+  let lastID = '';
+  const tableWrap = h('div', { class: 'card flush' });
+  const more = h('button', { type: 'button', onclick: () => fetchEvents(true).catch(reportError) }, 'Load older');
+
+  const sevSel = select([['', 'Any severity'], ...SEVERITIES.map((x) => [x, `≥ ${x}`])], eventFilter.min_severity);
+  const catSel = select([['', 'Any category'], ...[...categories(), 'uncategorized'].map((x) => [x, x])], eventFilter.category);
+  const srcSel = select([['', 'Any source'], ...cache.sources.map((x) => [x.id, x.name])], eventFilter.source);
+  const q = h('input', { type: 'search', placeholder: 'Search messages…', value: eventFilter.q });
+  const liveBox = checkbox('Live', live, (v) => { live = v; });
+  const fpNote = h('span');
+
+  const apply = () => {
+    Object.assign(eventFilter, { min_severity: sevSel.value, category: catSel.value, source: srcSel.value, q: q.value.trim() });
+    fetchEvents(false).catch(reportError);
+  };
+  [sevSel, catSel, srcSel].forEach((el) => el.addEventListener('change', apply));
+  let qTimer;
+  q.addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(apply, 300); });
+
+  const renderFpNote = () => {
+    clear(fpNote);
+    for (const key of ['fingerprint', 'tag']) {
+      if (eventFilter[key]) {
+        fpNote.append(h('span', { class: 'badge' }, `${key}: ${eventFilter[key]} `,
+          h('button', { type: 'button', class: 'link', onclick: () => { eventFilter[key] = ''; renderFpNote(); apply(); } }, '×')));
+      }
+    }
+  };
+  renderFpNote();
+
+  append(main,
+    pageHead('Events', 'Classified log events held in memory (newest first).'),
+    h('div', { class: 'row' }, sevSel, catSel, srcSel, q, fpNote, h('span', { class: 'spacer' }), liveBox.el),
+    h('div', { class: 'mt' }),
+    tableWrap,
+    h('div', { class: 'row mt' }, more));
+
+  async function fetchEvents(older) {
+    const p = new URLSearchParams({ limit: '100' });
+    for (const [k, v] of Object.entries(eventFilter)) if (v) p.set(k, v);
+    if (older && lastID) p.set('before', lastID);
+    const list = await GET(`/api/events?${p}`);
+    if (!older) clear(tableWrap);
+    let tbl = tableWrap.querySelector('table');
+    if (!tbl) {
+      tbl = h('table', null, h('tr', null, h('th', null, 'Time'), h('th', null, 'Severity'), h('th', null, 'Category'), h('th', null, 'Source'), h('th', null, 'Message')));
+      tableWrap.append(tbl);
+    }
+    if (!older && !list.length) {
+      clear(tableWrap).append(h('div', { class: 'empty' }, 'No matching events.'));
+    }
+    for (const ev of list) {
+      tbl.append(h('tr', { class: 'clickable', onclick: () => showEvent(ev.id) },
+        h('td', null, timeCell(ev.received_at)),
+        h('td', null, sevBadge(ev.severity)),
+        h('td', { class: 'nowrap' }, ev.category, ev.classifier === 'ai' ? h('span', { class: 'muted small', title: 'Classified by AI' }, ' ✦') : null),
+        h('td', { class: 'nowrap' }, ev.source_name),
+        h('td', { class: 'msg', title: ev.message }, ev.message, ' ', tags(ev.tags))));
+    }
+    if (list.length) lastID = list[list.length - 1].id;
+    more.disabled = list.length < 100;
+  }
+
+  await fetchEvents(false);
+  if (arg) showEvent(arg);
+  return every(5000, async () => { if (live && !document.querySelector('.modal-back')) await fetchEvents(false); });
+};
+
+async function showEvent(id) {
+  let data;
+  try {
+    data = await GET(`/api/events/${encodeURIComponent(id)}`);
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  await load('settings');
+  const ev = data.event;
+  const aiOut = h('div');
+  const kv = h('div', { class: 'kv' });
+  const row = (k, v) => { if (v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length)) kv.append(h('div', null, k), h('div', null, v)); };
+  row('Severity', sevBadge(ev.severity));
+  row('Category', ev.category);
+  row('Classified by', ev.classifier);
+  row('Source', ev.source_name);
+  row('Level field', ev.level);
+  row('Log timestamp', fmtTime(ev.timestamp));
+  row('Received', fmtTime(ev.received_at));
+  row('Tags', tags(ev.tags));
+  row('Matched rules', (ev.matched_rules || []).join(', '));
+  row('Alert routes', (data.routes || []).join(', ') || 'none');
+  row('AI summary', ev.summary);
+  row('Fingerprint', h('a', { href: `#/events?fingerprint=${encodeURIComponent(ev.fingerprint)}`, onclick: () => modal.close() }, ev.fingerprint));
+
+  const body = h('div', null,
+    h('div', { class: 'code-box' }, h('pre', null, ev.message)),
+    h('h3', null, 'Classification'), kv,
+    ev.fields && Object.keys(ev.fields).length ? [h('h3', null, 'Fields'), codeBox(JSON.stringify(ev.fields, null, 2))] : null,
+    aiOut);
+  const actions = [];
+  if (cache.settings.ai && cache.settings.ai.enabled) {
+    actions.push({
+      label: 'Classify with AI',
+      onClick: async () => {
+        clear(aiOut).append(h('p', { class: 'muted' }, 'Asking Claude…'));
+        const r = await api('POST', '/api/ai/test', { event_id: ev.id });
+        clear(aiOut).append(h('h3', null, 'AI classification'), r.ok
+          ? h('div', { class: 'kv' }, h('div', null, 'Category'), h('div', null, r.result.category), h('div', null, 'Severity'), h('div', null, sevBadge(r.result.severity)), h('div', null, 'Summary'), h('div', null, r.result.summary))
+          : h('div', { class: 'callout bad' }, r.error));
+        return false;
+      },
+    });
+  }
+  actions.push({ label: 'Create rule from this…', onClick: (close) => { close(); editRule(null, ev); } });
+  actions.push({ label: 'Close', primary: true, onClick: (close) => close() });
+  const modal = openModal({ title: 'Event', body, actions, wide: true });
+}
+
+// ---------- Sources ----------
+
+pages.sources = async (main) => {
+  await load('sources', 'info');
+  const list = h('div', { class: 'card flush' });
+  append(main, pageHead('Sources', 'Where logs come from: Laya can receive them on an ingest endpoint (push) or poll an API (pull).',
+    h('button', { type: 'button', class: 'primary', onclick: () => editSource(null) }, 'Add source')), list);
+  const refresh = async () => {
+    const [sources, stats] = await Promise.all([GET('/api/sources'), GET('/api/stats')]);
+    cache.sources = sources;
+    renderSources(list, sources, stats.sources || {});
+  };
+  await refresh();
+  return every(10000, refresh);
+};
+
+function renderSources(root, sources, status) {
+  clear(root);
+  if (!sources.length) root.append(h('div', { class: 'empty' }, 'No sources yet.'));
+  for (const src of sources) {
+    const meta = [];
+    if (src.type === 'push') {
+      meta.push(h('div', { class: 'meta mono' }, `POST ${cache.info.public_url}/ingest/${src.id}`));
+    } else {
+      const st = status[src.id] || {};
+      meta.push(h('div', { class: 'meta mono' }, `${src.pull.method} ${src.pull.url}`));
+      meta.push(h('div', { class: 'meta' }, `every ${src.pull.interval_seconds}s · last poll ${ago(st.last_poll)} · ${num(st.last_count)} records last time · ${num(st.total)} total`));
+      if (st.last_error) meta.push(h('div', { class: 'meta' }, h('span', { class: 'badge bad' }, 'error'), ' ', st.last_error));
+    }
+    if (src.description) meta.unshift(h('div', { class: 'meta' }, src.description));
+    root.append(h('div', { class: `list-item ${src.enabled ? '' : 'disabled-item'}` },
+      h('div', { class: 'main' },
+        h('div', { class: 'title' }, src.name, h('span', { class: 'badge' }, src.type), src.enabled ? null : h('span', { class: 'badge' }, 'disabled'), tags(src.tags)),
+        meta),
+      h('div', { class: 'actions' },
+        src.type === 'push' ? h('button', { type: 'button', class: 'small', onclick: () => showIngest(src) }, 'Setup instructions') : null,
+        h('button', { type: 'button', class: 'small', onclick: () => editSource(src) }, 'Edit'),
+        h('button', {
+          type: 'button', class: 'small danger',
+          onclick: async () => {
+            if (!(await confirmDialog(`Delete source "${src.name}"? Senders using it will get 404s.`))) return;
+            await api('DELETE', `/api/sources/${src.id}`).catch(reportError);
+            route();
+          },
+        }, 'Delete'))));
+  }
+}
+
+function showIngest(src) {
+  const base = cache.info.public_url;
+  const url = `${base}/ingest/${src.id}`;
+  let host = 'laya.service.consul', port = '8080', tls = 'Off';
+  try {
+    const u = new URL(base);
+    host = u.hostname;
+    port = u.port || (u.protocol === 'https:' ? '443' : '80');
+    tls = u.protocol === 'https:' ? 'On' : 'Off';
+  } catch { /* keep defaults */ }
+  const tokenBox = h('code', null, '•'.repeat(24));
+  let shown = false;
+  let modal;
+  const body = h('div', null,
+    h('p', null, 'Send logs with an HTTP POST. Bodies can be a JSON object, a JSON array, NDJSON, or plain-text lines (indented continuation lines such as stack traces are folded into the previous line). gzip Content-Encoding is accepted.'),
+    h('div', { class: 'kv' },
+      h('div', null, 'Ingest URL'), h('div', { class: 'mono' }, url),
+      h('div', null, 'Token'), h('div', { class: 'row' }, tokenBox,
+        h('button', { type: 'button', class: 'small', onclick: () => { shown = !shown; tokenBox.textContent = shown ? src.ingest_token : '•'.repeat(24); } }, 'Show'),
+        h('button', { type: 'button', class: 'small', onclick: () => copyText(src.ingest_token) }, 'Copy'),
+        h('button', {
+          type: 'button', class: 'small danger',
+          onclick: async () => {
+            if (!(await confirmDialog('Rotate the token? Existing senders will be rejected until they use the new one.', 'Rotate'))) return;
+            const upd = await api('POST', `/api/sources/${src.id}/rotate-token`).catch(reportError);
+            if (upd) { modal.close(); showIngest(upd); route(); }
+          },
+        }, 'Rotate'))),
+    h('p', { class: 'small muted' }, 'The token can be sent as "Authorization: Bearer <token>", an "X-Laya-Token" header, or a ?token= query parameter.'),
+    h('h3', null, 'curl'),
+    codeBox(`curl -X POST '${url}' \\\n  -H 'Authorization: Bearer ${src.ingest_token}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"level":"error","service":"checkout","message":"payment failed: connection refused to db:5432"}'`),
+    h('h3', null, 'Fluent Bit'),
+    codeBox(`[OUTPUT]\n    Name    http\n    Match   *\n    Host    ${host}\n    Port    ${port}\n    URI     /ingest/${src.id}\n    Format  json\n    tls     ${tls}\n    Header  Authorization Bearer ${src.ingest_token}`),
+    h('h3', null, 'Vector'),
+    codeBox(`[sinks.laya]\ntype = "http"\ninputs = ["app_logs"]\nuri = "${url}"\nencoding.codec = "json"\nframing.method = "newline_delimited"\nrequest.headers.Authorization = "Bearer ${src.ingest_token}"`));
+  modal = openModal({ title: `Send logs to "${src.name}"`, body, wide: true, actions: [{ label: 'Done', primary: true, onClick: (c) => c() }] });
+}
+
+function editSource(src) {
+  const isNew = !src;
+  src = src ? JSON.parse(JSON.stringify(src)) : { name: '', type: 'push', enabled: true, parse: { format: 'auto' }, tags: [] };
+  const pull = src.pull || { url: '', method: 'GET', interval_seconds: 60, timeout_seconds: 15, auth: { type: 'none' }, dedupe: true, headers: {} };
+  pull.auth = pull.auth || { type: 'none' };
+
+  const f = {
+    name: h('input', { value: src.name, placeholder: 'e.g. payments-api' }),
+    description: h('input', { value: src.description || '' }),
+    tags: h('input', { value: (src.tags || []).join(', '), placeholder: 'prod, payments' }),
+    enabled: checkbox('Enabled', src.enabled),
+    type: select([['push', 'Push — senders POST logs to Laya'], ['pull', 'Pull — Laya polls an HTTP API']], src.type, { disabled: !isNew }),
+    url: h('input', { value: pull.url, placeholder: 'https://logs.example.com/api/v1/logs?since={since_rfc3339}' }),
+    method: select(['GET', 'POST'], pull.method),
+    interval: h('input', { type: 'number', min: 5, value: pull.interval_seconds }),
+    timeout: h('input', { type: 'number', min: 1, value: pull.timeout_seconds }),
+    authType: select([['none', 'None'], ['bearer', 'Bearer token'], ['basic', 'Basic auth'], ['header', 'Custom header']], pull.auth.type),
+    token: secretInput(pull.auth.token || '', { placeholder: '${env:LOGS_API_TOKEN}' }),
+    username: h('input', { value: pull.auth.username || '' }),
+    password: secretInput(pull.auth.password || ''),
+    headerName: h('input', { value: pull.auth.header_name || '', placeholder: 'X-API-Key' }),
+    headerValue: secretInput(pull.auth.header_value || ''),
+    headers: h('textarea', { rows: 2, placeholder: 'Accept: application/json' }, headersToText(pull.headers)),
+    body: h('textarea', { rows: 3, placeholder: '{"query": "level:error", "from": "{since_rfc3339}"}' }, pull.body || ''),
+    dedupe: checkbox('Skip records already seen in earlier polls', pull.dedupe),
+    insecure: checkbox('Skip TLS certificate verification', pull.insecure_skip_verify),
+    format: select([['auto', 'Auto-detect'], ['json', 'JSON'], ['ndjson', 'NDJSON (one JSON object per line)'], ['text', 'Plain text lines']], src.parse.format),
+    recordsPath: h('input', { value: src.parse.records_path || '', placeholder: 'data.items  (auto: records, logs, events, data, hits.hits…)' }),
+    messageField: h('input', { value: src.parse.message_field || '', placeholder: 'auto: message, msg, log…' }),
+    levelField: h('input', { value: src.parse.level_field || '', placeholder: 'auto: level, severity…' }),
+    tsField: h('input', { value: src.parse.timestamp_field || '', placeholder: 'auto: @timestamp, timestamp, time…' }),
+  };
+
+  const authFields = h('div');
+  const renderAuth = () => {
+    clear(authFields);
+    const t = f.authType.value;
+    if (t === 'bearer') authFields.append(field('Token', f.token, 'Use ${env:NAME} to read it from the environment (e.g. a Nomad Variable).'));
+    if (t === 'basic') authFields.append(h('div', { class: 'fields-2' }, field('Username', f.username), field('Password', f.password)));
+    if (t === 'header') authFields.append(h('div', { class: 'fields-2' }, field('Header name', f.headerName), field('Header value', f.headerValue)));
+  };
+  f.authType.addEventListener('change', renderAuth);
+  renderAuth();
+
+  const bodyField = field('Request body', f.body, 'Sent for POST requests. Placeholders are expanded here too.');
+  const toggleBody = () => { bodyField.hidden = f.method.value !== 'POST'; };
+  f.method.addEventListener('change', toggleBody);
+  toggleBody();
+
+  const pullSection = h('fieldset', null, h('legend', null, 'Polling'),
+    field('URL', f.url, 'Placeholders: {since_rfc3339} {since_unix} {since_unix_ms} {now_rfc3339} {now_unix} {now_unix_ms} — "since" is the previous successful poll.'),
+    h('div', { class: 'fields-3' }, field('Method', f.method), field('Interval (s)', f.interval), field('Timeout (s)', f.timeout)),
+    field('Authentication', f.authType), authFields,
+    field('Extra headers', f.headers, 'One "Name: value" per line.'),
+    bodyField,
+    h('div', { class: 'row' }, f.dedupe.el, f.insecure.el));
+  const preview = h('div');
+  const toggleType = () => { pullSection.hidden = f.type.value !== 'pull'; };
+  f.type.addEventListener('change', toggleType);
+  toggleType();
+
+  const body = h('div', null,
+    h('div', { class: 'fields-2' }, field('Name', f.name), field('Type', f.type)),
+    field('Description', f.description),
+    h('div', { class: 'fields-2' }, field('Tags', f.tags, 'Added to every event from this source.'), h('div', { class: 'field' }, h('label', null, ' '), f.enabled.el)),
+    pullSection,
+    h('fieldset', null, h('legend', null, 'Parsing'),
+      h('div', { class: 'fields-2' }, field('Format', f.format), field('Records path', f.recordsPath, 'Dot path to the array of log records in a JSON response.')),
+      h('div', { class: 'fields-3' }, field('Message field', f.messageField), field('Level field', f.levelField), field('Timestamp field', f.tsField))),
+    preview);
+
+  const collect = () => {
+    const out = {
+      ...src,
+      name: f.name.value.trim(),
+      description: f.description.value.trim(),
+      tags: splitList(f.tags.value),
+      enabled: f.enabled.input.checked,
+      type: f.type.value,
+      parse: {
+        format: f.format.value, records_path: f.recordsPath.value.trim(), message_field: f.messageField.value.trim(),
+        level_field: f.levelField.value.trim(), timestamp_field: f.tsField.value.trim(),
+      },
+    };
+    if (out.type === 'pull') {
+      out.pull = {
+        url: f.url.value.trim(), method: f.method.value, body: f.body.value,
+        interval_seconds: Number(f.interval.value) || 60, timeout_seconds: Number(f.timeout.value) || 15,
+        headers: textToHeaders(f.headers.value), dedupe: f.dedupe.input.checked, insecure_skip_verify: f.insecure.input.checked,
+        auth: { type: f.authType.value, token: f.token.value, username: f.username.value, password: f.password.value, header_name: f.headerName.value, header_value: f.headerValue.value },
+      };
+    } else {
+      delete out.pull;
+    }
+    return out;
+  };
+
+  const actions = [{ label: 'Cancel', onClick: (c) => c() }];
+  const testBtn = {
+    label: 'Test fetch',
+    onClick: async () => {
+      const draft = collect();
+      if (draft.type !== 'pull') { toast('Test fetch is for pull sources. For push sources, use the curl example after saving.'); return false; }
+      clear(preview).append(h('p', { class: 'muted' }, 'Fetching…'));
+      try {
+        const r = await api('POST', '/api/sources/test', draft);
+        clear(preview).append(h('h3', null, `Preview — ${r.total} record(s) parsed`), previewTable(r.events));
+      } catch (err) {
+        clear(preview).append(h('div', { class: 'callout bad' }, err.message));
+      }
+      return false;
+    },
+  };
+  actions.push({
+    label: isNew ? 'Create source' : 'Save',
+    primary: true,
+    onClick: async (close) => {
+      const draft = collect();
+      const saved = isNew ? await api('POST', '/api/sources', draft) : await api('PUT', `/api/sources/${src.id}`, draft);
+      close();
+      toast('Source saved');
+      await route();
+      if (isNew && saved.type === 'push') showIngest(saved);
+    },
+  });
+  openModal({ title: isNew ? 'Add source' : `Edit source "${src.name}"`, body, actions, wide: true, left: h('button', { type: 'button', onclick: () => testBtn.onClick() }, 'Test fetch') });
+}
+
+function previewTable(items) {
+  if (!items.length) return h('div', { class: 'empty' }, 'No records.');
+  const tbl = h('table', null, h('tr', null, h('th', null, 'Severity'), h('th', null, 'Category'), h('th', null, 'Message'), h('th', null, 'Rules'), h('th', null, 'Routes')));
+  for (const it of items) {
+    const ev = it.event;
+    tbl.append(h('tr', null,
+      h('td', null, it.dropped ? h('span', { class: 'badge' }, 'dropped') : sevBadge(ev.severity)),
+      h('td', null, it.dropped ? '—' : ev.category),
+      h('td', { class: 'msg', title: ev.message }, ev.message, ' ', tags(ev.tags)),
+      h('td', { class: 'small' }, (ev.matched_rules || []).join(', ') || '—'),
+      h('td', { class: 'small' }, (it.routes || []).join(', ') || '—')));
+  }
+  return h('div', { class: 'preview' }, tbl);
+}
+
+// ---------- Rules ----------
+
+const FIELD_SUGGESTIONS = ['message', 'level', 'severity', 'source', 'category', 'tags', 'status', 'status_code', 'http.status_code', 'service', 'host', 'logger', 'kubernetes.namespace_name'];
+const OP_LABELS = {
+  contains: 'contains', not_contains: 'does not contain', equals: 'equals', not_equals: 'does not equal',
+  regex: 'matches regex', not_regex: 'does not match regex', starts_with: 'starts with', ends_with: 'ends with',
+  exists: 'exists', missing: 'is missing', gt: '>', lt: '<',
+};
+
+pages.rules = async (main) => {
+  await load('rules', 'sources', 'settings', 'routes');
+  const list = h('div', { class: 'card flush' });
+  const tester = ruleTester();
+  append(main,
+    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation.',
+      h('button', { type: 'button', class: 'primary', onclick: () => editRule(null) }, 'Add rule')),
+    h('div', { class: 'grid cols-2 top' }, list, tester));
+  renderRules(list);
+};
+
+function renderRules(root) {
+  clear(root);
+  const rules = cache.rules;
+  if (!rules.length) root.append(h('div', { class: 'empty' }, 'No rules. Events will only get heuristic severities.'));
+  const move = async (i, d) => {
+    const ids = rules.map((r) => r.id);
+    [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
+    cache.rules = await api('POST', '/api/rules/reorder', { ids }).catch(reportError) || cache.rules;
+    renderRules(root);
+  };
+  rules.forEach((r, i) => {
+    const conds = r.conditions.map((c) => `${c.field} ${OP_LABELS[c.op] || c.op}${['exists', 'missing'].includes(c.op) ? '' : ` "${c.value}"`}`).join(r.match === 'any' ? '  OR  ' : '  AND  ');
+    const acts = [];
+    if (r.drop) acts.push(h('span', { class: 'badge bad' }, 'drop'));
+    if (r.category) acts.push(h('span', { class: 'badge' }, `category: ${r.category}`));
+    if (r.severity) acts.push(h('span', { class: 'badge' }, `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}`));
+    if (r.stop) acts.push(h('span', { class: 'badge' }, 'stop'));
+    acts.push(tags(r.tags));
+    const toggle = h('input', {
+      type: 'checkbox', checked: r.enabled, title: 'Enabled',
+      onchange: async (e) => {
+        try {
+          await api('PUT', `/api/rules/${r.id}`, { ...r, enabled: e.target.checked });
+          r.enabled = e.target.checked;
+          renderRules(root);
+        } catch (err) { e.target.checked = !e.target.checked; reportError(err); }
+      },
+    });
+    root.append(h('div', { class: `list-item ${r.enabled ? '' : 'disabled-item'}` },
+      h('div', { class: 'order-btns' },
+        h('button', { type: 'button', disabled: i === 0, 'aria-label': 'Move up', onclick: () => move(i, -1) }, '▲'),
+        h('button', { type: 'button', disabled: i === rules.length - 1, 'aria-label': 'Move down', onclick: () => move(i, 1) }, '▼')),
+      toggle,
+      h('div', { class: 'main' },
+        h('div', { class: 'title' }, r.name, r.source_ids && r.source_ids.length ? h('span', { class: 'badge' }, `only: ${r.source_ids.map(sourceName).join(', ')}`) : null),
+        h('div', { class: 'meta mono' }, conds),
+        h('div', { class: 'meta' }, acts)),
+      h('div', { class: 'actions' },
+        h('button', { type: 'button', class: 'small', onclick: () => editRule(r) }, 'Edit'),
+        h('button', {
+          type: 'button', class: 'small danger',
+          onclick: async () => {
+            if (!(await confirmDialog(`Delete rule "${r.name}"?`))) return;
+            await api('DELETE', `/api/rules/${r.id}`).catch(reportError);
+            await load('rules');
+            renderRules(root);
+          },
+        }, 'Delete'))));
+  });
+}
+
+function ruleTester() {
+  const sample = h('textarea', { rows: 7, placeholder: 'Paste log lines, a JSON object or NDJSON…' },
+    '2026-10-11T10:15:02Z ERROR payment failed: connection refused to db:5432\n{"level":"warn","msg":"login failed for user admin from 10.0.0.7"}\nGET /healthz 200 1ms');
+  const srcSel = select([['', 'Default parsing'], ...cache.sources.map((x) => [x.id, x.name])], '');
+  const out = h('div');
+  return h('div', { class: 'card sticky' },
+    h('h2', null, 'Rule tester'),
+    h('p', { class: 'muted small' }, 'Runs the saved rules against a sample without storing anything or sending notifications.'),
+    sample,
+    h('div', { class: 'row mt' }, srcSel, h('span', { class: 'spacer' }), h('button', {
+      type: 'button', class: 'primary',
+      onclick: async () => {
+        try {
+          const r = await api('POST', '/api/rules/test', { sample: sample.value, source_id: srcSel.value });
+          clear(out).append(previewTable(r.events));
+        } catch (err) { clear(out).append(h('div', { class: 'callout bad' }, err.message)); }
+      },
+    }, 'Test')),
+    out);
+}
+
+function editRule(rule, fromEvent) {
+  const isNew = !rule;
+  rule = rule ? JSON.parse(JSON.stringify(rule)) : {
+    name: '', enabled: true, match: 'all', severity_mode: 'set', tags: [], source_ids: [],
+    conditions: [{ field: 'message', op: 'contains', value: fromEvent ? fromEvent.message.split('\n')[0].slice(0, 80) : '' }],
+  };
+  if (fromEvent) rule.name = `Events like "${fromEvent.message.slice(0, 40)}"`;
+
+  const name = h('input', { value: rule.name });
+  const desc = h('input', { value: rule.description || '' });
+  const enabled = checkbox('Enabled', rule.enabled);
+  const match = select([['all', 'all conditions match (AND)'], ['any', 'any condition matches (OR)']], rule.match);
+  const condWrap = h('div');
+  const dl = h('datalist', { id: 'field-suggestions' }, FIELD_SUGGESTIONS.map((x) => h('option', { value: x })));
+  const conds = rule.conditions.map((c) => ({ ...c }));
+
+  const renderConds = () => {
+    clear(condWrap);
+    conds.forEach((c, i) => {
+      const fieldIn = h('input', { value: c.field, list: 'field-suggestions', 'aria-label': 'Field', oninput: (e) => { c.field = e.target.value; } });
+      const op = select(Object.entries(OP_LABELS), c.op, { 'aria-label': 'Operator', onchange: (e) => { c.op = e.target.value; renderConds(); } });
+      const val = h('input', { value: c.value || '', 'aria-label': 'Value', disabled: ['exists', 'missing'].includes(c.op), oninput: (e) => { c.value = e.target.value; } });
+      const cs = h('label', { class: 'check small', title: 'Case sensitive' }, h('input', { type: 'checkbox', checked: c.case_sensitive, onchange: (e) => { c.case_sensitive = e.target.checked; } }), 'Aa');
+      condWrap.append(h('div', { class: 'cond-row' }, fieldIn, op, val, cs,
+        h('button', { type: 'button', class: 'small', disabled: conds.length === 1, 'aria-label': 'Remove condition', onclick: () => { conds.splice(i, 1); renderConds(); } }, '✕')));
+    });
+  };
+  renderConds();
+
+  const catIn = h('input', { value: rule.category || '', list: 'category-suggestions', placeholder: 'leave empty to not set' });
+  const catList = h('datalist', { id: 'category-suggestions' }, categories().map((x) => h('option', { value: x })));
+  const sev = select([['', '— keep detected —'], ...SEVERITIES.map((x) => [x, x])], rule.severity || '');
+  const sevMode = select([['set', 'set exactly'], ['at_least', 'raise to at least']], rule.severity_mode || 'set');
+  const tagsIn = h('input', { value: (rule.tags || []).join(', ') });
+  const drop = checkbox('Drop matching events (don\'t store or alert)', rule.drop);
+  const stop = checkbox('Stop evaluating later rules', rule.stop);
+  const srcChecks = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (rule.source_ids || []).includes(x.id)) }));
+
+  const testIn = h('textarea', { rows: 3, placeholder: 'Sample log to try this rule on…' }, fromEvent ? fromEvent.message : '');
+  const testOut = h('div');
+
+  const collect = () => ({
+    ...rule,
+    name: name.value.trim(), description: desc.value.trim(), enabled: enabled.input.checked, match: match.value,
+    conditions: conds.map((c) => ({ field: c.field.trim(), op: c.op, value: c.value || '', case_sensitive: Boolean(c.case_sensitive) })),
+    category: catIn.value.trim(), severity: sev.value, severity_mode: sevMode.value, tags: splitList(tagsIn.value),
+    drop: drop.input.checked, stop: stop.input.checked, source_ids: srcChecks.filter((x) => x.box.input.checked).map((x) => x.id),
+  });
+
+  const body = h('div', null, dl, catList,
+    h('div', { class: 'fields-2' }, field('Name', name), field('Description', desc)),
+    enabled.el,
+    h('fieldset', { class: 'mt' }, h('legend', null, 'When'),
+      field('Match', match),
+      condWrap,
+      h('button', { type: 'button', class: 'small', onclick: () => { conds.push({ field: 'message', op: 'contains', value: '' }); renderConds(); } }, '+ Add condition'),
+      h('div', { class: 'field mt' }, h('label', null, 'Only for sources'), h('div', { class: 'chips' }, srcChecks.map((x) => x.box.el)), h('div', { class: 'help' }, 'Leave all unchecked to apply to every source.'))),
+    h('fieldset', null, h('legend', null, 'Then'),
+      h('div', { class: 'fields-3' }, field('Category', catIn), field('Severity', sev), field('Severity mode', sevMode)),
+      field('Add tags', tagsIn, 'Comma-separated.'),
+      h('div', { class: 'row' }, drop.el, stop.el)),
+    h('fieldset', null, h('legend', null, 'Try it'),
+      testIn,
+      h('div', { class: 'row mt' }, h('button', {
+        type: 'button', class: 'small',
+        onclick: async () => {
+          try {
+            const r = await api('POST', '/api/rules/test', { sample: testIn.value, rules: [collect()] });
+            clear(testOut).append(previewTable(r.events));
+          } catch (err) { clear(testOut).append(h('div', { class: 'callout bad' }, err.message)); }
+        },
+      }, 'Test this rule alone')),
+      testOut));
+
+  openModal({
+    title: isNew ? 'Add rule' : `Edit rule "${rule.name}"`, body, wide: true,
+    actions: [
+      { label: 'Cancel', onClick: (c) => c() },
+      {
+        label: isNew ? 'Create rule' : 'Save', primary: true,
+        onClick: async (close) => {
+          const r = collect();
+          if (isNew) await api('POST', '/api/rules', r); else await api('PUT', `/api/rules/${rule.id}`, r);
+          close();
+          toast('Rule saved');
+          if (parseHash().page === 'rules') route(); else location.hash = '#/rules';
+        },
+      },
+    ],
+  });
+}
+
+// ---------- Notifiers ----------
+
+pages.notifiers = async (main) => {
+  await load('notifiers', 'types');
+  const list = h('div', { class: 'card flush' });
+  append(main,
+    pageHead('Notifiers', 'Channels Laya can alert through. Alert routes decide which events go where.',
+      h('button', { type: 'button', class: 'primary', onclick: () => editNotifier(null) }, 'Add notifier')),
+    list);
+  clear(list);
+  if (!cache.notifiers.length) {
+    list.append(h('div', { class: 'empty' }, 'No notifiers yet. Add email, Slack, Microsoft Teams, Discord, Google Chat, PagerDuty or a generic webhook.'));
+  }
+  for (const n of cache.notifiers) {
+    const type = cache.types.find((t) => t.type === n.type);
+    list.append(h('div', { class: `list-item ${n.enabled ? '' : 'disabled-item'}` },
+      h('div', { class: 'main' },
+        h('div', { class: 'title' }, n.name, h('span', { class: 'badge' }, type ? type.label : n.type), n.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
+        h('div', { class: 'meta' }, notifierSummary(n, type))),
+      h('div', { class: 'actions' },
+        h('button', { type: 'button', class: 'small', onclick: (e) => sendTest(n, e.currentTarget) }, 'Send test'),
+        h('button', { type: 'button', class: 'small', onclick: () => editNotifier(n) }, 'Edit'),
+        h('button', {
+          type: 'button', class: 'small danger',
+          onclick: async () => {
+            if (!(await confirmDialog(`Delete notifier "${n.name}"? It will be removed from all routes.`))) return;
+            await api('DELETE', `/api/notifiers/${n.id}`).catch(reportError);
+            route();
+          },
+        }, 'Delete'))));
+  }
+};
+
+function notifierSummary(n, type) {
+  if (!type) return '';
+  return type.fields.filter((f) => !f.secret && n.settings[f.key] && f.type !== 'textarea').slice(0, 3)
+    .map((f) => `${f.label}: ${n.settings[f.key]}`).join(' · ');
+}
+
+async function sendTest(n, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('POST', '/api/notifiers/test', n);
+    if (r.ok) toast(`Test notification sent via "${n.name || n.type}"`);
+    else toast(`Test failed: ${r.error}`, 'error');
+  } catch (err) {
+    reportError(err);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function editNotifier(n) {
+  const isNew = !n;
+  n = n ? JSON.parse(JSON.stringify(n)) : { name: '', type: cache.types[0].type, enabled: true, settings: {} };
+  const name = h('input', { value: n.name, placeholder: 'e.g. #ops-alerts' });
+  const typeSel = select(cache.types.map((t) => [t.type, t.label]), n.type, { disabled: !isNew });
+  const enabled = checkbox('Enabled', n.enabled);
+  const desc = h('div', { class: 'callout' });
+  const fieldsWrap = h('div');
+  let inputs = {};
+
+  const renderFields = () => {
+    const t = cache.types.find((x) => x.type === typeSel.value);
+    clear(desc).append(t.description);
+    clear(fieldsWrap);
+    inputs = {};
+    const settings = typeSel.value === n.type ? n.settings : {};
+    for (const f of t.fields) {
+      const v = settings[f.key] ?? '';
+      let input;
+      if (f.type === 'textarea') input = h('textarea', { rows: 4, placeholder: f.placeholder || '' }, v);
+      else if (f.type === 'select') input = select(f.options, v || f.default);
+      else if (f.type === 'checkbox') input = h('input', { type: 'checkbox', checked: v === 'true' });
+      else if (f.type === 'password') input = secretInput(v, { placeholder: f.placeholder || '' });
+      else input = h('input', { type: f.type === 'number' ? 'number' : 'text', value: v, placeholder: f.placeholder || f.default || '', autocomplete: 'off' });
+      inputs[f.key] = { f, input };
+      const label = f.label + (f.required ? ' *' : '');
+      fieldsWrap.append(f.type === 'checkbox'
+        ? h('div', { class: 'field' }, h('label', { class: 'check' }, input, f.label), f.help ? h('div', { class: 'help' }, f.help) : null)
+        : field(label, input, f.help));
+    }
+  };
+  typeSel.addEventListener('change', renderFields);
+  renderFields();
+
+  const collect = () => {
+    const settings = {};
+    for (const [k, { f, input }] of Object.entries(inputs)) {
+      settings[k] = f.type === 'checkbox' ? (input.checked ? 'true' : '') : input.value;
+    }
+    return { ...n, name: name.value.trim(), type: typeSel.value, enabled: enabled.input.checked, settings };
+  };
+
+  const body = h('div', null,
+    h('div', { class: 'fields-2' }, field('Name', name), field('Type', typeSel)),
+    desc, fieldsWrap, enabled.el,
+    h('p', { class: 'small muted' }, 'Tip: any value can be written as ${env:NAME} to read it from Laya\'s environment, so secrets can live in Nomad Variables or Vault instead of Laya\'s config file.'));
+  openModal({
+    title: isNew ? 'Add notifier' : `Edit notifier "${n.name}"`, body,
+    left: h('button', { type: 'button', onclick: (e) => sendTest(collect(), e.currentTarget) }, 'Send test'),
+    actions: [
+      { label: 'Cancel', onClick: (c) => c() },
+      {
+        label: isNew ? 'Create notifier' : 'Save', primary: true,
+        onClick: async (close) => {
+          const data = collect();
+          if (isNew) await api('POST', '/api/notifiers', data); else await api('PUT', `/api/notifiers/${n.id}`, data);
+          close();
+          toast('Notifier saved');
+          route();
+        },
+      },
+    ],
+  });
+}
+
+// ---------- Routes ----------
+
+const THROTTLES = [[0, 'No throttling'], [60, '1 minute'], [300, '5 minutes'], [900, '15 minutes'], [3600, '1 hour'], [21600, '6 hours'], [86400, '24 hours']];
+
+pages.routes = async (main) => {
+  await load('routes', 'notifiers', 'sources', 'settings');
+  const list = h('div', { class: 'card flush' });
+  append(main,
+    pageHead('Alert routes', 'Send matching events to notifiers. Throttling limits repeats of the same problem (same fingerprint) per notifier.',
+      h('button', { type: 'button', class: 'primary', onclick: () => editRoute(null) }, 'Add route')),
+    list);
+  if (!cache.notifiers.length) {
+    main.insertBefore(h('div', { class: 'callout' }, 'Add a notifier first, then create routes that send events to it. ', h('a', { href: '#/notifiers' }, 'Go to notifiers →')), list);
+  }
+  if (!cache.routes.length) list.append(h('div', { class: 'empty' }, 'No routes yet — classified events are stored but nobody is notified.'));
+  for (const r of cache.routes) {
+    const notifierNames = r.notifier_ids.map((id) => (cache.notifiers.find((n) => n.id === id) || {}).name).filter(Boolean);
+    const when = [`severity ≥ ${r.min_severity}`];
+    if (r.categories && r.categories.length) when.push(`category in [${r.categories.join(', ')}]`);
+    if (r.source_ids && r.source_ids.length) when.push(`source in [${r.source_ids.map(sourceName).join(', ')}]`);
+    if (r.tags && r.tags.length) when.push(`tag in [${r.tags.join(', ')}]`);
+    if (r.message_regex) when.push(`message ~ /${r.message_regex}/`);
+    const throttle = THROTTLES.find((t) => t[0] === r.throttle_seconds);
+    list.append(h('div', { class: `list-item ${r.enabled ? '' : 'disabled-item'}` },
+      h('div', { class: 'main' },
+        h('div', { class: 'title' }, r.name, r.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
+        h('div', { class: 'meta' }, 'When ', when.join(' and ')),
+        h('div', { class: 'meta' }, '→ ', notifierNames.length ? notifierNames.join(', ') : h('span', { class: 'badge warn' }, 'no notifiers'),
+          ' · ', r.throttle_seconds ? `throttle ${throttle ? throttle[1] : `${r.throttle_seconds}s`}` : 'no throttling')),
+      h('div', { class: 'actions' },
+        h('button', { type: 'button', class: 'small', onclick: () => editRoute(r) }, 'Edit'),
+        h('button', {
+          type: 'button', class: 'small danger',
+          onclick: async () => {
+            if (!(await confirmDialog(`Delete route "${r.name}"?`))) return;
+            await api('DELETE', `/api/routes/${r.id}`).catch(reportError);
+            route();
+          },
+        }, 'Delete'))));
+  }
+};
+
+function editRoute(r) {
+  const isNew = !r;
+  r = r ? JSON.parse(JSON.stringify(r)) : { name: '', enabled: true, min_severity: 'error', categories: [], source_ids: [], tags: [], notifier_ids: [], throttle_seconds: 900 };
+  const name = h('input', { value: r.name, placeholder: 'e.g. Production errors to on-call' });
+  const enabled = checkbox('Enabled', r.enabled);
+  const minSev = select(SEVERITIES, r.min_severity);
+  const cats = [...categories(), 'uncategorized'].map((c) => ({ c, box: checkbox(c, (r.categories || []).includes(c)) }));
+  const srcs = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (r.source_ids || []).includes(x.id)) }));
+  const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, (r.notifier_ids || []).includes(x.id)) }));
+  const tagsIn = h('input', { value: (r.tags || []).join(', ') });
+  const regex = h('input', { value: r.message_regex || '', placeholder: '(?i)payment|checkout' });
+  const throttleOpts = THROTTLES.some((t) => t[0] === r.throttle_seconds) ? THROTTLES : [...THROTTLES, [r.throttle_seconds, `${r.throttle_seconds} seconds`]];
+  const throttle = select(throttleOpts.map(([v, l]) => [String(v), l]), String(r.throttle_seconds));
+
+  const body = h('div', null,
+    field('Name', name), enabled.el,
+    h('fieldset', { class: 'mt' }, h('legend', null, 'Match events'),
+      field('Minimum severity', minSev),
+      h('div', { class: 'field' }, h('label', null, 'Categories'), h('div', { class: 'chips' }, cats.map((x) => x.box.el)), h('div', { class: 'help' }, 'None checked = any category.')),
+      h('div', { class: 'field' }, h('label', null, 'Sources'), h('div', { class: 'chips' }, srcs.map((x) => x.box.el)), h('div', { class: 'help' }, 'None checked = any source.')),
+      h('div', { class: 'fields-2' }, field('Any of these tags', tagsIn), field('Message regex', regex))),
+    h('fieldset', null, h('legend', null, 'Notify'),
+      nts.length ? h('div', { class: 'chips' }, nts.map((x) => x.box.el)) : h('p', { class: 'muted' }, 'No notifiers configured yet.'),
+      h('div', { class: 'mt' }, field('Throttle repeats', throttle, 'After alerting on a problem, suppress the same fingerprint on the same notifier for this long. The next alert reports how many were suppressed.'))));
+
+  openModal({
+    title: isNew ? 'Add alert route' : `Edit route "${r.name}"`, body, wide: true,
+    actions: [
+      { label: 'Cancel', onClick: (c) => c() },
+      {
+        label: isNew ? 'Create route' : 'Save', primary: true,
+        onClick: async (close) => {
+          const data = {
+            ...r, name: name.value.trim(), enabled: enabled.input.checked, min_severity: minSev.value,
+            categories: cats.filter((x) => x.box.input.checked).map((x) => x.c),
+            source_ids: srcs.filter((x) => x.box.input.checked).map((x) => x.id),
+            notifier_ids: nts.filter((x) => x.box.input.checked).map((x) => x.id),
+            tags: splitList(tagsIn.value), message_regex: regex.value.trim(), throttle_seconds: Number(throttle.value),
+          };
+          if (isNew) await api('POST', '/api/routes', data); else await api('PUT', `/api/routes/${r.id}`, data);
+          close();
+          toast('Route saved');
+          route();
+        },
+      },
+    ],
+  });
+}
+
+// ---------- Deliveries ----------
+
+pages.deliveries = async (main) => {
+  const wrap = h('div', { class: 'card flush' });
+  append(main, pageHead('Deliveries', 'Recent notification attempts (kept in memory).', h('button', { type: 'button', onclick: () => refresh().catch(reportError) }, 'Refresh')), wrap);
+  const refresh = async () => {
+    const list = await GET('/api/deliveries?limit=200');
+    clear(wrap);
+    if (!list.length) { wrap.append(h('div', { class: 'empty' }, 'No notifications sent yet.')); return; }
+    const tbl = h('table', null, h('tr', null, h('th', null, 'Time'), h('th', null, 'Status'), h('th', null, 'Notifier'), h('th', null, 'Route'), h('th', null, 'Event'), h('th', null, 'Attempts'), h('th', null, 'Detail')));
+    for (const d of list) {
+      const cls = d.status === 'sent' ? 'ok' : d.status === 'failed' ? 'bad' : 'warn';
+      tbl.append(h('tr', null,
+        h('td', null, timeCell(d.time)),
+        h('td', null, h('span', { class: `badge ${cls}` }, d.status), d.test ? h('span', { class: 'badge' }, 'test') : null),
+        h('td', { class: 'nowrap' }, d.notifier_name, h('div', { class: 'muted small' }, d.notifier_type)),
+        h('td', null, d.route_name || '—'),
+        h('td', { class: 'msg', title: d.title }, d.event_id && d.event_id !== 'test' ? h('a', { href: `#/events/${d.event_id}` }, d.title) : d.title),
+        h('td', null, d.attempts, h('div', { class: 'muted small' }, `${d.duration_ms} ms`)),
+        h('td', { class: 'small' }, d.error || '')));
+    }
+    wrap.append(tbl);
+  };
+  await refresh();
+  return every(10000, refresh);
+};
+
+// ---------- Settings ----------
+
+const AI_MODELS = [
+  ['claude-opus-5-5', 'Claude Opus 5.5 (default)'],
+  ['claude-sonnet-5-5', 'Claude Sonnet 5.5'],
+  ['claude-haiku-5-5', 'Claude Haiku 5.5 (lowest cost)'],
+  ['claude-fable-5-1', 'Claude Fable 5.1 (most capable)'],
+];
+
+pages.settings = async (main) => {
+  await load('settings', 'info');
+  const st = cache.settings;
+  const publicURL = h('input', { value: st.public_url || '', placeholder: cache.info.public_url });
+  const cats = h('textarea', { rows: 3 }, st.categories.join(', '));
+  const ai = st.ai;
+  const aiEnabled = checkbox('Use Claude to classify events the rules can\'t', ai.enabled);
+  const apiKey = secretInput(ai.api_key || '', { placeholder: '${env:ANTHROPIC_API_KEY}' });
+  const models = AI_MODELS.some((m) => m[0] === ai.model) ? AI_MODELS : [...AI_MODELS, [ai.model, ai.model]];
+  const model = select(models, ai.model);
+  const effort = select([['low', 'low (recommended for classification)'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max']], ai.effort);
+  const onlyUncat = checkbox('Only events no rule categorized', ai.only_uncategorized);
+  const minSev = select(SEVERITIES, ai.min_severity);
+  const budget = h('input', { type: 'number', min: 1, value: ai.max_calls_per_hour });
+  const aiStatus = h('div');
+  const aiTestIn = h('textarea', { rows: 3, placeholder: 'A log line to classify…' }, 'kafka consumer group rebalancing took 48213ms, lag on orders topic now 120k messages');
+  const aiTestOut = h('div');
+
+  const renderStatus = async () => {
+    const stats = await GET('/api/stats');
+    const a = stats.ai;
+    clear(aiStatus).append(h('div', { class: 'kv' },
+      h('div', null, 'Status'), h('div', null, !a.enabled ? 'disabled' : !a.configured ? h('span', { class: 'badge bad' }, 'no API key') : h('span', { class: 'badge ok' }, 'active')),
+      h('div', null, 'Calls this hour'), h('div', null, `${a.calls_this_hour} / ${a.budget_per_hour}`),
+      h('div', null, 'Total calls'), h('div', null, `${num(a.calls_total)} (${num(a.cache_hits)} cache hits, ${num(a.cached_results)} cached patterns)`),
+      h('div', null, 'Errors'), h('div', null, num(a.errors)),
+      a.last_error ? [h('div', null, 'Last error'), h('div', null, `${a.last_error} (${ago(a.last_error_at)})`)] : null,
+      a.paused_until && new Date(a.paused_until) > new Date() ? [h('div', null, 'Paused until'), h('div', null, fmtTime(a.paused_until))] : null));
+  };
+
+  const save = async () => {
+    const data = {
+      public_url: publicURL.value.trim(),
+      categories: splitList(cats.value),
+      ai: {
+        enabled: aiEnabled.input.checked, api_key: apiKey.value, model: model.value, effort: effort.value,
+        only_uncategorized: onlyUncat.input.checked, min_severity: minSev.value, max_calls_per_hour: Number(budget.value) || 120,
+      },
+    };
+    cache.settings = await api('PUT', '/api/settings', data);
+    toast('Settings saved');
+    renderStatus().catch(reportError);
+  };
+
+  const importFile = h('input', { type: 'file', accept: 'application/json', hidden: true });
+  importFile.addEventListener('change', async () => {
+    const file = importFile.files[0];
+    if (!file) return;
+    try {
+      const cfg = JSON.parse(await file.text());
+      if (!(await confirmDialog('Replace the entire configuration with this file? Masked secrets are kept for matching IDs.', 'Import'))) return;
+      await api('POST', '/api/config/import', cfg);
+      toast('Configuration imported');
+      route();
+    } catch (err) { reportError(err); } finally { importFile.value = ''; }
+  });
+
+  const exportCfg = async (secrets) => {
+    const res = await fetch(`/api/config/export${secrets ? '?include_secrets=true' : ''}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { toast('Export failed', 'error'); return; }
+    const blob = await res.blob();
+    const a = h('a', { href: URL.createObjectURL(blob), download: `laya-config-${new Date().toISOString().slice(0, 10)}.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  append(main,
+    pageHead('Settings', null, h('button', { type: 'button', class: 'primary', onclick: () => save().catch(reportError) }, 'Save settings')),
+    h('div', { class: 'grid cols-2' },
+      h('div', { class: 'card' },
+        h('h2', null, 'General'),
+        field('Public URL', publicURL, 'How users and senders reach Laya (e.g. https://laya.example.com). Used for ingest URLs and links in notifications. Defaults to LAYA_PUBLIC_URL or the address you are using now.'),
+        field('Categories', cats, 'Comma-separated. Offered in rule and route editors and used as the allowed answers for AI classification.'),
+        h('h3', null, 'Backup'),
+        h('p', { class: 'small muted' }, 'Export the configuration as JSON (secrets masked unless included), or import a file to replace it — useful for promoting config between environments.'),
+        h('div', { class: 'row' },
+          h('button', { type: 'button', onclick: () => exportCfg(false).catch(reportError) }, 'Export'),
+          h('button', { type: 'button', onclick: () => exportCfg(true).catch(reportError) }, 'Export with secrets'),
+          h('button', { type: 'button', onclick: () => importFile.click() }, 'Import…'), importFile)),
+      h('div', { class: 'card' },
+        h('h2', null, 'AI classification (optional)'),
+        h('p', { class: 'small muted' }, 'Sends qualifying log events to the Anthropic API for a category, severity and one-line summary. Results are cached per fingerprint for 24h, so repeats of the same problem cost one call. Rules always win over AI.'),
+        aiEnabled.el,
+        h('div', { class: 'mt' }),
+        field('Anthropic API key', apiKey, 'Prefer ${env:ANTHROPIC_API_KEY} and put the key in the nomad/jobs/laya Nomad Variable.'),
+        h('div', { class: 'fields-2' }, field('Model', model), field('Effort', effort)),
+        h('div', { class: 'fields-2' }, field('Minimum severity', minSev), field('Max calls per hour', budget)),
+        onlyUncat.el,
+        h('h3', null, 'Status'), aiStatus,
+        h('h3', null, 'Try it'), aiTestIn,
+        h('div', { class: 'row mt' }, h('button', {
+          type: 'button', class: 'small',
+          onclick: async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            clear(aiTestOut).append(h('p', { class: 'muted' }, 'Asking Claude… (save settings first if you changed them)'));
+            try {
+              const r = await api('POST', '/api/ai/test', { message: aiTestIn.value });
+              clear(aiTestOut).append(r.ok
+                ? h('div', { class: 'kv mt' }, h('div', null, 'Category'), h('div', null, r.result.category), h('div', null, 'Severity'), h('div', null, sevBadge(r.result.severity)), h('div', null, 'Summary'), h('div', null, r.result.summary))
+                : h('div', { class: 'callout bad mt' }, r.error));
+              renderStatus().catch(reportError);
+            } catch (err) { clear(aiTestOut); reportError(err); } finally { btn.disabled = false; }
+          },
+        }, 'Classify sample')),
+        aiTestOut)));
+  await renderStatus();
+};
+
+// ---------- Boot ----------
+
+let booted = false;
+async function boot() {
+  try {
+    await load('info');
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  document.getElementById('version').textContent = `v${cache.info.version}`;
+  if (!booted) {
+    booted = true;
+    window.addEventListener('hashchange', route);
+    document.getElementById('logout').addEventListener('click', () => {
+      sessionStorage.removeItem('laya.token');
+      token = '';
+      showLogin();
+    });
+  }
+  route();
+}
+
+if (token) boot(); else showLogin();

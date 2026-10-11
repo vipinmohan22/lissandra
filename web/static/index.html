@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Laya</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <a class="brand" href="#/dashboard">
+        <img src="favicon.svg" alt="" width="26" height="26">
+        <span>Laya</span>
+      </a>
+      <nav id="nav">
+        <a href="#/dashboard" data-page="dashboard">Dashboard</a>
+        <a href="#/events" data-page="events">Events</a>
+        <div class="nav-group">Configure</div>
+        <a href="#/sources" data-page="sources">Sources</a>
+        <a href="#/rules" data-page="rules">Classification rules</a>
+        <a href="#/notifiers" data-page="notifiers">Notifiers</a>
+        <a href="#/routes" data-page="routes">Alert routes</a>
+        <div class="nav-group">Operate</div>
+        <a href="#/deliveries" data-page="deliveries">Deliveries</a>
+        <a href="#/settings" data-page="settings">Settings</a>
+      </nav>
+      <div class="sidebar-foot">
+        <span id="version"></span>
+        <button type="button" class="link" id="logout">Sign out</button>
+      </div>
+    </aside>
+    <main id="main" tabindex="-1"></main>
+  </div>
+  <div id="toasts" aria-live="polite"></div>
+</body>
+</html>

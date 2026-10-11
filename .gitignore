@@ -1,0 +1,4 @@
+/bin/
+/data/
+/laya
+deploy/nomad/laya.vars.hcl

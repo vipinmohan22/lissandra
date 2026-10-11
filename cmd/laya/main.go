@@ -1,0 +1,155 @@
+// Command laya runs the Laya log classification service.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/vipinmohan22/layalogs/internal/ai"
+	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/layalogs/internal/events"
+	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/layalogs/internal/notify"
+	"github.com/vipinmohan22/layalogs/internal/pipeline"
+	"github.com/vipinmohan22/layalogs/internal/poller"
+	"github.com/vipinmohan22/layalogs/internal/server"
+	"github.com/vipinmohan22/layalogs/web"
+)
+
+var version = "dev"
+
+func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "laya:", err)
+		os.Exit(1)
+	}
+}
+
+func env(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
+}
+
+func envInt(key string, def int) int {
+	if v, err := strconv.Atoi(env(key, "")); err == nil && v > 0 {
+		return v
+	}
+	return def
+}
+
+func newLogger() *slog.Logger {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(env("LAYA_LOG_LEVEL", "info"))); err != nil {
+		lvl = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: lvl}
+	if env("LAYA_LOG_FORMAT", "json") == "text" {
+		return slog.New(slog.NewTextHandler(os.Stdout, opts))
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, opts))
+}
+
+func run() error {
+	log := newLogger()
+	listen := env("LAYA_LISTEN", ":8080")
+	dataDir := env("LAYA_DATA_DIR", "./data")
+	publicURL := env("LAYA_PUBLIC_URL", "")
+
+	token := env("LAYA_ADMIN_TOKEN", "")
+	if token == "" {
+		token = model.NewToken()
+		log.Warn("LAYA_ADMIN_TOKEN is not set; generated a token for this run only. Set LAYA_ADMIN_TOKEN (e.g. from a Nomad Variable) to keep it stable.", "admin_token", token)
+	} else if len(token) < 16 {
+		log.Warn("LAYA_ADMIN_TOKEN is shorter than 16 characters; use a long random value")
+	}
+
+	cfg, err := config.Open(filepath.Join(dataDir, "config.json"), env("LAYA_CONFIG_SEED", ""))
+	if err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	store := events.NewStore(envInt("LAYA_EVENT_BUFFER", 5000))
+	dispatcher := notify.NewDispatcher(log)
+	aic := ai.New(log)
+	pipe := pipeline.New(envInt("LAYA_QUEUE_SIZE", 10000), store, dispatcher, aic)
+	pollers := poller.NewManager(ctx, log, pipe.SubmitWait)
+
+	cfg.Subscribe(func(c *config.Config) {
+		if c.Settings.PublicURL == "" {
+			c.Settings.PublicURL = strings.TrimRight(publicURL, "/")
+		}
+		pipe.Configure(c)
+		dispatcher.Configure(c)
+		aic.Configure(c.Settings)
+		pollers.Configure(c)
+		log.Info("configuration applied", "version", c.Version, "sources", len(c.Sources), "rules", len(c.Rules), "notifiers", len(c.Notifiers), "routes", len(c.Routes))
+	})
+
+	done := make(chan struct{}, 2)
+	go func() { dispatcher.Run(ctx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
+	go func() { pipe.Run(ctx, envInt("LAYA_WORKERS", 4), envInt("LAYA_AI_WORKERS", 2)); done <- struct{}{} }()
+
+	srv := server.New(server.Options{
+		Version:        version,
+		AdminToken:     token,
+		PublicURL:      publicURL,
+		MaxIngestBytes: int64(envInt("LAYA_MAX_INGEST_BYTES", 10<<20)),
+		UI:             web.FS(),
+	}, log, cfg, store, pipe, dispatcher, aic, pollers)
+
+	httpSrv := &http.Server{
+		Addr:              listen,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      150 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	errc := make(chan error, 1)
+	go func() {
+		log.Info("laya listening", "addr", listen, "data_dir", dataDir, "version", version)
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errc <- err
+		}
+	}()
+
+	select {
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
+	}
+	log.Info("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_ = httpSrv.Shutdown(shutdownCtx)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-shutdownCtx.Done():
+			return nil
+		}
+	}
+	return nil
+}
