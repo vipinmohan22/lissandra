@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,5 +119,22 @@ func TestParseTime(t *testing.T) {
 	}
 	if _, ok := ParseTime("yesterday"); ok {
 		t.Error("garbage should not parse")
+	}
+}
+
+// hclog's JSON, Serilog's CLEF and OpenTelemetry name the level otherwise.
+func TestMoreLevelKeys(t *testing.T) {
+	for _, line := range []string{
+		`{"@level":"warn","@message":"agent: slow","@timestamp":"2026-10-11T10:00:00Z"}`,
+		`{"@t":"2026-10-11T10:00:00Z","@mt":"slow","@l":"Warning"}`,
+		`{"severityText":"WARN","body":"slow","timeUnixNano":"1"}`,
+	} {
+		var rec any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatal(err)
+		}
+		if ev, _ := toEvent(rec, config.Parse{}, time.Now(), timeParser{}); !strings.EqualFold(ev.Level[:4], "warn") {
+			t.Errorf("level from %s: %q", line, ev.Level)
+		}
 	}
 }

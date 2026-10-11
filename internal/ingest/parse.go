@@ -23,7 +23,7 @@ const (
 
 var (
 	messageKeys   = []string{"message", "msg", "log", "MESSAGE", "@message", "text", "short_message", "textPayload", "body", "line", "event"}
-	levelKeys     = []string{"level", "severity", "lvl", "log.level", "levelname", "loglevel", "log_level", "PRIORITY", "priority"}
+	levelKeys     = []string{"level", "severity", "lvl", "log.level", "levelname", "loglevel", "log_level", "@level", "@l", "severityText", "SeverityText", "PRIORITY", "priority"}
 	timestampKeys = []string{"@timestamp", "timestamp", "time", "ts", "date", "datetime", "_time", "eventTime", "__REALTIME_TIMESTAMP"}
 	wrapperKeys   = []string{"records", "Records", "logs", "events", "entries", "items", "data", "results", "messages", "hits.hits"}
 )

@@ -1,0 +1,114 @@
+{"format": "github-actions/raw", "line": "2026-10-11T10:00:05.1234567Z ##[error]Process completed with exit code 1.", "stated": "error"}
+{"format": "github-actions/raw", "line": "2026-10-11T10:00:01.2345678Z ##[warning]The `set-output` command is deprecated and will be disabled soon. Please upgrade to using Environment Files. For more information see: https://github.blog/changelog/2022-10-11-github-actions-deprecating-save-state-and-set-output-commands/", "stated": "warning"}
+{"format": "github-actions/raw", "line": "2026-10-11T10:00:00.5678901Z ##[debug]Evaluating condition for step: 'Run tests'", "stated": "debug"}
+{"format": "github-actions/raw", "line": "2026-10-11T10:00:03.3456789Z ##[notice]Coverage 81.4% is above the 80% threshold", "stated": "notice"}
+{"format": "github-actions/raw", "line": "2026-10-11T10:00:00.4567890Z ##[group]Run grep -c ERROR build/app.log", "stated": "", "guess": "info"}
+{"format": "github-actions/raw", "line": "2026-10-11T10:00:00.4567891Z   RUST_LOG: warn", "stated": "", "guess": "info"}
+{"format": "github-actions/raw", "line": "2026-10-11T10:00:02.3456789Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.", "stated": "warning"}
+{"format": "github-actions/raw+cargo", "line": "2026-10-11T10:00:06.1234567Z error[E0425]: cannot find value `amount_cents` in this scope", "stated": "error"}
+{"format": "github-actions/raw+eslint", "line": "2026-10-11T10:00:07.1234567Z   12:7   error    'amount' is assigned a value but never used  @typescript-eslint/no-unused-vars", "stated": "error"}
+{"format": "github-actions/raw+eslint", "line": "2026-10-11T10:00:07.1234568Z   30:1   warning  Unexpected console statement                 no-console", "stated": "warning"}
+{"format": "github-actions/workflow-command", "line": "::error file=internal/billing/charge.go,line=42,col=2::Error return value of `w.Write` is not checked (errcheck)", "stated": "error"}
+{"format": "github-actions/workflow-command", "line": "::warning file=app.js,line=1,col=5,endColumn=7::Missing semicolon", "stated": "warning"}
+{"format": "github-actions/workflow-command", "line": "::debug::Set the Octocat variable", "stated": "debug"}
+{"format": "gitlab-runner/job-trace", "line": "\u001b[31;1mERROR: Job failed: exit code 1\u001b[0;m", "stated": "error"}
+{"format": "gitlab-runner/job-trace", "line": "\u001b[0;33mWARNING: Failed to pull image with policy \"always\": Error response from daemon: manifest for registry.example.com/acme/ci-image:latest not found: manifest unknown: manifest unknown (manager.go:250:0s)\u001b[0;m", "stated": "warning"}
+{"format": "gitlab-runner/job-trace", "line": "\u001b[32;1m$ grep -c ERROR build/app.log\u001b[0;m", "stated": "", "guess": "info"}
+{"format": "gitlab-runner/service", "line": "Oct 11 10:00:00 ci-1 gitlab-runner[812]: WARNING: Checking for jobs... failed                runner=AbCdEf12 status=couldn't execute POST against https://gitlab.example.com/api/v4/jobs/request: Post \"https://gitlab.example.com/api/v4/jobs/request\": dial tcp 10.0.0.5:443: connect: connection refused", "stated": "warning"}
+{"format": "jenkins/console", "line": "ERROR: Couldn't find any revision to build. Verify the repository and branch configuration for this job.", "stated": "error"}
+{"format": "jenkins/console", "line": "FATAL: command execution failed", "stated": "critical"}
+{"format": "jenkins/console+timestamper", "line": "[2026-10-11T10:00:01.456Z] npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported", "stated": "warning"}
+{"format": "buildkite-agent", "line": "2026-10-11 10:00:00 NOTICE Starting buildkite-agent v3.82.0 with PID: 4242", "stated": "notice"}
+{"format": "buildkite-agent", "line": "2026-10-11 10:05:00 WARN   ci-agent-1 Failed to ping (Attempt 1/60 Retrying in 5s): POST https://agent.buildkite.com/v3/ping: dial tcp: lookup agent.buildkite.com on 127.0.0.53:53: server misbehaving", "stated": "warning"}
+{"format": "buildkite/job", "line": "\u001b[31m🚨 Error: The command exited with status 1\u001b[0m", "stated": "error"}
+{"format": "circleci/step", "line": "Exited with code exit status 1", "stated": ""}
+{"format": "terraform/diag-no-color", "line": "Error: Error acquiring the state lock", "stated": "error"}
+{"format": "terraform/diag-no-color", "line": "Warning: Value for undeclared variable", "stated": "warning"}
+{"format": "github-actions/raw+terraform-plan", "line": "2026-10-11T10:00:10.1234567Z       + log_level                    = \"ERROR\"", "stated": "", "guess": "info"}
+{"format": "hclog/terraform", "line": "2026-10-11T10:00:00.123Z [WARN]  Provider \"registry.terraform.io/hashicorp/aws\" produced an invalid plan for aws_instance.web, but we are tolerating it because it is using the legacy plugin SDK.\n    The following problems may be the cause of any confusing errors from downstream operations:\n      - .user_data_replace_on_change: planned value cty.False for a non-computed attribute", "stated": "warning"}
+{"format": "hclog/terraform", "line": "2026-10-11T10:00:00.456Z [ERROR] vertex \"aws_instance.web\" error: creating EC2 Instance: UnauthorizedOperation: You are not authorized to perform this operation.", "stated": "error"}
+{"format": "ansible/default-callback", "line": "TASK [common : Set log level to WARNING] ***************************************", "stated": "", "guess": "info"}
+{"format": "ansible/default-callback", "line": "fatal: [web1]: FAILED! => {\"changed\": false, \"msg\": \"No package matching 'ngnix' is available\"}", "stated": "", "gap": "Ansible's 'fatal:' has the generic level-label shape; a judgment call"}
+{"format": "ansible/default-callback", "line": "[WARNING]: Could not match supplied host pattern, ignoring: webservers", "stated": "warning"}
+{"format": "ansible/default-callback", "line": "[DEPRECATION WARNING]: The 'community.general.yaml' callback plugin has been deprecated. This feature will be removed from community.general in version 13.0.0. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.", "stated": "warning"}
+{"format": "ansible/default-callback", "line": "ERROR! the role 'nginx' was not found in /home/runner/work/infra/playbooks/roles:/home/runner/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles:/home/runner/work/infra/playbooks", "stated": "error"}
+{"format": "ansible/default-callback", "line": "web2                       : ok=5    changed=2    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0", "stated": "", "guess": "info"}
+{"format": "helm", "line": "WARNING: Kubernetes configuration file is group-readable. This is insecure. Location: /home/runner/.kube/config", "stated": "warning"}
+{"format": "helm", "line": "coalesce.go:286: warning: cannot overwrite table with non table for orders.resources (map[])", "stated": "warning"}
+{"format": "helm/--debug", "line": "upgrade.go:142: [debug] preparing upgrade for orders", "stated": "debug"}
+{"format": "helm/lint", "line": "[ERROR] templates/deployment.yaml: unable to parse YAML: error converting YAML to JSON: yaml: line 12: did not find expected key", "stated": "error"}
+{"format": "argocd/logrus-text", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"Reconciliation completed\" application=argocd/orders dedup_ms=0 dest-name= dest-namespace=orders dest-server=\"https://kubernetes.default.svc\" diff_ms=2 fields.level=1 git_ms=14 health_ms=0 live_ms=1 patch_ms=8 setop_ms=0 settings_ms=0 sync_ms=0 time_ms=45", "stated": "info"}
+{"format": "argocd/logrus-text", "line": "time=\"2026-10-11T10:00:05Z\" level=error msg=\"finished unary call with code Unknown\" error=\"rpc error: code = Unknown desc = authentication required\" grpc.code=Unknown grpc.method=GenerateManifest grpc.service=repository.RepoServerService grpc.start_time=\"2026-10-11T10:00:05Z\" grpc.time_ms=812.4 span.kind=server system=grpc", "stated": "error"}
+{"format": "argocd/cli-tty", "line": "FATA[0000] rpc error: code = Unauthenticated desc = invalid session: token has invalid claims: token is expired", "stated": "critical"}
+{"format": "flux/logs-cli", "line": "2026-10-11T10:00:00.123Z info GitRepository/flux-system.flux-system - stored artifact for commit 'Merge pull request #42 from acme/fix-error-page'", "stated": "info"}
+{"format": "flux/logs-cli", "line": "2026-10-11T10:00:05.456Z error Kustomization/apps.flux-system - Reconciliation failed after 1.234s, next try in 10m0s", "stated": "error"}
+{"format": "buildkit/plain", "line": "#5 ERROR: process \"/bin/sh -c go build -o /out/app ./cmd/app\" did not complete successfully: exit code: 1", "stated": "error"}
+{"format": "buildkit/plain", "line": "ERROR: failed to solve: process \"/bin/sh -c go build -o /out/app ./cmd/app\" did not complete successfully: exit code: 1", "stated": "error"}
+{"format": "buildkit/plain", "line": "#9 0.312 WARNING: apt does not have a stable CLI interface. Use with caution in scripts.", "stated": "warning"}
+{"format": "buildkit/plain", "line": "#12 1.234 npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported", "stated": "warning"}
+{"format": "bazel", "line": "INFO: Elapsed time: 12.345s, Critical Path: 8.90s", "stated": "info"}
+{"format": "bazel", "line": "ERROR: /home/runner/work/orders/orders/services/billing/BUILD.bazel:8:11: Compiling services/billing/charge.cc failed: (Exit 1): gcc failed: error executing CppCompile command (from target //services/billing:charge) /usr/bin/gcc -U_FORTIFY_SOURCE -fstack-protector -Wall -Wunused-but-set-parameter -Wno-free-nonheap-object -fno-omit-frame-pointer -g0 -O2 '-D_FORTIFY_SOURCE=1' -DNDEBUG -ffunction-sections ... (remaining 25 arguments skipped)", "stated": "error"}
+{"format": "bazel", "line": "FAIL: //services/billing:charge_test (see /home/runner/.cache/bazel/_bazel_runner/4f6c1e2d3b4a5c6d7e8f9a0b1c2d3e4f/execroot/_main/bazel-out/k8-fastbuild/testlogs/services/billing/charge_test/test.log)", "stated": "error"}
+{"format": "bazel", "line": "DEBUG: /home/runner/work/orders/orders/tools/defs.bzl:12:10: resolved go_sdk to 1.23.2", "stated": "debug"}
+{"format": "gcc/via-bazel", "line": "services/billing/charge.cc:42:7: warning: unused variable 'retries' [-Wunused-variable]", "stated": "warning"}
+{"format": "gcc/via-bazel", "line": "services/billing/charge.cc:12:10: fatal error: stripe/client.h: No such file or directory", "stated": "critical"}
+{"format": "go-test", "line": "--- FAIL: TestChargeDeclined (0.00s)\n    charge_test.go:42: expected status 402, got 500", "stated": ""}
+{"format": "go-test", "line": "FAIL\tgithub.com/acme/orders/internal/billing\t0.015s", "stated": ""}
+{"format": "go-test/race", "line": "WARNING: DATA RACE", "stated": "warning"}
+{"format": "golangci-lint/text", "line": "internal/billing/charge.go:42:2: Error return value of `w.Write` is not checked (errcheck)\n\tw.Write(body)\n\t^", "stated": ""}
+{"format": "golangci-lint/logrus", "line": "level=warning msg=\"[runner] The linter 'exportloopref' is deprecated (since v1.60.2) due to: Since Go1.22 (loopvar) this linter is no longer relevant. Replaced by copyloopvar.\"", "stated": "warning"}
+{"format": "pytest", "line": "FAILED tests/test_orders.py::test_charge_declined - AssertionError: assert 500 == 402", "stated": ""}
+{"format": "pytest", "line": "ERROR tests/test_db.py::test_migrations - sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused", "stated": "error"}
+{"format": "pytest", "line": "tests/test_orders.py::test_legacy\n  /home/runner/work/orders/orders/legacy.py:12: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).", "stated": "", "guess": "warning"}
+{"format": "pytest/captured-log", "line": "ERROR    orders.billing:charge.py:42 card declined: insufficient_funds", "stated": "error"}
+{"format": "pytest/captured-log", "line": "WARNING  urllib3.connectionpool:connectionpool.py:870 Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x7f3c2a1b4d90>: Failed to establish a new connection: [Errno 111] Connection refused')': /v1/charges", "stated": "warning"}
+{"format": "pytest/captured-log", "line": "INFO     alembic.runtime.migration:migration.py:207 Running upgrade 3f2a1b0c9d8e -> 4a5b6c7d8e9f, add error_code column", "stated": "info"}
+{"format": "jest/color", "line": "\u001b[0m\u001b[7m\u001b[1m\u001b[31m FAIL \u001b[39m\u001b[22m\u001b[27m\u001b[0m \u001b[2msrc/orders/\u001b[22m\u001b[1mcharge.test.ts\u001b[22m", "stated": ""}
+{"format": "chromium/via-cypress", "line": "[2345:1011/100000.123456:ERROR:bus.cc(407)] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")", "stated": "error"}
+{"format": "chromium/via-cypress", "line": "[2345:1011/100001.234567:INFO:CONSOLE(1)] \"Uncaught Error: boom\", source: http://localhost:3000/main.js (1)", "stated": "info"}
+{"format": "cargo", "line": "warning: unused variable: `retries`\n  --> src/billing.rs:42:9\n   |", "stated": "warning"}
+{"format": "cargo", "line": "error[E0425]: cannot find value `amount_cents` in this scope\n  --> src/billing.rs:57:20\n   |", "stated": "error"}
+{"format": "cargo", "line": "error: could not compile `orders` (bin \"orders\") due to 1 previous error; 1 warning emitted", "stated": "error"}
+{"format": "cargo-test", "line": "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s", "stated": "", "guess": "info"}
+{"format": "tsc", "line": "src/orders/charge.ts(12,5): error TS2304: Cannot find name 'Charge'.", "stated": "error"}
+{"format": "tsc/pretty", "line": "\u001b[96msrc/orders/charge.ts\u001b[0m:\u001b[93m12\u001b[0m:\u001b[93m5\u001b[0m - \u001b[91merror\u001b[0m\u001b[90m TS2304: \u001b[0mCannot find name 'Charge'.", "stated": "error"}
+{"format": "eslint/unix", "line": "/home/runner/work/web/src/orders/Charge.tsx:12:7: 'amount' is assigned a value but never used. [Error/@typescript-eslint/no-unused-vars]", "stated": "error", "gap": "ESLint's unix format puts the level past the head; the guess is right"}
+{"format": "eslint/unix", "line": "/home/runner/work/web/src/orders/Charge.tsx:30:1: Unexpected console statement. [Warning/no-console]", "stated": "warning", "gap": "ESLint's unix format puts the level past the head; the guess is right"}
+{"format": "webpack5", "line": "ERROR in ./src/index.js 3:0-28", "stated": "error"}
+{"format": "webpack5", "line": "WARNING in ./node_modules/legacy-lib/index.js 12:15-22", "stated": "warning"}
+{"format": "webpack5", "line": "Critical dependency: the request of a dependency is an expression", "stated": "", "guess": "warning", "gap": "keyword guess; a webpack-only mask would be too narrow"}
+{"format": "webpack-dev-server", "line": "<i> [webpack-dev-server] Project is running at:", "stated": "info"}
+{"format": "webpack-dev-server", "line": "<w> [webpack-dev-server] \"hot: true\" automatically applies HMR plugin, you don't have to add it manually to your webpack configuration.", "stated": "warning"}
+{"format": "vite", "line": "(!) Some chunks are larger than 500 kB after minification. Consider:", "stated": "warning", "gap": "Rollup's '(!)' glyph is a product convention"}
+{"format": "vite/dev", "line": "10:00:00 AM [vite] Internal server error: Failed to resolve import \"./charge\" from \"src/App.tsx\". Does the file exist?", "stated": ""}
+{"format": "controller-runtime/console", "line": "2026-10-11T10:00:00Z\tERROR\tReconciler error\t{\"controller\": \"order\", \"controllerGroup\": \"shop.acme.io\", \"controllerKind\": \"Order\", \"Order\": {\"name\":\"o-42\",\"namespace\":\"shop\"}, \"namespace\": \"shop\", \"name\": \"o-42\", \"reconcileID\": \"8f14e45f-ceea-467f-a0e6-7a1b2c3d4e5f\", \"error\": \"failed to update status: Operation cannot be fulfilled on orders.shop.acme.io \\\"o-42\\\": the object has been modified; please apply your changes to the latest version and try again\"}", "stated": "error"}
+{"format": "controller-runtime/console", "line": "2026-10-11T10:00:00Z\tLEVEL(-2)\tfetched order\t{\"controller\": \"order\", \"namespace\": \"shop\", \"name\": \"o-42\", \"phase\": \"Pending\"}", "stated": "debug"}
+{"format": "controller-runtime/json", "line": "fetched order", "level": "Level(-2)", "stated": "debug"}
+{"format": "fluent-bit", "line": "[2026/10/11 10:00:00] [debug] [input:tail:tail.0] inode=1234567 file=/var/log/containers/orders-7d9f_shop_app-1a2b.log promote to TAIL_EVENT", "stated": "debug"}
+{"format": "vector", "line": "2026-10-11T10:00:00.123456Z  WARN sink{component_kind=\"sink\" component_id=out component_type=elasticsearch}:request{request_id=1}: vector::sinks::util::retries: Retrying after error. error=Http status: 429 Too Many Requests internal_log_rate_limit=true", "stated": "warning"}
+{"format": "logstash", "line": "[2026-10-11T10:00:00,123][INFO ][logstash.agent           ] Successfully started Logstash API endpoint {:port=>9600, :ssl_enabled=>false}", "stated": "info"}
+{"format": "logstash", "line": "[2026-10-11T10:00:00,123][WARN ][logstash.outputs.elasticsearch][main][a1b2c3d4e5f6] Could not index event to Elasticsearch. status: 400, action: [\"index\", {:_id=>nil, :_index=>\"logs-2026.10.11\", :routing=>nil}, {\"message\"=>\"x\"}], response: {\"index\"=>{\"status\"=>400, \"error\"=>{\"type\"=>\"mapper_parsing_exception\", \"reason\"=>\"failed to parse field [level] of type [long] in document with id 'x'\"}}}", "stated": "warning"}
+{"format": "logstash", "line": "[2026-10-11T10:00:00,123][FATAL][org.logstash.Logstash    ] Logstash stopped processing because of an error: (SystemExit) exit", "stated": "critical"}
+{"format": "filebeat/ecs-json-as-text", "line": "{\"log.level\":\"error\",\"@timestamp\":\"2026-10-11T10:00:00.123Z\",\"log.logger\":\"publisher_pipeline_output\",\"log.origin\":{\"function\":\"github.com/elastic/beats/v7/libbeat/publisher/pipeline.(*netClientWorker).run\",\"file.name\":\"pipeline/client_worker.go\",\"file.line\":148},\"message\":\"Failed to connect to backoff(elasticsearch(https://es01:9200)): Get \\\"https://es01:9200\\\": dial tcp 10.0.0.9:9200: connect: connection refused\",\"service.name\":\"filebeat\",\"ecs.version\":\"1.6.0\"}", "stated": "error"}
+{"format": "elastic-agent/ecs-json", "line": "Possible transient error during checkin with fleet-server, retrying", "level": "warn", "stated": "warning"}
+{"format": "loki/logfmt", "line": "level=info ts=2026-10-11T10:00:00.123456789Z caller=metrics.go:217 component=frontend org_id=fake latency=fast query=\"{app=\\\"orders\\\"} |= \\\"error\\\"\" query_hash=1234567890 query_type=filter range_type=range length=1h0m0s step=1s duration=45.6ms status=200 limit=1000 returned_lines=12 throughput=1.2MB total_bytes=56kB total_entries=12", "stated": "info"}
+{"format": "spark/log4j2", "line": "26/10/11 10:00:06 WARN TaskSetManager: Lost task 3.0 in stage 1.0 (TID 7) (10.0.0.12 executor 2): java.lang.OutOfMemoryError: Java heap space", "stated": "warning"}
+{"format": "spark/log4j2", "line": "26/10/11 10:00:07 INFO DAGScheduler: Job 1 failed: count at OrdersJob.scala:42, took 12.345678 s", "stated": "info"}
+{"format": "slf4j2/reporter", "line": "SLF4J(W): No SLF4J providers were found.", "stated": "warning"}
+{"format": "kafka-connect", "line": "[2026-10-11 10:00:00,123] ERROR [orders-sink|task-0] WorkerSinkTask{id=orders-sink-0} Task threw an uncaught and unrecoverable exception. Task is being killed and will not recover until manually restarted (org.apache.kafka.connect.runtime.WorkerTask:212)", "stated": "error"}
+{"format": "airflow/task", "line": "[2026-10-11T10:00:00.123+0000] {subprocess.py:93} INFO - ERROR:  relation \"staging.orders\" does not exist", "stated": "info"}
+{"format": "dbt", "line": "10:00:07  2 of 12 FAIL 3 not_null_orders_customer_id ..................................... [FAIL 3 in 0.12s]", "stated": ""}
+{"format": "dbt", "line": "10:00:08  3 of 12 WARN 2 accepted_values_orders_status__placed__shipped__completed ....... [WARN 2 in 0.10s]", "stated": "warning"}
+{"format": "dbt", "line": "10:00:09  Failure in test not_null_orders_customer_id (models/schema.yml)", "stated": ""}
+{"format": "dbt", "line": "10:00:09  Warning in test accepted_values_orders_status__placed__shipped__completed (models/schema.yml)", "stated": "warning"}
+{"format": "dbt", "line": "10:00:09  Done. PASS=11 WARN=0 ERROR=0 SKIP=0 TOTAL=11", "stated": "", "guess": "info"}
+{"format": "dbt/dbt.log", "line": "\u001b[0m10:00:00.123456 [debug] [MainThread]: Acquiring new postgres connection 'master'", "stated": "debug"}
+{"format": "dbt/dbt.log", "line": "\u001b[0m10:00:09.123456 [error] [MainThread]: \u001b[31mFailure in test not_null_orders_customer_id (models/schema.yml)\u001b[0m", "stated": "error"}
+{"format": "dbt", "line": "10:00:00  [WARNING]: Configuration paths exist in your dbt_project.yml file which do not apply to any resources.", "stated": "warning"}
+{"format": "flyway", "line": "Migrating schema \"public\" to version \"5 - add orders error column\"", "stated": "", "guess": "info", "gap": "a state word in a migration name (a literal)"}
+{"format": "flyway", "line": "WARNING: Flyway upgrade recommended: PostgreSQL 17.0 is newer than this version of Flyway and support has not been tested. The latest supported version of PostgreSQL is 16.", "stated": "warning"}
+{"format": "flyway", "line": "ERROR: Migration V5__add_orders_error_column.sql failed", "stated": "error"}
+{"format": "liquibase", "line": "ERROR: Exception Primary Class:  PSQLException", "stated": "error"}
+{"format": "liquibase", "line": "Unexpected error running Liquibase: Migration failed for changeset db/changelog/db.changelog-master.yaml::5::acme:\n     Reason: liquibase.exception.DatabaseException: ERROR: relation \"orders\" already exists [Failed SQL: (0) CREATE TABLE public.orders (id BIGINT NOT NULL)]", "stated": ""}
+{"format": "liquibase/jul", "line": "[2026-10-11 10:00:00] SEVERE [liquibase.integration] Migration failed for changeset db/changelog/db.changelog-master.yaml::5::acme:", "stated": "error"}
+{"format": "liquibase/jul", "line": "[2026-10-11 10:00:00] FINE [liquibase.executor] Executing with the 'jdbc' executor", "stated": "debug"}

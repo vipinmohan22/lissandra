@@ -1,0 +1,120 @@
+{"format": "python/basic", "line": "ERROR:app.worker:Job 4512 failed: FileNotFoundError: [Errno 2] No such file or directory: '/srv/uploads/denied/report.csv'", "stated": "error"}
+{"format": "python/basic", "line": "CRITICAL:root:Database unreachable after 5 attempts, shutting down", "stated": "critical"}
+{"format": "python/basic", "line": "INFO:root:Health check passed, error rate 0.00%", "stated": "info"}
+{"format": "python/basic", "line": "DEBUG:urllib3.connectionpool:https://api.example.com:443 \"GET /v1/errors?limit=50 HTTP/1.1\" 200 1532", "stated": "debug"}
+{"format": "python/basic", "line": "INFO:app.importer:Errors: 0, warnings: 0, rows imported: 1520", "stated": "info"}
+{"format": "python/cookbook", "line": "2026-10-11 10:00:00,123 - app.api - ERROR - Upstream returned 502, giving up after 3 retries", "stated": "error"}
+{"format": "python/cookbook", "line": "2026-10-11 10:00:00,123 - app.auth - INFO - Login denied for user bob: invalid password", "stated": "info"}
+{"format": "python/cookbook", "line": "2026-10-11 10:00:00,123 - app.logging - DEBUG - handler \"console\" configured with level=WARNING", "stated": "debug"}
+{"format": "python/cookbook", "line": "2026-10-11 10:00:00,123 - app.health - INFO - Fatal error count over last 5m: 0", "stated": "info"}
+{"format": "python/asctime-level", "line": "2026-10-11 10:00:00,123 ERROR Could not connect to broker at amqp://rabbitmq:5672//", "stated": "error"}
+{"format": "python/traceback", "line": "Traceback (most recent call last):", "stated": ""}
+{"format": "flask", "line": "[2026-10-11 10:00:00,123] ERROR in app: Exception on /checkout [POST]", "stated": "error"}
+{"format": "flask", "line": "[2026-10-11 10:00:00,123] INFO in routes: Export finished with no errors", "stated": "info"}
+{"format": "werkzeug", "line": "127.0.0.1 - - [11/Oct/2026 10:00:00] \"GET /docs/fatal-errors HTTP/1.1\" 200 -", "stated": "", "guess": "info"}
+{"format": "django/runserver", "line": "[11/Oct/2026 10:00:00] \"GET /docs/fatal-error-handling/ HTTP/1.1\" 200 5120", "stated": "", "guess": "info"}
+{"format": "django/runserver", "line": "[11/Oct/2026 10:00:00] \"GET /admin/logs/?severity=critical HTTP/1.1\" 200 8812", "stated": "", "guess": "info"}
+{"format": "django/console", "line": "Not Found: /wp-login.php", "stated": ""}
+{"format": "django/db-debug", "line": "(0.002) SELECT \"orders_order\".\"id\", \"orders_order\".\"status\" FROM \"orders_order\" WHERE \"orders_order\".\"status\" = 'failed' LIMIT 21; args=('failed',); alias=default", "stated": "", "guess": "info", "gap": "a state word in SQL literals; masking quotes would hide real ones"}
+{"format": "django/verbose", "line": "ERROR 2026-10-11 10:00:00,123 log 7 140245123456768 Internal Server Error: /api/orders/", "stated": "error"}
+{"format": "gunicorn", "line": "[2026-10-11 10:00:00 +0000] [1] [ERROR] Worker (pid:8) was sent SIGKILL! Perhaps out of memory?", "stated": "error"}
+{"format": "gunicorn", "line": "[2026-10-11 10:00:00 +0000] [1] [WARNING] Worker with pid 8 was terminated due to signal 9", "stated": "warning"}
+{"format": "gunicorn", "line": "[2026-10-11 10:00:00 +0000] [8] [DEBUG] GET /docs/errors", "stated": "debug"}
+{"format": "gunicorn", "line": "[2026-10-11 10:00:00 +0000] [8] [ERROR] Exception in worker process", "stated": "error"}
+{"format": "gunicorn", "line": "[2026-10-11 10:00:00 +0000] [8] [INFO] Application startup complete.", "stated": "info"}
+{"format": "gunicorn/access", "line": "10.0.0.7 - - [11/Oct/2026:10:00:00 +0000] \"GET /logs?level=debug HTTP/1.1\" 200 5120 \"-\" \"curl/8.5.0\"", "stated": "", "guess": "info"}
+{"format": "gunicorn/access", "line": "10.0.0.7 - - [11/Oct/2026:10:00:00 +0000] \"GET /docs/fatal-errors HTTP/1.1\" 200 5120 \"-\" \"Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0\"", "stated": "", "guess": "info"}
+{"format": "uvicorn", "line": "INFO:     10.0.0.7:51234 - \"POST /api/orders HTTP/1.1\" 500 Internal Server Error", "stated": "info"}
+{"format": "uvicorn", "line": "INFO:     10.0.0.7:51234 - \"GET /api/logs?level=error HTTP/1.1\" 200 OK", "stated": "info"}
+{"format": "uvicorn", "line": "ERROR:    Exception in ASGI application", "stated": "error"}
+{"format": "uvicorn", "line": "WARNING:  WatchFiles detected changes in 'app/main.py'. Reloading...", "stated": "warning"}
+{"format": "uvicorn", "line": "TRACE:    10.0.0.7:51234 - HTTP connection made", "stated": "debug"}
+{"format": "celery", "line": "[2026-10-11 10:00:00,123: ERROR/ForkPoolWorker-2] Task payments.tasks.charge[3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f01] raised unexpected: TimeoutError('timed out')", "stated": "error"}
+{"format": "celery", "line": "[2026-10-11 10:00:00,123: CRITICAL/MainProcess] Unrecoverable error: ConnectionRefusedError(111, 'Connection refused')", "stated": "critical"}
+{"format": "celery", "line": "[2026-10-11 10:00:00,123: DEBUG/MainProcess] | Worker: Preparing bootsteps.", "stated": "debug"}
+{"format": "celery", "line": "[2026-10-11 10:00:00,123: WARNING/ForkPoolWorker-1] no errors found in batch 42", "stated": "warning"}
+{"format": "airflow", "line": "[2026-10-11T10:00:00.123+0000] {taskinstance.py:1400} INFO - Marking task as FAILED. dag_id=etl_daily, task_id=load, execution_date=20261010T000000, start_date=20261011T100000, end_date=20261011T100500", "stated": "info"}
+{"format": "airflow", "line": "[2026-10-11T10:00:00.123+0000] {subprocess.py:93} INFO - psql: error: connection to server at \"db\" (10.0.0.5), port 5432 failed: Connection refused", "stated": "info"}
+{"format": "airflow", "line": "[2026-10-11T10:00:00.123+0000] {standard_task_runner.py:104} ERROR - Failed to execute job 42 for task load (relation \"staging.orders\" does not exist; 1234)", "stated": "error"}
+{"format": "airflow", "line": "[2026-10-11 10:00:00,123] {local_task_job.py:212} WARNING - State of this instance has been externally set to failed. Terminating instance.", "stated": "warning"}
+{"format": "rails/logger", "line": "I, [2026-10-11T10:00:00.123456 #1]  INFO -- : [8f3c2e1a-5b7d-4c9e-a1f2-3d4e5f6a7b8c] Completed 500 Internal Server Error in 12ms (ActiveRecord: 1.2ms | Allocations: 1234)", "stated": "info"}
+{"format": "rails/logger", "line": "F, [2026-10-11T10:00:00.123456 #1] FATAL -- : [8f3c2e1a-5b7d-4c9e-a1f2-3d4e5f6a7b8c] ActionController::RoutingError (No route matches [GET] \"/wp-admin/setup-config.php\"):", "stated": "critical"}
+{"format": "rails/logger", "line": "E, [2026-10-11T10:00:00.123456 #1] ERROR -- : [ActiveJob] [InvoiceMailerJob] [0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b] Error performing InvoiceMailerJob (Job ID: 0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b) from Async(default) in 30012.45ms: Net::ReadTimeout (Net::ReadTimeout):", "stated": "error"}
+{"format": "rails/logger", "line": "D, [2026-10-11T10:00:00.123456 #1] DEBUG -- : [8f3c2e1a-5b7d-4c9e-a1f2-3d4e5f6a7b8c]   Order Load (0.6ms)  SELECT \"orders\".* FROM \"orders\" WHERE \"orders\".\"status\" = $1 LIMIT $2  [[\"status\", \"failed\"], [\"LIMIT\", 11]]", "stated": "debug"}
+{"format": "rails/development", "line": "Started GET \"/api/v1/payments/failed\" for 10.0.0.7 at 2026-10-11 10:00:00 +0000", "stated": "", "guess": "info"}
+{"format": "rails/development", "line": "Completed 500 Internal Server Error in 34ms (ActiveRecord: 2.1ms | Allocations: 9876)", "stated": ""}
+{"format": "sidekiq", "line": "2026-10-11T10:00:00.456Z pid=7 tid=2kqj class=Notifications::WeeklyDigestJob jid=b4a577edbccf1d805744efa9 elapsed=1.204 INFO: done", "stated": "info"}
+{"format": "sidekiq", "line": "2026-10-11T10:00:00.456Z pid=7 tid=2kr3 class=HardJob jid=0a1b2c3d4e5f6a7b8c9d0e1f elapsed=0.12 INFO: fail", "stated": "info"}
+{"format": "sidekiq", "line": "2026-10-11T10:00:00.457Z pid=7 tid=2kr3 class=HardJob jid=0a1b2c3d4e5f6a7b8c9d0e1f WARN: NoMethodError: undefined method 'charge' for nil", "stated": "warning"}
+{"format": "sidekiq", "line": "2026-10-11T10:00:00.789Z pid=7 tid=2ks1 ERROR: Error fetching job: Error connecting to Redis on redis:6379 (Errno::ECONNREFUSED)", "stated": "error"}
+{"format": "puma", "line": "[1] ! Terminating timed out worker: 12", "stated": ""}
+{"format": "php/error_log", "line": "[11-Oct-2026 10:00:00 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Connection refused in /var/www/html/src/Db.php:14", "stated": "critical"}
+{"format": "php/error_log", "line": "[11-Oct-2026 10:00:00 UTC] PHP Parse error:  syntax error, unexpected token \"}\", expecting \";\" in /var/www/html/checkout.php on line 41", "stated": "error"}
+{"format": "php/error_log", "line": "[11-Oct-2026 10:00:00 UTC] PHP Deprecated:  Creation of dynamic property Cart::$errors is deprecated in /var/www/html/src/Cart.php on line 22", "stated": "warning"}
+{"format": "php/error_log", "line": "[11-Oct-2026 10:00:00 Europe/Berlin] PHP Warning:  Undefined array key \"error\" in /var/www/html/api.php on line 22", "stated": "warning"}
+{"format": "php/error_log", "line": "[11-Oct-2026 10:00:00 UTC] PHP Recoverable fatal error:  Object of class stdClass could not be converted to string in /var/www/html/report.php on line 8", "stated": "error"}
+{"format": "php/display", "line": "Warning: Undefined variable $total in /app/bin/report.php on line 17", "stated": "warning"}
+{"format": "php/display", "line": "Fatal error: Uncaught Error: Call to undefined function mysql_connect() in /app/bin/import.php:3", "stated": "critical"}
+{"format": "php/display", "line": "Parse error: syntax error, unexpected end of file in /app/bin/sync.php on line 120", "stated": "error"}
+{"format": "php/display", "line": "Deprecated: Creation of dynamic property Importer::$errors is deprecated in /app/src/Importer.php on line 30", "stated": "warning"}
+{"format": "wordpress", "line": "[11-Oct-2026 10:00:00 UTC] PHP Notice:  Function _load_textdomain_just_in_time was called <strong>incorrectly</strong>. Translation loading for the <code>woocommerce</code> domain was triggered too early. This is usually an indicator for some code in the plugin or theme running too early. Translations should be loaded at the <code>init</code> action or later. Please see <a href=\"https://developer.wordpress.org/advanced-administration/debug/debug-wordpress/\">Debugging in WordPress</a> for more information. (This message was added in version 6.7.0.) in /var/www/html/wp-includes/functions.php on line 6114", "stated": "notice"}
+{"format": "wordpress", "line": "[11-Oct-2026 10:00:00 UTC] WordPress database error Table 'wordpress.wp_wc_orders' doesn't exist for query SELECT id FROM wp_wc_orders WHERE status = 'wc-failed' made by require('wp-blog-header.php'), wp, WP->main, WP->parse_request", "stated": ""}
+{"format": "php-fpm", "line": "[11-Oct-2026 10:00:00] NOTICE: fpm is running, pid 1", "stated": "notice"}
+{"format": "php-fpm", "line": "[11-Oct-2026 10:00:00] WARNING: [pool www] server reached pm.max_children setting (5), consider raising it", "stated": "warning"}
+{"format": "php-fpm", "line": "[11-Oct-2026 10:00:00] ERROR: An another FPM instance seems to already listen on /run/php/php8.2-fpm.sock", "stated": "error"}
+{"format": "php-fpm", "line": "[11-Oct-2026 10:00:00] ALERT: [pool www] user has not been defined", "stated": "critical"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] production.ERROR: SQLSTATE[HY000] [2002] Connection refused (Connection: mysql, SQL: select * from `sessions` where `id` = 9Xk2 limit 1) {\"exception\":\"[object] (Illuminate\\\\Database\\\\QueryException(code: 2002): SQLSTATE[HY000] [2002] Connection refused (Connection: mysql, SQL: select * from `sessions` where `id` = 9Xk2 limit 1) at /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php:822)\"}", "stated": "error"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] production.INFO: Nightly import finished: 0 errors, 3 warnings {\"rows\":1520}", "stated": "info"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] local.DEBUG: Cache miss for key orders:failed:count", "stated": "debug"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] production.CRITICAL: Unable to reach payment provider, checkout disabled", "stated": "critical"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] laravel.EMERGENCY: Unable to create configured logger. Using emergency logger. {\"exception\":\"[object] (InvalidArgumentException(code: 0): Log [stack2] is not defined. at /var/www/html/vendor/laravel/framework/src/Illuminate/Log/LogManager.php:232)\"}", "stated": "critical"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] production.NOTICE: User 42 exported the error log", "stated": "notice"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] production.WARNING: Payment provider latency above threshold {\"provider\":\"stripe\",\"p95_ms\":2140}", "stated": "warning"}
+{"format": "symfony/monolog", "line": "[2026-10-11T10:00:00.123456+00:00] request.CRITICAL: Uncaught PHP Exception Doctrine\\DBAL\\Exception\\ConnectionException: \"An exception occurred in the driver: SQLSTATE[HY000] [2002] Connection refused\" at /app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php line 103 {\"exception\":\"[object] (Doctrine\\\\DBAL\\\\Exception\\\\ConnectionException(code: 2002): An exception occurred in the driver: SQLSTATE[HY000] [2002] Connection refused at /app/vendor/doctrine/dbal/src/Driver/API/MySQL/ExceptionConverter.php:103)\"} []", "stated": "critical"}
+{"format": "symfony/monolog", "line": "[2026-10-11T10:00:00.123456+00:00] php.INFO: User Deprecated: Since symfony/framework-bundle 6.4: Not setting the \"framework.handle_all_throwables\" config option is deprecated. It will default to \"true\" in 7.0. {\"exception\":\"[object] (ErrorException(code: 0): User Deprecated: Since symfony/framework-bundle 6.4: Not setting the \\\"framework.handle_all_throwables\\\" config option is deprecated. It will default to \\\"true\\\" in 7.0. at /app/vendor/symfony/deprecation-contracts/function.php:25)\"} []", "stated": "info"}
+{"format": "monolog", "line": "[2026-10-11T10:00:00.123456+00:00] app.WARNING: Cache warmup skipped, Redis unavailable [] []", "stated": "warning"}
+{"format": "symfony/monolog", "line": "[2026-10-11T10:00:00.123456+00:00] security.DEBUG: Checking for authenticator support. {\"firewall_name\":\"main\",\"authenticators\":1} []", "stated": "debug"}
+{"format": "winston/simple", "line": "error: uncaughtException: Cannot read properties of undefined (reading 'id')", "stated": "error"}
+{"format": "winston/simple", "line": "verbose: Loaded 42 routes from /app/routes", "stated": "debug"}
+{"format": "winston/simple", "line": "info: Error queue drained, 0 messages pending", "stated": "info"}
+{"format": "winston/simple", "line": "info: Alert rule saved {\"rule\":\"disk\",\"severity\":\"WARN\"}", "stated": "info"}
+{"format": "winston/colorize", "line": "\u001b[32minfo\u001b[39m: Server listening on port 3000", "stated": "info"}
+{"format": "winston/colorize", "line": "\u001b[31merror\u001b[39m: Unhandled rejection: connect ECONNREFUSED 10.0.0.5:5432", "stated": "error"}
+{"format": "winston/cli", "line": "\u001b[33mwarn\u001b[39m:    Retrying connection to 10.0.0.5:5432 (attempt 3)", "stated": "warning"}
+{"format": "winston/cli", "line": "\u001b[36mverbose\u001b[39m: Using config from /app/config/production.json", "stated": "debug"}
+{"format": "pino-pretty", "line": "[10:00:00.123] ERROR (42): connect ECONNREFUSED 127.0.0.1:5432", "stated": "error"}
+{"format": "pino-pretty", "line": "[10:00:00.123] FATAL (42): uncaught exception, shutting down", "stated": "critical"}
+{"format": "pino-pretty", "line": "[10:00:00.123] TRACE (42): entering handler GET /errors", "stated": "debug"}
+{"format": "pino-pretty", "line": "[10:00:00.123] INFO (42): no errors in batch, 120 records written", "stated": "info"}
+{"format": "pino/json", "line": "request errored", "level": "50", "stated": "error"}
+{"format": "bunyan", "line": "[2026-10-11T10:00:00.123Z] ERROR: api/42 on web-1: upstream fetch failed", "stated": "error"}
+{"format": "bunyan", "line": "[2026-10-11T10:00:00.123Z] FATAL: api/42 on web-1: uncaught exception", "stated": "critical"}
+{"format": "bunyan", "line": "[2026-10-11T10:00:00.123Z]  INFO: api/42 on web-1: no errors since restart", "stated": "info"}
+{"format": "bunyan/short", "line": "10:00:00.123Z  WARN api: slow query on orders (1520ms)", "stated": "warning"}
+{"format": "debug", "line": "2026-10-11T10:00:00.123Z express:router dispatching GET /api/error-reports", "stated": ""}
+{"format": "morgan/combined", "line": "::ffff:10.0.0.7 - - [11/Oct/2026:10:00:00 +0000] \"GET /docs/fatal-errors HTTP/1.1\" 200 5120 \"-\" \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36\"", "stated": "", "guess": "info"}
+{"format": "morgan/tiny", "line": "GET /docs/fatal-errors 200 5120 - 3.512 ms", "stated": "", "guess": "info"}
+{"format": "npm", "line": "npm ERR! code ELIFECYCLE", "stated": "error"}
+{"format": "npm", "line": "npm error code E404", "stated": "error"}
+{"format": "npm", "line": "npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.", "stated": "warning"}
+{"format": "npm", "line": "npm notice New major version of npm available! 10.8.2 -> 11.6.1", "stated": "notice"}
+{"format": "npm/debug-log", "line": "0 verbose cli /usr/local/bin/node /usr/local/bin/npm", "stated": "debug"}
+{"format": "npm/debug-log", "line": "1 info using npm@10.8.2", "stated": "info"}
+{"format": "npm/debug-log", "line": "31 error code E404", "stated": "error"}
+{"format": "yarn", "line": "error Command failed with exit code 1.", "stated": "error"}
+{"format": "yarn", "line": "warning \" > react-dom@18.3.1\" has unmet peer dependency \"react@^18.3.1\".", "stated": "warning"}
+{"format": "yarn", "line": "info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.", "stated": "info"}
+{"format": "yarn", "line": "[1/4] Resolving packages...", "stated": ""}
+{"format": "nextjs", "line": "info  - Loaded env from /app/.env.production", "stated": "info"}
+{"format": "nextjs", "line": "warn  - You have enabled experimental feature (appDir) in next.config.js.", "stated": "warning"}
+{"format": "nextjs", "line": "error - unhandledRejection: Error: connect ECONNREFUSED 127.0.0.1:5432", "stated": "error"}
+{"format": "nextjs", "line": "- warn You have enabled experimental feature (serverActions) in next.config.js.", "stated": "warning", "gap": "Next.js 13.4 only; '- <level> ' would match bullet lists; the guess is right"}
+{"format": "nextjs", "line": "- info Creating an optimized production build...", "stated": "info", "gap": "Next.js 13.4 only; '- <level> ' would match bullet lists; the guess is right"}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM     LOG [RoutesResolver] ErrorsController {/errors}: +2ms", "stated": "info"}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM   ERROR [ExceptionsHandler] Cannot read properties of undefined (reading 'id')", "stated": "error"}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM    WARN [PaymentsService] Stripe webhook signature missing, request rejected +3ms", "stated": "warning"}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM   DEBUG [OrdersService] Fetched 0 failed orders +1ms", "stated": "debug"}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM VERBOSE [CacheService] Evicted 12 expired entries +5ms", "stated": "debug"}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM   FATAL [Bootstrap] Port 3000 already in use, exiting", "stated": "critical"}
+{"format": "nestjs/color", "line": "\u001b[31m[Nest] 1  - \u001b[39m10/11/2026, 10:00:00 AM \u001b[31m  ERROR\u001b[39m \u001b[33m[ExceptionsHandler] \u001b[39m\u001b[31mCannot read properties of undefined (reading 'id')\u001b[39m", "stated": "error"}
+{"format": "node/warning", "line": "(node:1) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 error listeners added to [Socket]. Use emitter.setMaxListeners() to increase limit", "stated": "", "guess": "warning"}

@@ -1,0 +1,161 @@
+{"format": "syslog/postfix", "stated": "warning", "line": "Oct 11 10:00:00 mail postfix/smtpd[2211]: warning: unknown[203.0.113.7]: SASL LOGIN authentication failed: UGFzc3dvcmQ6"}
+{"format": "syslog/postfix", "stated": "warning", "line": "Oct 11 10:00:00 mail postfix/smtp[2212]: warning: connect to Milter service inet:localhost:8891: Connection refused"}
+{"format": "syslog/postfix", "stated": "warning", "line": "Oct 11 10:00:00 mail postfix/smtpd[2213]: warning: hostname mail.example.net does not resolve to address 198.51.100.4: Name or service not known"}
+{"format": "syslog/postfix", "stated": "warning", "line": "Oct 11 10:00:00 mail postfix/postdrop[2217]: warning: unable to look up public/pickup: No such file or directory"}
+{"format": "syslog/postfix", "stated": "warning", "line": "Oct 11 10:00:00 mail postfix/smtpd[2218]: warning: TLS library problem: error:0A000126:SSL routines::unexpected eof while reading"}
+{"format": "syslog/postfix", "stated": "critical", "line": "Oct 11 10:00:00 mail postfix/smtpd[2216]: fatal: open lock file /var/lib/postfix/master.lock: cannot open file: Permission denied"}
+{"format": "syslog/postfix", "stated": "", "line": "Oct 11 10:00:00 mail postfix/smtpd[2219]: NOQUEUE: reject: RCPT from unknown[203.0.113.7]: 554 5.7.1 <x@example.net>: Relay access denied; from=<a@b> to=<x@example.net> proto=ESMTP helo=<x>"}
+{"format": "syslog/postfix", "stated": "", "line": "Oct 11 10:00:00 mail postfix/smtp[2220]: connect to mx.example.net[198.51.100.9]:25: Connection timed out"}
+{"format": "syslog/sshd", "stated": "error", "line": "Oct 11 10:00:00 host sshd[999]: error: kex_exchange_identification: Connection closed by remote host"}
+{"format": "syslog/sshd", "stated": "error", "line": "Oct 11 10:00:00 host sshd[999]: error: maximum authentication attempts exceeded for root from 203.0.113.5 port 4242 ssh2 [preauth]"}
+{"format": "syslog/sshd", "stated": "", "line": "Oct 11 10:00:00 host sshd[999]: Failed password for invalid user admin from 203.0.113.5 port 4242 ssh2"}
+{"format": "syslog/kernel", "stated": "warning", "line": "Oct 11 10:00:00 host kernel: [12345.678901] EXT4-fs warning (device sda1): ext4_dx_add_entry:2346: Directory index full!"}
+{"format": "syslog/kernel", "stated": "error", "line": "Oct 11 10:00:00 host kernel: [12345.678901] EXT4-fs error (device sda1): ext4_find_entry:1455: inode #2: comm ls: reading directory lblock 0"}
+{"format": "syslog/kernel", "stated": "", "line": "Oct 11 10:00:00 host kernel: audit: type=1400 audit(1697018400.123:42): apparmor=\"DENIED\" operation=\"open\" profile=\"/usr/sbin/cups-browsed\" name=\"/etc/ssl/openssl.cnf\" pid=1234 comm=\"cups-browsed\" requested_mask=\"r\" denied_mask=\"r\"", "guess": "info"}
+{"format": "syslog/systemd", "stated": "", "line": "Oct 11 10:00:00 host systemd[1]: nginx.service: Failed with result 'exit-code'."}
+{"format": "syslog/nm", "stated": "info", "line": "Oct 11 10:00:00 host NetworkManager[800]: <info>  [1697018400.1234] device (eth0): state change: activated -> deactivating"}
+{"format": "syslog/nm", "stated": "warning", "line": "Oct 11 10:00:00 host NetworkManager[800]: <warn>  [1697018400.1234] dhcp4 (eth0): request timed out"}
+{"format": "syslog/docker", "stated": "warning", "line": "Oct 11 10:00:00 host dockerd[901]: time=\"2026-10-11T10:00:00Z\" level=warning msg=\"failed to retrieve runc version: exit status 1\""}
+{"format": "syslog/kubelet", "stated": "error", "line": "Oct 11 10:00:00 host kubelet[1000]: E1011 10:00:00.123456    1000 pod_workers.go:1298] \"Error syncing pod, skipping\" err=\"failed to StartContainer\""}
+{"format": "syslog/kubelet", "stated": "warning", "line": "Oct 11 10:00:00 host kubelet[1000]: W1011 10:00:00.123456 1000 reflector.go:424] failed to list *v1.Pod: Unauthorized"}
+{"format": "syslog/php-fpm", "stated": "warning", "line": "Oct 11 10:00:00 host php-fpm[1500]: [WARNING] [pool www] server reached pm.max_children setting (5), consider raising it"}
+{"format": "syslog/haproxy", "stated": "", "line": "Oct 11 10:00:00 host haproxy[1600]: Server backend/web1 is DOWN, reason: Layer4 connection problem, info: \"Connection refused\", check duration: 0ms. 1 active and 0 backup servers left."}
+{"format": "syslog/named", "stated": "", "line": "Oct 11 10:00:00 host named[700]: client @0x7f00 198.51.100.7#53000 (example.com): query (cache) 'example.com/A/IN' denied"}
+{"format": "syslog/app", "stated": "notice", "line": "Oct 11 10:00:00 host app[42]: notice: config reloaded"}
+{"format": "syslog/app", "stated": "info", "line": "Oct 11 10:00:00 host app[42]: info: upstream 10.0.0.9 timed out, retrying on next host"}
+{"format": "syslog/app", "stated": "error", "line": "Oct 11 10:00:00 host app[42]: error: quota service returned 429 for tenant 7"}
+{"format": "syslog/app", "stated": "critical", "line": "Oct 11 10:00:00 host app[42]: crit: replication stopped on db-2"}
+{"format": "syslog/app", "stated": "warning", "line": "Oct 11 10:00:00 host app[42]: warning: unable to resolve upstream, using cached address"}
+{"format": "journald/iso", "stated": "warning", "line": "2026-10-11T10:00:00+0000 host app[42]: warning: certificate renewal failed, will retry in 1h"}
+{"format": "syslog/mysqld", "stated": "warning", "line": "Oct 11 10:00:00 host mysqld[1300]: 2026-10-11T10:00:00.123456Z 0 [Warning] [MY-010068] [Server] CA certificate ca.pem is self signed."}
+{"format": "syslog/postgres", "stated": "error", "line": "Oct 11 10:00:00 host postgres[1400]: [13-1] 2026-10-11 10:00:00.123 UTC [1400] ERROR:  duplicate key value violates unique constraint \"users_pkey\""}
+{"format": "nginx/error", "stated": "error", "line": "2026/10/11 10:00:00 [error] 31#31: *1 open() \"/usr/share/nginx/html/favicon.ico\" failed (2: No such file or directory), client: 10.0.0.1, server: _"}
+{"format": "nginx/error", "stated": "warning", "line": "2026/10/11 10:00:00 [warn] 31#31: *1 an upstream response is buffered to a temporary file /var/cache/nginx/proxy_temp/1/00/0000000001 while reading upstream"}
+{"format": "nginx/error", "stated": "notice", "line": "2026/10/11 10:00:00 [notice] 1#1: signal process started"}
+{"format": "nginx/error", "stated": "critical", "line": "2026/10/11 10:00:00 [crit] 31#31: *1 SSL_do_handshake() failed (SSL: error:0A00006C:SSL routines::bad key share) while SSL handshaking"}
+{"format": "nginx/error", "stated": "critical", "line": "2026/10/11 10:00:00 [alert] 31#31: *1024 1024 worker_connections are not enough"}
+{"format": "nginx/error", "stated": "critical", "line": "2026/10/11 10:00:00 [emerg] 1#1: bind() to 0.0.0.0:80 failed (98: Address already in use)"}
+{"format": "nginx/error", "stated": "info", "line": "2026/10/11 10:00:00 [info] 31#31: *7 client timed out (110: Connection timed out) while waiting for request, client: 10.0.0.1"}
+{"format": "nginx/access", "stated": "", "line": "10.0.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /api/users HTTP/1.1\" 200 512 \"-\" \"curl/8.0\"", "guess": "info"}
+{"format": "nginx/access", "stated": "", "line": "10.0.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /blog/2026/postmortem-of-the-checkout-outage HTTP/1.1\" 200 8812 \"-\" \"Mozilla/5.0\"", "guess": "info"}
+{"format": "nginx/access", "stated": "", "line": "10.0.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /security/data-breach-notice HTTP/1.1\" 200 4410 \"-\" \"Mozilla/5.0\"", "guess": "info"}
+{"format": "nginx/access", "stated": "", "line": "10.0.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /help/cannot-login HTTP/1.1\" 200 1200 \"-\" \"Mozilla/5.0\"", "guess": "info"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [core:error] [pid 1234:tid 5678] [client 10.0.0.1:50000] AH00126: Invalid URI in request GET /%%32%65%%32%65/ HTTP/1.1"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [mpm_prefork:error] [pid 1234] AH00161: server reached MaxRequestWorkers setting, consider raising the MaxRequestWorkers setting"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [mpm_event:error] [pid 1234:tid 5678] AH00484: server reached MaxRequestWorkers setting, consider raising the MaxRequestWorkers setting"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [ssl:error] [pid 1234:tid 5678] AH02032: Hostname www.example.com provided via SNI and hostname example.org provided via HTTP are different"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [core:error] [pid 1234:tid 5678] [client 10.0.0.1:50000] AH00037: Symbolic link not allowed or link target not accessible: /var/www/html/link"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [cgid:error] [pid 1234:tid 5678] [client 10.0.0.1:50000] End of script output before headers: test.cgi"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [proxy:error] [pid 1234:tid 5678] (111)Connection refused: AH00957: http: attempt to connect to 127.0.0.1:8080 (127.0.0.1:8080) failed"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [authz_core:error] [pid 1234:tid 5678] [client 10.0.0.1:50000] AH01630: client denied by server configuration: /var/www/html/.git"}
+{"format": "apache24", "stated": "warning", "line": "[Sun Oct 11 10:00:00.123456 2026] [ssl:warn] [pid 1234:tid 5678] AH01909: www.example.com:443:0 server certificate does NOT include an ID which matches the server name"}
+{"format": "apache24", "stated": "notice", "line": "[Sun Oct 11 10:00:00.123456 2026] [mpm_event:notice] [pid 1234:tid 5678] AH00489: Apache/2.4.58 (Ubuntu) OpenSSL/3.0.13 configured -- resuming normal operations"}
+{"format": "apache24", "stated": "critical", "line": "[Sun Oct 11 10:00:00.123456 2026] [core:alert] [pid 1234:tid 5678] [client 10.0.0.1:50000] /var/www/html/.htaccess: Invalid command 'RewriteEngine', perhaps misspelled or defined by a module not included in the server configuration"}
+{"format": "apache24", "stated": "critical", "line": "[Sun Oct 11 10:00:00.123456 2026] [ssl:emerg] [pid 1234] AH02572: Failed to configure at least one certificate and key for www.example.com:443"}
+{"format": "apache24", "stated": "critical", "line": "[Sun Oct 11 10:00:00.123456 2026] [core:crit] [pid 1234:tid 5678] (13)Permission denied: [client 10.0.0.1:50000] AH00529: /var/www/html/.htaccess pcfg_openfile: unable to check htaccess file"}
+{"format": "apache24", "stated": "error", "line": "[Sun Oct 11 10:00:00.123456 2026] [php:error] [pid 1234] [client 10.0.0.1:50000] PHP Fatal error:  Uncaught Error: Call to undefined function mysql_connect() in /var/www/html/db.php:3"}
+{"format": "apache22", "stated": "error", "line": "[Sun Oct 11 10:00:00 2026] [error] [client 10.0.0.1] File does not exist: /var/www/favicon.ico"}
+{"format": "php", "stated": "warning", "line": "PHP Warning:  mysqli_connect(): (HY000/2002): Connection refused in /var/www/html/db.php on line 5"}
+{"format": "php", "stated": "warning", "line": "PHP Warning:  include(config.local.php): Failed to open stream: No such file or directory in /var/www/html/index.php on line 3"}
+{"format": "php", "stated": "warning", "line": "PHP Warning:  file_get_contents(https://api.example.com/rates): Failed to open stream: HTTP request failed! HTTP/1.1 503 Service Unavailable in /var/www/html/rates.php on line 12"}
+{"format": "php", "stated": "notice", "line": "PHP Notice:  Undefined index: page in /var/www/html/index.php on line 7"}
+{"format": "php", "stated": "critical", "line": "PHP Fatal error:  Allowed memory size of 134217728 bytes exhausted (tried to allocate 20480 bytes) in /var/www/html/x.php on line 9"}
+{"format": "php", "stated": "warning", "line": "[11-Oct-2026 10:00:00 UTC] PHP Warning:  Cannot modify header information - headers already sent by (output started at /var/www/a.php:1) in /var/www/b.php on line 4"}
+{"format": "postgres", "stated": "error", "line": "2026-10-11 10:00:00.123 UTC [1400] ERROR:  relation \"users\" does not exist at character 15"}
+{"format": "postgres", "stated": "critical", "line": "2026-10-11 10:00:00.123 UTC [1400] FATAL:  password authentication failed for user \"app\""}
+{"format": "postgres", "stated": "warning", "line": "2026-10-11 10:00:00.123 UTC [1400] WARNING:  there is no transaction in progress"}
+{"format": "postgres", "stated": "info", "line": "2026-10-11 10:00:00.123 UTC [1400] LOG:  could not receive data from client: Connection reset by peer"}
+{"format": "postgres", "stated": "info", "line": "2026-10-11 10:00:00.123 UTC [1400] LOG:  could not send data to client: Broken pipe"}
+{"format": "postgres", "stated": "info", "line": "2026-10-11 10:00:00.123 UTC [1400] LOG:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added"}
+{"format": "postgres", "stated": "critical", "line": "2026-10-11 10:00:00.123 UTC [1400] PANIC:  could not write to file \"pg_wal/xlogtemp.1400\": No space left on device"}
+{"format": "mysql", "stated": "warning", "line": "2026-10-11T10:00:00.123456Z 0 [Warning] [MY-010068] [Server] CA certificate ca.pem is self signed."}
+{"format": "mysql", "stated": "error", "line": "2026-10-11T10:00:00.123456Z 0 [ERROR] [MY-010119] [Server] Aborting"}
+{"format": "mysql", "stated": "notice", "line": "2026-10-11T10:00:00.123456Z 12 [Note] [MY-010914] [Server] Aborted connection 12 to db: 'app' user: 'app' host: '10.0.0.5' (Got an error reading communication packets)."}
+{"format": "mysql", "stated": "notice", "line": "2026-10-11T10:00:00.123456Z 0 [Note] [MY-011953] [InnoDB] Page cleaner took 4212ms to flush 121 and evict 0 pages"}
+{"format": "springboot", "stated": "error", "line": "2026-10-11 10:00:00.123 ERROR 1234 --- [nio-8080-exec-1] o.a.c.c.C.[.[.[/].[dispatcherServlet] : Servlet.service() for servlet [dispatcherServlet] threw exception"}
+{"format": "springboot", "stated": "warning", "line": "2026-10-11 10:00:00.123  WARN 1234 --- [           main] o.s.b.a.orm.jpa.DatabaseLookup : Unable to determine jdbc url from datasource"}
+{"format": "logback", "stated": "info", "line": "10:00:00.123 [main] INFO  com.example.App - Started App in 3.2 seconds"}
+{"format": "logback", "stated": "warning", "line": "10:00:00.123 [main] WARN  com.example.Cache - Cache warmup could not complete, continuing with cold cache"}
+{"format": "logback", "stated": "info", "line": "10:00:00.123 [main] INFO  com.example.Job - Job finished with status [ERROR] after 3 retries"}
+{"format": "logback", "stated": "warning", "line": "10:00:00.123 [kafka-producer-network-thread | producer-1] WARN  o.a.k.c.NetworkClient - [Producer clientId=producer-1] Connection to node -1 could not be established."}
+{"format": "log4j2", "stated": "error", "line": "2026-10-11 10:00:00,123 main ERROR Unable to locate appender \"File\" for logger config \"root\""}
+{"format": "kafka", "stated": "info", "line": "[2026-10-11 10:00:00,123] INFO [Log partition=x-0, dir=/var/lib/kafka] Deleting segments due to log start offset 5 breach (kafka.log.Log)"}
+{"format": "tomcat/jul", "stated": "error", "line": "11-Oct-2026 10:00:00.123 SEVERE [main] org.apache.catalina.core.StandardContext.startInternal One or more listeners failed to start."}
+{"format": "tomcat/jul", "stated": "warning", "line": "11-Oct-2026 10:00:00.123 WARNING [main] org.apache.catalina.startup.SetAllPropertiesRule.begin Setting property 'x' did not find a matching property."}
+{"format": "jul/2line", "stated": "warning", "line": "Oct 11, 2026 10:00:00 AM org.example.Foo run\nWARNING: retry 2 failed"}
+{"format": "jul/2line", "stated": "error", "line": "Oct 11, 2026 10:00:00 AM org.example.Foo run\nSEVERE: Connection pool exhausted"}
+{"format": "elasticsearch", "stated": "warning", "line": "[2026-10-11T10:00:00,123][WARN ][o.e.c.r.a.DiskThresholdMonitor] [node-1] high disk watermark [90%] exceeded on [abc][node-1]"}
+{"format": "python", "stated": "warning", "line": "WARNING:root:Retrying (Retry(total=4)) after connection broken by 'NewConnectionError(': Failed to establish a new connection: [Errno 111] Connection refused')': /api"}
+{"format": "python", "stated": "warning", "line": "2026-10-11 10:00:00,123 - app.db - WARNING - connection to replica failed, falling back to primary"}
+{"format": "python", "stated": "info", "line": "2026-10-11 10:00:00,123 - app.cache - INFO - could not find cache entry, computing"}
+{"format": "airflow", "stated": "error", "line": "[2026-10-11 10:00:00,123] {taskinstance.py:1234} ERROR - Task failed with exception"}
+{"format": "gunicorn", "stated": "critical", "line": "[2026-10-11 10:00:00 +0000] [7] [CRITICAL] WORKER TIMEOUT (pid:42)"}
+{"format": "gunicorn", "stated": "info", "line": "[2026-10-11 10:00:00 +0000] [7] [INFO] Booting worker with pid: 42"}
+{"format": "celery", "stated": "info", "line": "[2026-10-11 10:00:00,123: INFO/MainProcess] Task app.tasks.charge[abc] retry: Retry in 30s: ConnectionRefusedError(111, 'Connection refused')"}
+{"format": "celery", "stated": "warning", "line": "[2026-10-11 10:00:00,123: WARNING/MainProcess] consumer: Connection to broker lost. Trying to re-establish the connection..."}
+{"format": "uvicorn", "stated": "info", "line": "INFO:     127.0.0.1:50000 - \"GET /health HTTP/1.1\" 200 OK"}
+{"format": "uvicorn", "stated": "warning", "line": "WARNING:  Invalid HTTP request received."}
+{"format": "go/log", "stated": "", "line": "2026/10/11 10:00:00 error connecting to db: dial tcp 10.0.0.5:5432: connect: connection refused"}
+{"format": "go/log+file", "stated": "warning", "line": "2026/10/11 10:00:00 server.go:88: warning: cache refresh failed, serving stale data"}
+{"format": "go/log+file", "stated": "info", "line": "2026/10/11 10:00:00 worker.go:120: info: job 42 timed out after 30s, will retry"}
+{"format": "go/log+file", "stated": "notice", "line": "2026/10/11 10:00:00.123456 main.go:42: notice: could not read optional config /etc/app/extra.yaml, skipping"}
+{"format": "go/log+prefix", "stated": "warning", "line": "[api] 2026/10/11 10:00:00 warn: upstream returned 503, retrying"}
+{"format": "zap/console", "stated": "error", "line": "2026-10-11T10:00:00.000Z\terror\tserver/handler.go:42\trequest failed\t{\"path\": \"/x\"}"}
+{"format": "zap/console", "stated": "info", "line": "2026-10-11T10:00:00.000Z\tinfo\thttp\tserver/server.go:88\tcould not reuse connection, dialing new one"}
+{"format": "logrus/text", "stated": "error", "line": "time=\"2026-10-11T10:00:00Z\" level=error msg=\"failed to connect\""}
+{"format": "logrus/tty", "stated": "warning", "line": "WARN[0042] unable to resolve host db.internal, falling back to 10.0.0.5"}
+{"format": "logrus/tty", "stated": "info", "line": "INFO[0000] retrying connection: dial tcp 10.0.0.5:5432: connect: connection refused"}
+{"format": "logrus/tty", "stated": "error", "line": "ERRO[0042] failed to connect to database  error=\"dial tcp: connection refused\""}
+{"format": "slog/text", "stated": "warning", "line": "time=2026-10-11T10:00:00.000Z level=WARN msg=\"retrying request\" err=\"connection refused\""}
+{"format": "slog/default", "stated": "warning", "line": "2026/10/11 10:00:00 WARN retrying request err=\"connection refused\""}
+{"format": "hclog", "stated": "warning", "line": "2026-10-11T10:00:00.123Z [WARN]  agent: Check is now critical: check=service:web"}
+{"format": "hclog", "stated": "info", "line": "2026-10-11T10:00:00.123Z [INFO]  client.alloc_runner.task_runner: Task event: alloc_id=x failed=false msg=\"Task started by client\" task=web type=Started"}
+{"format": "prometheus", "stated": "warning", "line": "ts=2026-10-11T10:00:00.123Z caller=main.go:123 level=warn component=tsdb msg=\"compaction failed\""}
+{"format": "caddy", "stated": "info", "line": "2026/10/11 10:00:00.000\tINFO\thttp\tserver running\t{\"name\": \"srv0\"}"}
+{"format": "klog", "stated": "error", "line": "E1011 10:00:00.123456       1 reflector.go:138] Failed to watch *v1.Pod: failed to list *v1.Pod: Unauthorized"}
+{"format": "klog", "stated": "warning", "line": "W1011 10:00:00.123456       1 warnings.go:70] policy/v1beta1 PodSecurityPolicy is deprecated in v1.21+"}
+{"format": "klog", "stated": "info", "line": "I1011 10:00:00.123456       1 leaderelection.go:258] successfully acquired lease kube-system/kube-scheduler"}
+{"format": "cri+klog", "stated": "info", "line": "2026-10-11T10:00:00.123456789Z stdout F I1011 10:00:00.123456 1 controller.go:88] retrying after connection refused"}
+{"format": "cri+json", "stated": "info", "line": "2026-10-11T10:00:00.123456789Z stdout F {\"level\":\"info\",\"msg\":\"could not reach upstream, will retry\"}"}
+{"format": "coredns", "stated": "error", "line": "[ERROR] plugin/errors: 2 example.com. A: read udp 10.0.0.1:1->8.8.8.8:53: i/o timeout"}
+{"format": "winston", "stated": "error", "line": "2026-10-11T10:00:00.000Z [app] error: Unhandled rejection"}
+{"format": "winston", "stated": "warning", "line": "2026-10-11T10:00:00.000Z [app] warn: could not refresh token, using cached one"}
+{"format": "winston", "stated": "info", "line": "2026-10-11T10:00:00.000Z [app] info: request to /api/x failed with 404, falling back"}
+{"format": "winston", "stated": "info", "line": "info: Server listening on port 3000"}
+{"format": "npm", "stated": "warning", "line": "npm WARN deprecated request@2.88.2: request has been deprecated"}
+{"format": "pino-pretty", "stated": "warning", "line": "[10:00:00.000] WARN (42 on host): could not reach cache"}
+{"format": "bunyan", "stated": "warning", "line": "[2026-10-11T10:00:00.000Z]  WARN: app/42 on host: could not reach cache"}
+{"format": "node/trace", "stated": "", "line": "TypeError: Cannot read properties of undefined (reading 'id')\n    at /app/src/handler.js:12:20\n    at processTicksAndRejections (node:internal/process/task_queues:95:5)"}
+{"format": "aspnet", "stated": "warning", "line": "warn: Microsoft.AspNetCore.Server.Kestrel[0]\n      Unable to bind to http://localhost:5000 on the IPv6 loopback interface: 'Cannot assign requested address'."}
+{"format": "aspnet", "stated": "info", "line": "info: Microsoft.Hosting.Lifetime[14]\n      Now listening on: http://[::]:8080"}
+{"format": "serilog", "stated": "warning", "line": "2026-10-11 10:00:00.123 +00:00 [WRN] Unable to bind to http://localhost:5000 on the IPv6 loopback interface: 'Cannot assign requested address'."}
+{"format": "serilog", "stated": "warning", "line": "[10:00:00 WRN] Could not reach cache, retrying"}
+{"format": "serilog", "stated": "error", "line": "[10:00:00 ERR] Unhandled exception in request pipeline"}
+{"format": "ruby", "stated": "error", "line": "E, [2026-10-11T10:00:00.123456 #1234] ERROR -- : PG::ConnectionBad (could not connect to server)"}
+{"format": "ruby", "stated": "warning", "line": "W, [2026-10-11T10:00:00.123456 #1234]  WARN -- : Retrying after timeout"}
+{"format": "ruby", "stated": "info", "line": "I, [2026-10-11T10:00:00.123456 #1234]  INFO -- : Completed 401 Unauthorized in 3ms"}
+{"format": "win/text", "stated": "error", "line": "2026-10-11 10:00:00 Error Service Control Manager 7031 The Print Spooler service terminated unexpectedly."}
+{"format": "win/tsv", "stated": "warning", "line": "Warning\t10/11/2026 10:00:00 AM\tMicrosoft-Windows-Time-Service\t36\tNone\tThe time service has not synchronized the system time for 86400 seconds."}
+{"format": "win/csv", "stated": "warning", "line": "\"Warning\",\"10/11/2026 10:00:00 AM\",\"Microsoft-Windows-DNS-Client\",\"1014\",\"(1014)\",\"Name resolution for the name wpad timed out after none of the configured DNS servers responded.\""}
+{"format": "win/csv", "stated": "critical", "line": "\"Critical\",\"10/11/2026 10:00:00 AM\",\"Microsoft-Windows-Kernel-Power\",\"41\",\"(63)\",\"The system has rebooted without cleanly shutting down first.\""}
+{"format": "win/csv", "stated": "error", "line": "\"Error\",\"10/11/2026 10:00:00 AM\",\"Service Control Manager\",\"7000\",\"None\",\"The MyApp service did not start due to the following: The service did not respond in a timely fashion.\""}
+{"format": "win/csv", "stated": "info", "line": "\"Information\",\"10/11/2026 10:00:00 AM\",\"Microsoft-Windows-Winlogon\",\"7001\",\"(1101)\",\"User Logon Notification for Customer Experience Improvement Program\""}
+{"format": "json/raw", "stated": "warning", "line": "{\"level\":\"warn\",\"msg\":\"retry failed\"}"}
+{"format": "json/raw", "stated": "warning", "line": "{\"severity\":\"WARNING\",\"message\":\"could not refresh token\"}"}
+{"format": "json/raw", "stated": "warning", "line": "{\"log.level\":\"warn\",\"message\":\"cannot reach es\"}"}
+{"format": "cri+zap", "stated": "warning", "line": "2026-10-11T10:00:00.123456789Z stderr F 2026-10-11T10:00:00.000Z\twarn\tapi/client.go:88\tcould not refresh token, using cached one"}
+{"format": "cri+zap", "stated": "info", "line": "2026-10-11T10:00:00.123456789Z stderr F 2026-10-11T10:00:00.000Z\tinfo\tapi/client.go:91\tupstream timed out, retried on replica"}
+{"format": "cri+winston", "stated": "warning", "line": "2026-10-11T10:00:00.123456789Z stdout F warn: could not refresh token, using cached one"}
+{"format": "kubectl-ts+golog", "stated": "warning", "line": "2026-10-11T10:00:00.123456789Z 2026/10/11 10:00:00 warning: cache refresh failed, serving stale data"}
+{"format": "syslog-ts-only", "stated": "warning", "line": "Oct 11 10:15:02 warning: disk low, could not rotate logs"}
+{"format": "sshd", "stated": "", "line": "Oct 11 10:00:00 host sshd[1234]: Connection closed by 203.0.113.5 port 4242: Permission denied (publickey) [preauth]", "guess": "info"}
+{"format": "mysql", "stated": "notice", "line": "2026-10-11T10:00:00.123456Z 9 [Note] [MY-010926] [Server] Access denied for user 'root'@'localhost' (using password: YES)"}
+{"format": "sudo", "stated": "", "line": "Oct 11 10:00:00 host sudo[4321]: pam_unix(sudo:auth): conversation failed"}
+{"format": "k8s-api", "stated": "error", "line": "E1011 10:00:00.123456 1 authentication.go:63] \"Unable to authenticate the request\" err=\"[invalid bearer token, token lookup failed]\""}
+{"format": "app", "stated": "", "line": "GET /api/admin 403 permission denied for role viewer"}
+{"format": "plain", "stated": "", "line": "failed to fetch user info: connection lost"}
+{"format": "plain", "stated": "", "line": "user info updated"}
+{"format": "plain", "stated": "", "line": "payment failed for order 7"}
+{"format": "plain", "stated": "", "line": "debug symbols uploaded"}
+{"format": "plain", "stated": "", "line": "error rate 0.1% within budget"}
+{"format": "plain", "stated": "", "line": "cannot parse optional header X-Foo, ignoring"}

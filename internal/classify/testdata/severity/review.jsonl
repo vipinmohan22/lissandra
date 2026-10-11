@@ -1,0 +1,5 @@
+{"format": "mysql/general-log", "stated": "", "guess": "info", "line": "2026-10-11T10:00:00.123456Z\t   12 Query\tSELECT TABLE_NAME, DATA_LENGTH, AUTO_INCREMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'shop'"}
+{"format": "mysql/general-log", "stated": "", "guess": "info", "line": "2026-10-11T10:00:00.123456Z\t   12 Query\tSELECT COUNT(*), SUM(TABLE_ROWS), TABLE_SCHEMA FROM INFORMATION_SCHEMA.TABLES GROUP BY TABLE_SCHEMA"}
+{"format": "clang/diagnostics-summary", "stated": "", "line": "1 error generated."}
+{"format": "dotnet/systemd-console-formatter (containerd CRI file)", "stated": "info", "line": "2026-10-11T10:00:00.123456789Z stdout F <6>Microsoft.Hosting.Lifetime[0] Application started. Press Ctrl+C to shut down."}
+{"format": "dotnet/systemd-console-formatter (containerd CRI file)", "stated": "warning", "line": "2026-10-11T10:00:00.123456789Z stdout F <4>Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[35] No XML encryptor configured. Key {3b6c1a8e-2d4f-4b7a-9e0c-5f1d2a3b4c5d} may be persisted to storage in unencrypted form."}

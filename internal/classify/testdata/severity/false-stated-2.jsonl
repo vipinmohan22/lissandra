@@ -1,0 +1,102 @@
+{"format": "psql \\x expanded (app_logs: id, created_at, level, logger, message)", "line": "level      | error", "stated": ""}
+{"format": "psql \\x expanded (app_logs: id, created_at, level, logger, message)", "line": "level      | warning", "stated": ""}
+{"format": "psql \\x expanded (app_logs, control)", "line": "logger     | app.db", "stated": ""}
+{"format": "psql \\x expanded (pg_settings WHERE name='log_min_messages')", "line": "setting         | warning", "stated": ""}
+{"format": "psql \\x expanded (pg_settings WHERE name='client_min_messages')", "line": "boot_val        | notice", "stated": ""}
+{"format": "psql \\x expanded (pg_settings WHERE name='log_min_error_statement')", "line": "reset_val       | error", "stated": ""}
+{"format": "psql \\x expanded (pg_settings, control)", "line": "vartype         | enum", "stated": ""}
+{"format": "pgcli \\x expanded (app_config row)", "line": "log_level   | debug", "stated": ""}
+{"format": "psql \\x expanded (pg_stat_activity, control)", "line": "state            | active", "stated": ""}
+{"format": "psql \\x expanded in a systemd unit (journald PRIORITY=6)", "line": "level      | error", "level": "6", "stated": "info"}
+{"format": "psql \\x expanded under GitHub Actions timestamps (control)", "line": "2026-10-11T10:00:00.1234567Z level      | error", "stated": ""}
+{"format": "docker compose v2, longest name gets one space (container_name: error, control)", "line": "error | 2026/10/11 10:00:00 listening on :8080", "stated": ""}
+{"format": "docker compose v2, longest name gets one space (container_name: notice, control)", "line": "notice | Sleeping for 3600 seconds", "stated": ""}
+{"format": "docker compose v2/alertmanager (control)", "line": "alertmanager-1  | ts=2026-10-11T10:00:00.123Z caller=main.go:181 level=info msg=\"Starting Alertmanager\" version=\"(version=0.27.0, branch=HEAD)\"", "stated": "info"}
+{"format": "overmind (control)", "line": "web    | Listening on http://0.0.0.0:3000", "stated": ""}
+{"format": "ansible ad-hoc -m shell (control)", "line": "web-1 | CHANGED | rc=0 >>", "stated": ""}
+{"format": "ansible ad-hoc -m shell (control)", "line": "db-2 | FAILED | rc=1 >>", "stated": ""}
+{"format": "udevadm info /dev/sda (control)", "line": "P: /devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/sda", "stated": ""}
+{"format": "udevadm info /dev/sda", "line": "N: sda", "stated": ""}
+{"format": "udevadm info /dev/sda", "line": "E: DEVPATH=/devices/pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0/block/sda", "stated": ""}
+{"format": "udevadm info /dev/sda", "line": "E: DEVNAME=/dev/sda", "stated": ""}
+{"format": "udevadm info /dev/sda", "line": "E: ID_SERIAL=Samsung_SSD_860_EVO_500GB_S3Z1NB0K123456X", "stated": ""}
+{"format": "udevadm info /dev/sda1", "line": "E: ID_FS_TYPE=ext4", "stated": ""}
+{"format": "udevadm info --export-db", "line": "N: nvme0n1", "stated": ""}
+{"format": "udevadm info in a oneshot unit (journald PRIORITY=6)", "line": "E: ID_PART_TABLE_TYPE=gpt", "level": "6", "stated": "info"}
+{"format": "udevadm info in a containerd CRI file (node debug pod)", "line": "2026-10-11T10:00:00.123456789Z stdout F E: ID_BUS=ata", "stated": ""}
+{"format": "udevadm info via kubectl logs --prefix (node debug pod)", "line": "[pod/node-debugger-worker-2-x7k2p/debugger] E: DEVNAME=/dev/nvme0n1", "stated": ""}
+{"format": "apt-get (control)", "line": "W: Some index files failed to download. They have been ignored, or old ones used instead.", "stated": "warning"}
+{"format": "apt-get (control)", "line": "N: Download is performed unsandboxed as root as file '/root/pkg.deb' couldn't be accessed by user '_apt'. - pkgAcquire::Run (13: Permission denied)", "stated": "notice"}
+{"format": "apt-get (control)", "line": "E: Unable to locate package libssl1.1", "stated": "error"}
+{"format": "psql -tAc 'SHOW log_min_messages' (default value)", "line": "warning", "stated": ""}
+{"format": "psql -tAc 'SHOW client_min_messages' (default value)", "line": "notice", "stated": ""}
+{"format": "psql -c 'SHOW log_min_error_statement' (aligned value row)", "line": " error", "stated": ""}
+{"format": "redis-cli --raw CONFIG GET loglevel (value line)", "line": "notice", "stated": ""}
+{"format": "ls target/ (cargo, CI non-tty, one name per line)", "line": "debug", "stated": ""}
+{"format": "psql -tAc in a systemd unit (journald PRIORITY=6)", "line": "warning", "level": "6", "stated": "info"}
+{"format": "mysql -B -e 'SELECT level, COUNT(*) ... GROUP BY level' (batch mode, non-tty)", "line": "error\t12", "stated": ""}
+{"format": "mysql -B -e 'SELECT level, COUNT(*) ... GROUP BY level' (batch mode, non-tty)", "line": "warning\t87", "stated": ""}
+{"format": "mysql -B -e 'SELECT level, COUNT(*) ... GROUP BY level' (batch mode, non-tty)", "line": "info\t4021", "stated": ""}
+{"format": "mysql -B -e 'SELECT day, level, COUNT(*) ...' (batch mode, non-tty)", "line": "2026-10-11\terror\t12", "stated": ""}
+{"format": "psql --csv -c 'SELECT level, count(*) ... GROUP BY level'", "line": "error,12", "stated": ""}
+{"format": "mysql -B under Jenkins Timestamper", "line": "[2026-10-11T10:00:00.123Z] error\t12", "stated": ""}
+{"format": "docker compose config (service environment)", "line": "      DEBUG: \"false\"", "stated": ""}
+{"format": "helm get values (YAML)", "line": "debug: false", "stated": ""}
+{"format": "django manage.py diffsettings", "line": "DEBUG = True", "stated": ""}
+{"format": "filebeat export config (YAML, dotted key)", "line": "logging.level: debug", "stated": ""}
+{"format": "cat config.json (xray/v2ray, pretty-printed)", "line": "    \"loglevel\": \"warning\",", "stated": ""}
+{"format": "jq . zap-config.json (pretty-printed)", "line": "  \"level\": \"debug\",", "stated": ""}
+{"format": "kafka-streams StreamsConfig values (continuation line of an INFO record)", "line": "\tmetrics.recording.level = DEBUG", "stated": ""}
+{"format": "docker compose config (service environment, control)", "line": "      LOG_LEVEL: info", "stated": ""}
+{"format": "npm audit (report)", "line": "Severity: critical", "stated": ""}
+{"format": "npm audit (report, control)", "line": "Severity: high", "stated": ""}
+{"format": "npm audit under GitHub Actions timestamps", "line": "2026-10-11T10:00:00.1234567Z Severity: critical", "stated": ""}
+{"format": "npm audit in a systemd unit (journald PRIORITY=6)", "line": "Severity: critical", "level": "6", "stated": "info"}
+{"format": "trivy image (summary, zero criticals)", "line": "Total: 3 (UNKNOWN: 0, LOW: 1, MEDIUM: 1, HIGH: 1, CRITICAL: 0)", "stated": ""}
+{"format": "trivy image (table row)", "line": "│ libssl3       │ CVE-2024-5535  │ CRITICAL │ fixed  │ 3.0.12-r4         │ 3.0.14-r0     │ openssl: SSL_select_next_proto buffer overread │", "stated": ""}
+{"format": "trivy config (misconfiguration)", "line": "AVD-AWS-0107 (CRITICAL): Security group rule allows ingress from public internet.", "stated": "critical"}
+{"format": "docker scout cves", "line": "    ✗ CRITICAL CVE-2023-38545", "stated": "critical"}
+{"format": "grype (table row, control)", "line": "openssl  3.0.12-r4  3.0.14-r0  apk   CVE-2024-5535  Critical", "stated": ""}
+{"format": "river gauge telemetry JSON (datetime)", "line": "{\"datetime\":\"2026-10-11 10:00:00\",\"station\":\"kaub\",\"river\":\"rhine\",\"level\":200,\"unit\":\"cm\"}", "stated": ""}
+{"format": "river gauge telemetry JSON (datetime)", "line": "{\"datetime\":\"2026-10-11 10:15:00\",\"station\":\"kaub\",\"river\":\"rhine\",\"level\":400,\"unit\":\"cm\"}", "stated": ""}
+{"format": "IoT tank telemetry JSON (datetime)", "line": "{\"datetime\":\"2026-10-11T10:00:00+00:00\",\"sensor\":\"tank-3\",\"level\":50,\"unit\":\"percent\"}", "stated": ""}
+{"format": "IoT tank telemetry JSON (time + msg)", "line": "{\"time\":\"2026-10-11T10:00:00Z\",\"msg\":\"tank reading\",\"sensor\":\"tank-3\",\"level\":60,\"unit\":\"percent\"}", "stated": ""}
+{"format": "game server JSON events (datetime)", "line": "{\"datetime\":\"2026-10-11 10:00:00\",\"event\":\"level_up\",\"player\":\"steve\",\"level\":30}", "stated": ""}
+{"format": "river gauge JSON in a systemd unit (journald PRIORITY=6)", "line": "{\"datetime\":\"2026-10-11 10:30:00\",\"station\":\"kaub\",\"river\":\"rhine\",\"level\":600,\"unit\":\"cm\"}", "level": "6", "stated": "info"}
+{"format": "pino (control)", "line": "{\"level\":40,\"time\":1791712800123,\"pid\":1,\"hostname\":\"api-7d9f8b6c4-x2x9z\",\"msg\":\"slow query\"}", "stated": "warning"}
+{"format": "bunyan (control)", "line": "{\"name\":\"api\",\"hostname\":\"web-1\",\"pid\":42,\"level\":50,\"msg\":\"request failed\",\"time\":\"2026-10-11T10:00:00.123Z\",\"v\":0}", "stated": "error"}
+{"format": "monolog JSON (control)", "line": "{\"message\":\"Payment failed\",\"context\":{},\"level\":400,\"level_name\":\"ERROR\",\"channel\":\"app\",\"datetime\":\"2026-10-11T10:00:00.123456+00:00\",\"extra\":{}}", "stated": "error"}
+{"format": "go log (uptime checker, Printf(\"Alert %s - %s\"))", "line": "2026/10/11 10:00:00 Alert api.example.com - DOWN (HTTP 503)", "stated": ""}
+{"format": "go log (cert checker, Printf(\"Notice %s - %s\"))", "line": "2026/10/11 10:00:00 Notice api.example.com - certificate expires in 12 days", "stated": ""}
+{"format": "go log (traceroute tool, Printf(\"trace %s - %d hops, %s\"))", "line": "2026/10/11 10:00:00 trace 8.8.8.8 - 11 hops, 18.4ms", "stated": ""}
+{"format": "go log (uptime checker without the dash, control)", "line": "2026/10/11 10:00:00 Alert api.example.com DOWN (HTTP 503)", "stated": ""}
+{"format": "esxi vpxa (control)", "line": "2026-10-11T10:00:00.123Z info vpxa[2099456] [Originator@6876 sub=vpxLro opID=lro-42] [VpxLRO] -- BEGIN lro-42 -- -- vpxapi.VpxaService.retrieveChanges", "stated": "info"}
+{"format": "node console.log(`Attempt ${n} - ${err}`) (axios error)", "line": "Attempt 3 - Error: Request failed with status code 503", "stated": ""}
+{"format": "node console.log(`Retry ${i}/${max} - ${err}`)", "line": "Retry 2/5 - Error: connect ECONNREFUSED 10.0.0.5:5432", "stated": ""}
+{"format": "node console.log(`[sync] page ${n} - ${err}`)", "line": "[sync] page 12 - Error: socket hang up", "stated": ""}
+{"format": "tsc (control)", "line": "src/app.ts:3:7 - error TS2322: Type 'string' is not assignable to type 'number'.", "stated": "error"}
+{"format": "go log (chatops bot relaying a device message)", "line": "2026/10/11 10:00:00 posted to #netops: sw01 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down", "stated": ""}
+{"format": "rsyslog/chatops bot (PRI 30 = info)", "line": "<30>Oct 11 10:00:00 bot01 netbot[812]: posted to #netops: sw01 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down", "stated": "info"}
+{"format": "chatops bot in a systemd unit (journald PRIORITY=6)", "line": "2026/10/11 10:00:00 posted to #netops: sw01 %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down", "level": "6", "stated": "info"}
+{"format": "python logging INFO relay (control: leftmost wins)", "line": "2026-10-11 10:00:00,123 INFO forwarded from 10.0.0.1: %LINK-3-UPDOWN: Interface Gi0/1, changed state to down", "stated": "info"}
+{"format": "cisco ios via rsyslog (control)", "line": "Oct 11 10:00:00 sw01 123: *Oct 11 10:00:00.123: %SYS-5-CONFIG_I: Configured from console by admin on vty0 (10.0.0.5)", "stated": "notice"}
+{"format": "go log Printf of alert labels (webhook receiver)", "line": "2026/10/11 10:00:00 alert=DiskFull severity=critical status=firing instance=web-1:9100", "stated": ""}
+{"format": "go log Printf of alert labels (webhook receiver)", "line": "2026/10/11 10:00:00 alertname=HighLatency severity=warning status=resolved job=api", "stated": ""}
+{"format": "logcli (control: labels in braces)", "line": "2026-10-11T10:00:00Z {app=\"api\", level=\"error\"} request failed", "stated": ""}
+{"format": "kubernetes audit (control)", "line": "{\"kind\":\"Event\",\"apiVersion\":\"audit.k8s.io/v1\",\"level\":\"Request\",\"auditID\":\"5e1f0a4c-2b7d-4c1e-9f2a-5d6b7c8e9f05\",\"stage\":\"ResponseComplete\",\"verb\":\"get\"}", "stated": ""}
+{"format": "go log (startup banner)", "line": "2026/10/11 10:00:00 Log level: DEBUG", "stated": ""}
+{"format": "go log (startup banner) in a systemd unit (journald PRIORITY=6)", "line": "2026/10/11 10:00:00 Log level: DEBUG", "level": "6", "stated": "info"}
+{"format": "node retry log in a systemd unit (journald PRIORITY=6)", "line": "Attempt 3 - Error: Request failed with status code 503", "level": "6", "stated": "info"}
+{"format": "docker syslog driver stderr (PRI 27)/go log chatops relay", "line": "<27>1 2026-10-11T10:00:00Z node1 netbot 812 netbot - 2026/10/11 10:00:00 posted to #netops: sw01 %LINK-5-CHANGED: Interface Gi0/1, changed state to administratively down", "stated": "error"}
+{"format": "mikrotik (control)", "line": "Oct 11 10:00:00 192.0.2.1 system,info,account user admin logged in from 10.0.0.5 via winbox", "stated": "info"}
+{"format": "webpack-dev-server (control)", "line": "<i> [webpack-dev-server] Project is running at:", "stated": "info"}
+{"format": "github workflow command (control)", "line": "::warning file=app.js,line=1,col=5::Missing semicolon", "stated": "warning"}
+{"format": "C++ source in grep output (control)", "line": "::error_code ec;", "stated": ""}
+{"format": "curl -v weak ETag header (control)", "line": "< ETag: W/\"5e15153d-120f\"", "stated": ""}
+{"format": "telegraf (control)", "line": "2026-10-11T10:00:00Z I! Starting Telegraf 1.32.0", "stated": "info"}
+{"format": "frp (control)", "line": "2026-10-11 10:00:00.123 [I] [client/service.go:295] [3f1c9a2e] login to server success, get run id [3f1c9a2e]", "stated": "info"}
+{"format": "tensorflow via rsyslog (control)", "line": "Oct 11 10:00:00 gpu01 python3[812]: 2026-10-11 10:00:00.123456: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.", "stated": "info"}
+{"format": "xorg log legend (control)", "line": "\t(++) from command line, (!!) notice, (II) informational,", "stated": ""}
+{"format": "go runtime (control)", "line": "fatal error: all goroutines are asleep - deadlock!", "stated": "critical"}
+{"format": "orchestrator quoting a replica error (control)", "line": "2026/10/11 10:00:00 replica db-2: Got fatal error 1236 from source when reading data from binary log", "stated": ""}
+{"format": "sqlite3 list mode, Sonarr logs.db (control: the record's own level)", "line": "1|Info|RssSyncService|RSS Sync Completed. Reports found: 98, Reports grabbed: 0", "stated": "info"}

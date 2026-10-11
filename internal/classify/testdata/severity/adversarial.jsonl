@@ -1,0 +1,455 @@
+{"format": "pihole-ftl-v5", "line": "[2026-10-11 10:00:00.123 1234M] FTL branch: master", "stated": "", "guess": "info"}
+{"format": "pihole-ftl-v5", "line": "[2026-10-11 10:00:00.123 1234M] ########## FTL started on pi.hole! ##########", "stated": "", "guess": "info"}
+{"format": "pihole-ftl-v5", "line": "[2026-10-11 10:00:00.456 1234/T1240] Resizing \"FTL-strings\" from 40960 to (81920 * 1) == 81920 (/dev/shm: 1.2MB used, 4.1GB total, FTL uses 1.2MB)", "stated": "", "guess": "info"}
+{"format": "freemarker/stderr", "line": "FTL stack trace (\"~\" means nesting-related):", "stated": ""}
+{"format": "freemarker/stderr", "line": "FreeMarker template error (DEBUG mode; use RETHROW in production!):", "stated": ""}
+{"format": "nagios/nagios.log", "line": "[1791712800] SERVICE ALERT: web01;HTTP;OK;HARD;3;HTTP OK: HTTP/1.1 200 OK - 512 bytes in 0.012 second response time", "stated": "", "guess": "info"}
+{"format": "nagios/nagios.log", "line": "[1791712800] SERVICE ALERT: web01;Disk /;WARNING;SOFT;1;DISK WARNING - free space: / 1843 MB (9.42% inode=91%):", "stated": "", "guess": "warning", "gap": "Nagios plugin output's status word reads as a level; the severity equals the guess"}
+{"format": "nagios/nagios.log", "line": "[1791712800] HOST ALERT: web01;UP;HARD;1;PING OK - Packet loss = 0%, RTA = 0.42 ms", "stated": "", "guess": "info"}
+{"format": "nagios/syslog", "line": "Oct 11 10:00:00 mon01 nagios: SERVICE ALERT: web01;HTTP;OK;HARD;3;HTTP OK: HTTP/1.1 200 OK - 512 bytes in 0.012 second response time", "stated": "", "guess": "info"}
+{"format": "nagios/journald-json", "line": "SERVICE ALERT: web01;HTTP;OK;HARD;3;HTTP OK: HTTP/1.1 200 OK - 512 bytes in 0.012 second response time", "level": "6", "stated": "info"}
+{"format": "android/logcat-threadtime", "line": "10-11 10:00:00.123  1234  1234 E AndroidRuntime: FATAL EXCEPTION: main", "stated": "error"}
+{"format": "android/logcat-threadtime", "line": "10-11 10:00:00.123  1234  1234 W ActivityManager: Slow operation: 123ms so far, now at startProcess: done updating battery stats", "stated": "warning"}
+{"format": "android/logcat-threadtime", "line": "10-11 10:00:00.123  1234  5678 D OkHttp  : --> GET https://api.example.com/v1/users", "stated": "debug"}
+{"format": "android/logcat-threadtime", "line": "10-11 10:00:00.123  1234  1234 I ActivityManager: Start proc 4321:com.example.app/u0a123 for activity {com.example.app/com.example.app.MainActivity}", "stated": "info"}
+{"format": "docker-syslog-driver/rfc5424 stderr", "line": "<27>1 2026-10-11T10:00:00Z node1 web 812 web - 2026-10-11 10:00:00,123 INFO     app.main: Started worker pid=42", "stated": "info"}
+{"format": "docker-syslog-driver/rfc5424 stdout", "line": "<30>1 2026-10-11T10:00:00Z node1 api 812 api - {\"level\":\"error\",\"time\":\"2026-10-11T10:00:00Z\",\"message\":\"failed to connect to db\"}", "stated": "error"}
+{"format": "docker-gelf/stderr", "line": "2026-10-11 10:00:00,123 INFO     app.main: Started worker pid=42", "level": "3", "stated": "info"}
+{"format": "gke/textPayload stderr", "line": "2026-10-11 10:00:00,123 INFO     app.main: Started worker pid=42", "level": "ERROR", "stated": "info", "gap": "a string level field is trusted over the text; only numeric transport defaults are re-checked"}
+{"format": "monolog-json/structured", "line": "User 42 logged in", "level": "200", "stated": "info"}
+{"format": "monolog-json/structured", "line": "Payment provider latency above threshold", "level": "300", "stated": "warning"}
+{"format": "monolog-json/structured", "line": "Order sync failed", "level": "400", "stated": "error"}
+{"format": "monolog-json/structured", "line": "Cache miss for key orders:42", "level": "100", "stated": "debug"}
+{"format": "monolog-json/docker-json-file", "line": "{\"message\":\"Payment provider timeout\",\"context\":{\"order\":42},\"level\":300,\"level_name\":\"WARNING\",\"channel\":\"app\",\"datetime\":\"2026-10-11T10:00:00.123456+00:00\",\"extra\":{}}", "stated": "warning"}
+{"format": "monolog-json/docker-json-file", "line": "{\"message\":\"Retrying failed webhook\",\"context\":{},\"level\":200,\"level_name\":\"INFO\",\"channel\":\"app\",\"datetime\":\"2026-10-11T10:00:00.123456+00:00\",\"extra\":{}}", "stated": "info"}
+{"format": "python-json-logger/docker-json-file", "line": "{\"asctime\": \"2026-10-11 10:00:00,123\", \"levelname\": \"WARNING\", \"name\": \"app.db\", \"message\": \"Retry 2 of 3 failed, backing off\"}", "stated": "warning"}
+{"format": "python-json-logger/docker-json-file", "line": "{\"asctime\": \"2026-10-11 10:00:00,123\", \"levelname\": \"INFO\", \"name\": \"app.jobs\", \"message\": \"Nightly export finished\"}", "stated": "info"}
+{"format": "python-json-logger/cri", "line": "2026-10-11T10:00:00.123456789Z stderr F {\"asctime\": \"2026-10-11 10:00:00,123\", \"levelname\": \"ERROR\", \"name\": \"app.worker\", \"message\": \"Job 42 crashed\"}", "stated": "error"}
+{"format": "pino/docker-json-file", "line": "{\"level\":50,\"time\":1791712800123,\"pid\":1,\"hostname\":\"api-7d9f8b6c4-x2x9z\",\"msg\":\"request errored\"}", "stated": "error"}
+{"format": "pino/docker-json-file", "line": "{\"level\":30,\"time\":1791712800123,\"pid\":1,\"hostname\":\"api-7d9f8b6c4-x2x9z\",\"reqId\":\"req-1\",\"res\":{\"statusCode\":500},\"responseTime\":12.3,\"msg\":\"request completed\"}", "stated": "info"}
+{"format": "bunyan/docker-json-file", "line": "{\"name\":\"api\",\"hostname\":\"web-1\",\"pid\":42,\"level\":40,\"msg\":\"slow query on orders (1520ms)\",\"time\":\"2026-10-11T10:00:00.123Z\",\"v\":0}", "stated": "warning"}
+{"format": "serilog-clef/cri", "line": "2026-10-11T10:00:00.123456789Z stdout F {\"@t\":\"2026-10-11T10:00:00.1234567Z\",\"@mt\":\"Cache miss rate {Rate} above threshold\",\"@l\":\"Warning\",\"Rate\":0.42}", "stated": "warning"}
+{"format": "serilog-clef/cri", "line": "2026-10-11T10:00:00.123456789Z stdout F {\"@t\":\"2026-10-11T10:00:00.1234567Z\",\"@mt\":\"Payment {OrderId} failed\",\"@l\":\"Error\",\"OrderId\":42}", "stated": "error"}
+{"format": "erlang/sasl-report", "line": "=ERROR REPORT==== 11-Oct-2026::10:00:00 ===", "stated": "error"}
+{"format": "erlang/sasl-report", "line": "=WARNING REPORT==== 11-Oct-2026::10:00:00 ===", "stated": "warning"}
+{"format": "erlang/sasl-report", "line": "=INFO REPORT==== 11-Oct-2026::10:00:00 ===", "stated": "info"}
+{"format": "rabbitmq-3.6/joined", "line": "=WARNING REPORT==== 11-Oct-2026::10:00:00 ===\nclosing AMQP connection <0.1234.0> (10.0.0.5:50412 -> 10.0.0.2:5672):\nclient unexpectedly closed TCP connection", "stated": "warning"}
+{"format": "go/runtime", "line": "fatal error: concurrent map writes", "stated": "critical"}
+{"format": "go/runtime", "line": "fatal error: all goroutines are asleep - deadlock!", "stated": "critical"}
+{"format": "go test", "line": "FAIL\tgithub.com/acme/orders/internal/billing\t0.412s", "stated": ""}
+{"format": "python/unittest", "line": "FAIL: test_refund_rejected (tests.test_payments.RefundTests.test_refund_rejected)", "stated": "", "gap": "same shape as Bazel's 'FAIL: //target (…)', which states its level"}
+{"format": "jest", "line": "FAIL  src/payments/refund.test.ts", "stated": ""}
+{"format": "node/console.error", "line": "Sync failed: Error: Request failed with status code 503", "stated": ""}
+{"format": "clang", "line": "1 error generated.", "stated": ""}
+{"format": "github-actions/checkout", "line": "Note: switching to 'refs/remotes/pull/42/merge'.", "stated": "notice", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 Debug server listening on 127.0.0.1:6060", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 Alert rule \"HighCPU\" fired for web-1, notifying #ops", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 Log level: debug", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 received alert DiskFull from alertmanager status=resolved severity=critical instance=web-1:9100", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 webhook payload: {\"receiver\":\"ops\",\"status\":\"resolved\",\"alerts\":[{\"labels\":{\"alertname\":\"HighLatency\",\"severity\":\"warning\"}}]}", "stated": "", "guess": "info"}
+{"format": "go/log flags=0", "line": "error Get \"https://api.example.com/v1/rates\": dial tcp: lookup api.example.com: no such host", "stated": "", "gap": "same shape as yarn's 'error Command failed'; the severity is right"}
+{"format": "kibana/csv-export", "line": "\"Oct 11, 2026 @ 10:00:00.123\",\"INFO\",\"Retry of failed webhook delivery succeeded\"", "stated": "info"}
+{"format": "supervisord", "line": "2026-10-11 10:00:00,123 DEBG 'worker' stderr output:", "stated": "debug"}
+{"format": "supervisord", "line": "2026-10-11 10:00:00,123 DEBG fd 11 closed, stopped monitoring <POutputDispatcher at 140245123456789 for <Subprocess at 140245123456000 with name worker in state RUNNING> (stderr)>", "stated": "debug"}
+{"format": "pgbouncer", "line": "2026-10-11 10:00:00.123 UTC [1] LOG kernel file descriptor limit: 1048576 (hard: 1048576); max_client_conn: 100, max expected fd use: 152", "stated": "info"}
+{"format": "pgbouncer", "line": "2026-10-11 10:00:00.456 UTC [1] LOG C-0x55d5c1a2b3c4: appdb/app@10.0.0.5:50412 closing because: client unexpected eof (age=0s)", "stated": "info"}
+{"format": "pgbouncer", "line": "2026-10-11 10:00:01.000 UTC [1] LOG S-0x55d5c1a2c000: appdb/app@10.0.0.2:5432 closing because: server conn crashed? (age=3021s)", "stated": "info"}
+{"format": "telegraf", "line": "2026-10-11T10:00:00Z W! [outputs.influxdb] When writing to [http://influxdb:8086]: database \"telegraf\" creation failed: 401 Unauthorized", "stated": "warning"}
+{"format": "telegraf", "line": "2026-10-11T10:00:00Z E! [inputs.disk] Error in plugin: error getting disk io info: open /proc/diskstats: no such file or directory", "stated": "error"}
+{"format": "telegraf", "line": "2026-10-11T10:00:00Z I! Loaded inputs: cpu disk diskio mem net system", "stated": "info"}
+{"format": "telegraf", "line": "2026-10-11T10:00:00Z D! [outputs.file] Wrote batch of 12 metrics in 85.2µs", "stated": "debug"}
+{"format": "falco", "line": "10:00:00.123456789: Informational Container with sensitive mount started (user=<NA> user_loginuid=0 command=container:1a2b3c4d5e6f k8s.ns=default k8s.pod=web container=1a2b3c4d5e6f image=nginx:1.27 mounts=/etc:/host/etc::true:rprivate)", "stated": "info"}
+{"format": "cisco-asa/rsyslog", "line": "Oct 11 10:00:00 fw01 %ASA-4-106023: Deny tcp src outside:203.0.113.9/51234 dst inside:10.0.0.5/22 by access-group \"outside_access_in\" [0x0, 0x0]", "stated": "warning"}
+{"format": "cisco-asa/rsyslog", "line": "Oct 11 10:00:00 fw01 %ASA-6-302013: Built inbound TCP connection 123456 for outside:203.0.113.9/51234 (203.0.113.9/51234) to inside:10.0.0.5/443 (10.0.0.5/443)", "stated": "info"}
+{"format": "cisco-ios/rsyslog", "line": "Oct 11 10:00:00 sw01 000123: *Oct 11 10:00:00.123: %LINK-3-UPDOWN: Interface GigabitEthernet0/1, changed state to down", "stated": "error"}
+{"format": "monit", "line": "[UTC Oct 11 10:00:00] error    : 'nginx' process is not running", "stated": "error"}
+{"format": "monit", "line": "[UTC Oct 11 10:00:00] info     : 'nginx' process is running with pid 1234", "stated": "info"}
+{"format": "icinga2", "line": "[2026-10-11 10:00:00 +0000] critical/ApiListener: Cannot connect to host '10.0.0.5' on port '5665': Connection refused", "stated": "critical"}
+{"format": "icinga2", "line": "[2026-10-11 10:00:00 +0000] information/ConfigItem: Committing config item(s).", "stated": "info"}
+{"format": "minecraft/vanilla", "line": "[10:00:00] [Server thread/WARN]: Can't keep up! Is the server overloaded? Running 2034ms or 40 ticks behind", "stated": "warning"}
+{"format": "minecraft/vanilla", "line": "[10:00:00] [Server thread/ERROR]: Encountered an unexpected exception", "stated": "error"}
+{"format": "minecraft/vanilla", "line": "[10:00:00] [Server thread/INFO]: Steve[/203.0.113.9:51234] logged in with entity id 123 at (12.5, 64.0, -8.3)", "stated": "info"}
+{"format": "sonarr/nlog-file", "line": "2026-10-11 10:00:00.1|Info|RssSyncService|RSS Sync Completed. Reports found: 98, Reports grabbed: 0", "stated": "info"}
+{"format": "sonarr/nlog-file", "line": "2026-10-11 10:00:00.2|Warn|DownloadClientProvider|Download client qBittorrent is unavailable, retrying in 5 minutes", "stated": "warning"}
+{"format": "loguru", "line": "2026-10-11 10:00:00.123 | SUCCESS  | app.importer:run:88 - Imported 1520 rows", "stated": "info"}
+{"format": "heroku/router", "line": "2026-10-11T10:00:00.123456+00:00 heroku[router]: at=error code=H12 desc=\"Request timeout\" method=GET path=\"/api/orders\" host=shop.herokuapp.com request_id=3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f01 fwd=\"203.0.113.9\" dyno=web.1 connect=0ms service=30001ms status=503 bytes=0 protocol=https", "stated": "error"}
+{"format": "heroku/router", "line": "2026-10-11T10:00:00.123456+00:00 heroku[router]: at=info method=GET path=\"/api/orders?status=failed\" host=shop.herokuapp.com request_id=3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f02 fwd=\"203.0.113.9\" dyno=web.1 connect=0ms service=12ms status=200 bytes=512 protocol=https", "stated": "info"}
+{"format": "docker-compose-logs/aspnet", "line": "api-1  | fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]", "stated": "error"}
+{"format": "docker-compose-logs/aspnet", "line": "api-1  | warn: Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository[60]", "stated": "warning"}
+{"format": "docker-compose-logs/redis", "line": "cache-1  | 1:M 11 Oct 2026 10:00:00.126 * Ready to accept connections tcp", "stated": "notice"}
+{"format": "docker-compose-logs/winston", "line": "web-1  | error: Unhandled rejection: connect ECONNREFUSED 10.0.0.5:5432", "stated": "error"}
+{"format": "kubectl-logs--prefix/klog", "line": "[pod/kube-proxy-x2x9z/kube-proxy] E1011 10:00:00.123456       1 proxier.go:1504] \"Failed to execute iptables-restore\" err=\"exit status 1\"", "stated": "error"}
+{"format": "buildkit/plain+npm", "line": "#12 8.214 npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it.", "stated": "warning"}
+{"format": "buildkit/plain+npm", "line": "#12 9.873 npm error code ERESOLVE", "stated": "error"}
+{"format": "tsc/pretty", "line": "src/app.ts:3:7 - error TS2322: Type 'string' is not assignable to type 'number'.", "stated": "error"}
+{"format": "rustc", "line": "error[E0308]: mismatched types", "stated": "error"}
+{"format": "apt-get", "line": "E: Unable to locate package libssl1.1", "stated": "error"}
+{"format": "apt-get", "line": "W: Some index files failed to download. They have been ignored, or old ones used instead.", "stated": "warning"}
+{"format": "bash+tput", "line": "\u001b[31mERROR\u001b(B\u001b[m backup to s3://backups/db failed", "stated": "error"}
+{"format": "mel/systemd+cri", "line": "2026-10-11T10:00:00.123456789Z stdout F <3>MyApp.Workers.PaymentSync[0] Payment sync failed for batch 42", "stated": "error"}
+{"format": "mel/systemd+cri", "line": "2026-10-11T10:00:00.123456789Z stdout F <4>Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[35] No XML encryptor configured. Key {3b6c1a8e-2d4f-4b7a-9e0c-5d6e7f8a9b0c} may be persisted to storage in unencrypted form.", "stated": "warning"}
+{"format": "mel/console via rsyslog", "line": "Oct 11 10:00:00 web1 MyApp[4242]: fail: MyApp.Workers.PaymentSync[0]", "stated": "error"}
+{"format": "tensorflow/c++", "line": "2026-10-11 10:00:00.123456: E external/local_xla/xla/stream_executor/cuda/cuda_dnn.cc:9261] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered", "stated": "error"}
+{"format": "tensorflow/c++", "line": "2026-10-11 10:00:00.123456: W tensorflow/compiler/tf2tensorrt/utils/py_utils.cc:38] TF-TRT Warning: Could not find TensorRT", "stated": "warning"}
+{"format": "tensorflow/c++", "line": "2026-10-11 10:00:00.123456: I tensorflow/core/platform/cpu_feature_guard.cc:182] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.", "stated": "info"}
+{"format": "pytorch/c10", "line": "[W socket.cpp:464] [c10d] The server socket has failed to bind to [::]:29500 (errno: 98 - Address already in use).", "stated": "warning"}
+{"format": "glusterfs", "line": "[2026-10-11 10:00:00.123456] W [MSGID: 114031] [client-rpc-fops_v2.c:2634:client4_0_lookup_cbk] 0-gv0-client-1: remote operation failed. Path: /data (00000000-0000-0000-0000-000000000001) [Transport endpoint is not connected]", "stated": "warning"}
+{"format": "glusterfs", "line": "[2026-10-11 10:00:00.123456] I [MSGID: 100030] [glusterfsd.c:2865:main] 0-/usr/sbin/glusterfs: Started running /usr/sbin/glusterfs version 11.1", "stated": "info"}
+{"format": "gitea", "line": "2026/10/11 10:00:00 cmd/web.go:304:listen() [I] Listen: http://0.0.0.0:3000", "stated": "info"}
+{"format": "gitea", "line": "2026/10/11 10:00:00 ...s/web/repo/view.go:123:Home() [E] GetBranchCommit: object does not exist [id: refs/heads/main, rel_path: ]", "stated": "error"}
+{"format": "suricata-7/suricata.log", "line": "[1234 - Suricata-Main] 2026-10-11 10:00:00 Notice: suricata: This is Suricata version 7.0.7 RELEASE running in SYSTEM mode", "stated": "notice"}
+{"format": "suricata-7/suricata.log", "line": "[1234 - Suricata-Main] 2026-10-11 10:00:00 Error: af-packet: eth1: failed to find interface: No such device", "stated": "error"}
+{"format": "nextjs-14", "line": "⚠ Port 3000 is in use, trying 3001 instead.", "stated": "warning", "gap": "a glyph alone as the level is a Next.js-only convention"}
+{"format": "nextjs-14", "line": "⨯ Error: Cannot find module 'sharp'", "stated": "error"}
+{"format": "cockroachdb", "line": "W261011 10:00:00.123456 412 server/node.go:1234 ⋮ [T1,Vsystem,n1] 42  slow heartbeat took 4.2s; err=context deadline exceeded", "stated": "warning"}
+{"format": "rsyslog/systemd", "line": "Oct 11 10:00:00 host systemd[1]: Started Daily apt download activities.", "stated": ""}
+{"format": "rsyslog/systemd", "line": "Oct 11 10:00:00 host systemd[1]: logrotate.service: Deactivated successfully.", "stated": ""}
+{"format": "rsyslog/systemd", "line": "Oct 11 10:00:00 host systemd[1]: apt-daily.service: Consumed 3.123s CPU time.", "stated": ""}
+{"format": "rsyslog/systemd-logind", "line": "Oct 11 10:00:00 host systemd-logind[612]: New session 42 of user alice.", "stated": ""}
+{"format": "rsyslog/systemd-resolved", "line": "Oct 11 10:00:00 host systemd-resolved[540]: Using degraded feature set UDP instead of UDP+EDNS0 for DNS server 10.0.0.1.", "stated": ""}
+{"format": "rsyslog/systemd-networkd", "line": "Oct 11 10:00:00 host systemd-networkd[530]: eth0: Lost carrier", "stated": ""}
+{"format": "rsyslog/dbus", "line": "Oct 11 10:00:00 host dbus-daemon[701]: [system] Successfully activated service 'org.freedesktop.timedate1'", "stated": ""}
+{"format": "rsyslog/avahi", "line": "Oct 11 10:00:00 host avahi-daemon[700]: Joining mDNS multicast group on interface eth0.IPv4 with address 10.0.0.5.", "stated": ""}
+{"format": "rsyslog/wpa_supplicant", "line": "Oct 11 10:00:00 host wpa_supplicant[812]: wlp2s0: CTRL-EVENT-DISCONNECTED bssid=aa:bb:cc:dd:ee:ff reason=3 locally_generated=1", "stated": ""}
+{"format": "rsyslog/dhclient", "line": "Oct 11 10:00:00 host dhclient[900]: DHCPACK of 10.0.0.5 from 10.0.0.1 (xid=0x1a2b3c4d)", "stated": ""}
+{"format": "rsyslog/snapd", "line": "Oct 11 10:00:00 host snapd[800]: storehelpers.go:769: cannot refresh: snap has no updates available: \"core22\", \"lxd\"", "stated": ""}
+{"format": "rsyslog/bluetoothd", "line": "Oct 11 10:00:00 host bluetoothd[640]: profiles/sap/server.c:sap_server_register() Sap driver initialization failed.", "stated": ""}
+{"format": "kern.log/usb", "line": "Oct 11 10:00:00 host kernel: [12345.678901] usb 1-1: new high-speed USB device number 3 using xhci_hcd", "stated": ""}
+{"format": "kern.log/e1000e", "line": "Oct 11 10:00:00 host kernel: [12345.678901] e1000e 0000:00:1f.6 eno1: NIC Link is Up 1000 Mbps Full Duplex, Flow Control: Rx/Tx", "stated": ""}
+{"format": "kern.log/xhci", "line": "Oct 11 10:00:00 host kernel: [12345.678901] xhci_hcd 0000:00:14.0: WARN Set TR Deq Ptr cmd failed due to incorrect slot or ep state.", "stated": "warning"}
+{"format": "kern.log/libata", "line": "Oct 11 10:00:00 host kernel: [12345.678901] ata1.00: error: { UNC }", "stated": "error"}
+{"format": "kern.log/bluetooth", "line": "Oct 11 10:00:00 host kernel: [12345.678901] Bluetooth: hci0: Opcode 0x0c03 failed: -110", "stated": ""}
+{"format": "kern.log/nfs", "line": "Oct 11 10:00:00 host kernel: [12345.678901] nfs: server nas.example.com not responding, still trying", "stated": ""}
+{"format": "kern.log/ext4", "line": "Oct 11 10:00:00 host kernel: [12345.678901] EXT4-fs (nvme0n1p2): re-mounted 3b6a1f2e-6a4d-4c3b-9f1e-2a3b4c5d6e7f. Quota mode: none.", "stated": ""}
+{"format": "kern.log/apparmor", "line": "Oct 11 10:00:00 host kernel: [12345.678901] audit: type=1400 audit(1791712800.123:45): apparmor=\"ALLOWED\" operation=\"open\" profile=\"/usr/sbin/cupsd\" name=\"/etc/cups/cupsd.conf\" pid=1234 comm=\"cupsd\" requested_mask=\"r\" denied_mask=\"r\" fsuid=0 ouid=0", "stated": "", "guess": "info"}
+{"format": "dmesg", "line": "[    1.234567] ACPI: Added _OSI(Module Device)", "stated": ""}
+{"format": "rsyslog/chronyd", "line": "Oct 11 10:00:00 host chronyd[612]: Selected source 162.159.200.123 (2.debian.pool.ntp.org)", "stated": ""}
+{"format": "rsyslog/chronyd", "line": "Oct 11 10:00:00 host chronyd[612]: System clock wrong by 1.234567 seconds", "stated": ""}
+{"format": "rsyslog/cron", "line": "Oct 11 10:00:00 host CRON[2345]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)", "stated": ""}
+{"format": "rsyslog/sshd", "line": "Oct 11 10:00:00 host sshd[1234]: Disconnected from invalid user admin 203.0.113.9 port 51234 [preauth]", "stated": ""}
+{"format": "rsyslog/sshd", "line": "Oct 11 10:00:00 host sshd[1234]: Received disconnect from 203.0.113.9 port 51234:11: Bye Bye [preauth]", "stated": ""}
+{"format": "rsyslog/sshd", "line": "Oct 11 10:00:00 host sshd[1234]: Invalid user alert from 203.0.113.9 port 51234", "stated": "", "guess": "info"}
+{"format": "rsyslog/sudo", "line": "Oct 11 10:00:00 host sudo:    alice : 3 incorrect password attempts ; TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/usr/bin/apt update", "stated": ""}
+{"format": "rsyslog/smartd", "line": "Oct 11 10:00:00 host smartd[701]: Device: /dev/sda [SAT], SMART Usage Attribute: 194 Temperature_Celsius changed from 34 to 36", "stated": ""}
+{"format": "rsyslog/upsmon", "line": "Oct 11 10:00:00 host upsmon[1234]: UPS ups@localhost on battery", "stated": ""}
+{"format": "apcupsd/events", "line": "2026-10-11 10:00:00 +0000  Power failure.", "stated": ""}
+{"format": "rsyslog/rsyslogd", "line": "Oct 11 10:00:00 host rsyslogd[789]: imjournal: journal files changed, reloading...  [v8.2312.0 try https://www.rsyslog.com/e/0 ]", "stated": ""}
+{"format": "rsyslog/auditd", "line": "type=USER_LOGIN msg=audit(1791712800.123:4567): pid=1234 uid=0 auid=1000 ses=42 subj=unconfined msg='op=login id=1000 exe=\"/usr/sbin/sshd\" hostname=203.0.113.5 addr=203.0.113.5 terminal=/dev/pts/0 res=success'", "stated": ""}
+{"format": "proxmox/pvestatd", "line": "2026-10-11T10:00:00.123456+00:00 pve1 pvestatd[1234]: status update time (12.345 seconds)", "stated": ""}
+{"format": "cloud-init", "line": "2026-10-11 10:00:00,123 - util.py[DEBUG]: Reading from /proc/uptime (quiet=False)", "stated": "debug"}
+{"format": "cloud-init", "line": "2026-10-11 10:00:00,123 - util.py[WARNING]: Failed to set passwords with chpasswd for ['ubuntu']", "stated": "warning"}
+{"format": "journald/json", "line": "Started Session 42 of User alice.", "level": "6", "stated": "info"}
+{"format": "journald/json", "line": "Received disconnect from 203.0.113.9 port 51234:11: Bye Bye [preauth]", "level": "6", "stated": "info"}
+{"format": "journald/json", "line": "pam_unix(sudo:auth): authentication failure; logname=alice uid=1000 euid=0 tty=/dev/pts/0 ruser=alice rhost=  user=alice", "level": "5", "stated": "notice"}
+{"format": "journald/json python stderr", "line": "WARNING:root:Retrying (Retry(total=4)) after connection broken by 'ProtocolError'", "level": "6", "stated": "warning"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [error] 29#29: *1234 upstream timed out (110: Connection timed out) while reading response header from upstream, client: 10.0.0.1, server: api.example.com, request: \"GET /api/orders HTTP/1.1\", upstream: \"http://10.0.0.5:8080/api/orders\", host: \"api.example.com\"", "stated": "error"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [warn] 29#29: *1235 a client request body is buffered to a temporary file /var/cache/nginx/client_temp/0000000001, client: 10.0.0.1, server: api.example.com, request: \"POST /api/upload HTTP/1.1\", host: \"api.example.com\"", "stated": "warning"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [notice] 1#1: start worker processes", "stated": "notice"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [error] 29#29: *1236 no live upstreams while connecting to upstream, client: 10.0.0.1, server: api.example.com, request: \"GET /healthz HTTP/1.1\", upstream: \"http://backend/healthz\", host: \"api.example.com\"", "stated": "error"}
+{"format": "nginx/access", "line": "10.0.0.1 - - [11/Oct/2026:10:00:00 +0000] \"POST /api/v1/alerts/critical HTTP/1.1\" 201 64 \"-\" \"Alertmanager/0.27.0\"", "stated": "", "guess": "info"}
+{"format": "nginx/access", "line": "10.0.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /api/v1/orders HTTP/1.1\" 500 21 \"-\" \"okhttp/4.12.0\"", "stated": ""}
+{"format": "nginx/access", "line": "10.0.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /static/app.js HTTP/1.1\" 200 51234 \"https://shop.example.com/checkout/error?code=declined\" \"Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0\"", "stated": "", "guess": "info"}
+{"format": "ingress-nginx/access", "line": "10.244.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /api/health HTTP/1.1\" 200 2 \"-\" \"kube-probe/1.31\" 245 0.002 [default-api-80] [] 10.244.1.7:8080 2 0.002 200 3f1c9a2e8b7d4c1e9f2a5d6b7c8e9f01", "stated": "", "guess": "info"}
+{"format": "ingress-nginx/controller", "line": "I1011 10:00:00.123456       7 controller.go:193] \"Configuration changes detected, backend reload required\"", "stated": "info"}
+{"format": "apache/access", "line": "203.0.113.5 - - [11/Oct/2026:10:00:00 +0000] \"GET /wp-admin/install.php HTTP/1.1\" 404 196 \"-\" \"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)\"", "stated": ""}
+{"format": "apache24/error", "line": "[Sun Oct 11 10:00:00.123456 2026] [mpm_event:notice] [pid 1234:tid 140028315387648] AH00492: caught SIGWINCH, shutting down gracefully", "stated": "notice"}
+{"format": "apache24/error", "line": "[Sun Oct 11 10:00:00.123456 2026] [ssl:warn] [pid 1234:tid 140028315387648] AH01906: www.example.com:443:0 server certificate is a CA certificate (BasicConstraints: CA == TRUE !?)", "stated": "warning"}
+{"format": "apache24/error", "line": "[Sun Oct 11 10:00:00.123456 2026] [proxy:error] [pid 1234:tid 140028315387648] (111)Connection refused: AH00957: HTTP: attempt to connect to 127.0.0.1:8080 (localhost) failed", "stated": "error"}
+{"format": "haproxy/stderr", "line": "[WARNING]  (8) : Server be_app/app2 is UP, reason: Layer7 check passed, code: 200, check duration: 3ms. 2 active and 0 backup servers online. 0 sessions requeued, 0 total in queue.", "stated": "warning"}
+{"format": "haproxy/syslog", "line": "Oct 11 10:00:00 lb1 haproxy[1234]: Server be_app/app2 is UP, reason: Layer7 check passed, code: 200, check duration: 3ms. 2 active and 0 backup servers online. 0 sessions requeued, 0 total in queue.", "stated": ""}
+{"format": "traefik/v2-logfmt", "line": "time=\"2026-10-11T10:00:00Z\" level=error msg=\"service \\\"api@kubernetescrd\\\" error: unable to find the IP address for the container \\\"/web\\\": the server is ignored\" container=web-1a2b3c providerName=docker", "stated": "error"}
+{"format": "envoy/app", "line": "[2026-10-11 10:00:00.123][1][info][upstream] [source/common/upstream/cds_api_helper.cc:32] cds: add 3 cluster(s), remove 0 cluster(s)", "stated": "info"}
+{"format": "squid/cache", "line": "2026/10/11 10:00:00 kid1| Starting Squid Cache version 6.6 for x86_64-pc-linux-gnu...", "stated": ""}
+{"format": "squid/cache", "line": "2026/10/11 10:00:00 kid1| ERROR: No forward-proxy ports configured.", "stated": "error"}
+{"format": "iis/w3c", "line": "2026-10-11 10:00:00 10.0.0.5 POST /api/orders - 443 - 203.0.113.5 Mozilla/5.0+(Windows+NT+10.0;+Win64;+x64) https://shop.example.com/cart 500 0 0 1203", "stated": ""}
+{"format": "uwsgi/req", "line": "[pid: 12|app: 0|req: 42/128] 10.0.0.1 () {38 vars in 512 bytes} [Sun Oct 11 10:00:00 2026] GET /api/orders => generated 21 bytes in 3 msecs (HTTP/1.1 500) 2 headers in 80 bytes (1 switches on core 0)", "stated": "", "guess": "info"}
+{"format": "uwsgi/startup", "line": "*** Starting uWSGI 2.0.26 (64bit) on [Sun Oct 11 10:00:00 2026] ***", "stated": ""}
+{"format": "chromium", "line": "[1011/100000.123456:ERROR:bus.cc(407)] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory", "stated": "error"}
+{"format": "chromium", "line": "[1011/100000.123456:WARNING:sandbox_linux.cc(400)] InitializeSandbox() called with multiple threads in process gpu-process.", "stated": "warning"}
+{"format": "chromium", "line": "[1011/100000.123456:INFO:CONSOLE(12)] \"Uncaught TypeError: Cannot read properties of undefined (reading 'id')\", source: https://shop.example.com/app.js (12)", "stated": "info"}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [1234] LOG:  connection authorized: user=app database=appdb application_name=psql", "stated": "info"}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [1234] ERROR:  canceling statement due to statement timeout", "stated": "error"}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [1234] STATEMENT:  SELECT * FROM orders WHERE status = 'failed' FOR UPDATE", "stated": ""}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [1234] FATAL:  terminating connection due to administrator command", "stated": "critical"}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [27] LOG:  checkpoints are occurring too frequently (12 seconds apart)", "stated": "info"}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [1234] LOG:  unexpected EOF on client connection with an open transaction", "stated": "info"}
+{"format": "patroni", "line": "2026-10-11 10:00:00,123 INFO: no action. I am (pg-0), the leader with the lock", "stated": "info"}
+{"format": "patroni", "line": "2026-10-11 10:00:00,123 WARNING: Request failed to pg-1: GET http://10.0.0.6:8008/patroni (HTTPConnectionPool(host='10.0.0.6', port=8008): Max retries exceeded with url: /patroni (Caused by ProtocolError('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))))", "stated": "warning"}
+{"format": "pgbouncer", "line": "2026-10-11 10:00:02.000 UTC [1] WARNING C-0x55d5c1a2b3c4: (nodb)/(nouser)@10.0.0.5:50414 pooler error: no such database: reports", "stated": "warning"}
+{"format": "mysql8", "line": "2026-10-11T10:00:00.123456Z 0 [Warning] [MY-010055] [Server] IP address '203.0.113.9' could not be resolved: Name or service not known", "stated": "warning"}
+{"format": "mysql8", "line": "2026-10-11T10:00:00.123456Z 0 [System] [MY-013172] [Server] Received SHUTDOWN from user <via user signal>. Shutting down mysqld (Version: 8.0.39).", "stated": "info"}
+{"format": "mariadb", "line": "2026-10-11 10:00:00 0 [Note] InnoDB: Buffer pool(s) load completed at 261011 10:00:00", "stated": "notice"}
+{"format": "mariadb", "line": "2026-10-11 10:00:00 42 [Warning] Aborted connection 42 to db: 'app' user: 'app' host: '10.0.0.5' (Got timeout reading communication packets)", "stated": "warning"}
+{"format": "sqlserver/errorlog", "line": "2026-10-11 10:00:00.12 spid52      Error: 18456, Severity: 14, State: 8.", "stated": "error"}
+{"format": "sqlserver/errorlog", "line": "2026-10-11 10:00:00.12 Logon       Login failed for user 'sa'. Reason: Password did not match that for the login provided. [CLIENT: 203.0.113.9]", "stated": ""}
+{"format": "mongodb-json/cri", "line": "2026-10-11T10:00:00.123456789Z stdout F {\"t\":{\"$date\":\"2026-10-11T10:00:00.123+00:00\"},\"s\":\"I\",  \"c\":\"NETWORK\",  \"id\":22943,   \"ctx\":\"listener\",\"msg\":\"Connection accepted\",\"attr\":{\"remote\":\"10.0.0.5:50412\",\"connectionId\":42,\"connectionCount\":3}}", "stated": "info"}
+{"format": "redis", "line": "1:M 11 Oct 2026 10:00:00.123 * DB saved on disk", "stated": "notice"}
+{"format": "redis", "line": "1:M 11 Oct 2026 10:00:00.123 * Background saving terminated with success", "stated": "notice"}
+{"format": "redis", "line": "1:S 11 Oct 2026 10:00:00.123 * MASTER <-> REPLICA sync: Finished with success", "stated": "notice"}
+{"format": "redis", "line": "1:M 11 Oct 2026 10:00:00.123 # Possible SECURITY ATTACK detected. It looks like somebody is sending POST or Host: commands to Redis. This is likely due to an attacker attempting to use Cross Protocol Scripting to compromise your Redis instance. Connection from 10.0.0.9:51234 aborted.", "stated": "warning"}
+{"format": "elasticsearch", "line": "[2026-10-11T10:00:00,123][INFO ][o.e.c.r.a.AllocationService] [node-1] current.health=\"GREEN\" message=\"Cluster health status changed from [YELLOW] to [GREEN] (reason: [shards started [[logs-2026.10.11][0]]]).\" previous.health=\"YELLOW\" reason=\"shards started [[logs-2026.10.11][0]]\"", "stated": "info"}
+{"format": "elasticsearch8-ecs/cri", "line": "2026-10-11T10:00:00.123456789Z stdout F {\"@timestamp\":\"2026-10-11T10:00:00.123Z\", \"log.level\": \"WARN\", \"message\":\"high disk watermark [90%] exceeded on [AbCdEf][es-0][/usr/share/elasticsearch/data] free: 9.1gb[9.4%], shards will be relocated away from this node\", \"ecs.version\": \"1.2.0\",\"service.name\":\"ES_ECS\",\"event.dataset\":\"elasticsearch.server\"}", "stated": "warning"}
+{"format": "kafka", "line": "[2026-10-11 10:00:00,123] INFO [GroupCoordinator 1]: Preparing to rebalance group orders-consumer in state PreparingRebalance with old generation 12 (__consumer_offsets-3) (reason: Leader consumer-1 re-joining group during Stable) (kafka.coordinator.group.GroupCoordinator)", "stated": "info"}
+{"format": "kafka", "line": "[2026-10-11 10:00:00,123] WARN [Producer clientId=producer-1] Got error produce response with correlation id 42 on topic-partition orders-0, retrying (2147483646 attempts left). Error: NOT_LEADER_OR_FOLLOWER (org.apache.kafka.clients.producer.internals.Sender)", "stated": "warning"}
+{"format": "kafka-connect", "line": "[2026-10-11 10:00:00,123] ERROR [jdbc-sink|task-0] WorkerSinkTask{id=jdbc-sink-0} Task threw an uncaught and unrecoverable exception. Task is being killed and will not recover until manually restarted (org.apache.kafka.connect.runtime.WorkerTask:212)", "stated": "error"}
+{"format": "rabbitmq-3.13", "line": "2026-10-11 10:00:00.123456+00:00 [warning] <0.1234.0> closing AMQP connection <0.1234.0> (10.0.0.5:50412 -> 10.0.0.2:5672, vhost: '/', user: 'app'):", "stated": "warning"}
+{"format": "cassandra", "line": "INFO  [CompactionExecutor:3] 2026-10-11 10:00:00,123 CompactionTask.java:241 - Compacted (3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f01) 4 sstables to [/var/lib/cassandra/data/ks/orders-1a2b3c/nb-42-big,] to level=0.  12.345MiB to 12.000MiB (~97% of original) in 1,234ms.", "stated": "info"}
+{"format": "clickhouse", "line": "2026.10.11 10:00:00.123456 [ 1 ] {} <Warning> Context: Server was built in debug mode. It will work slowly.", "stated": "warning"}
+{"format": "influxdb2", "line": "ts=2026-10-11T10:00:00.123456Z lvl=info msg=\"Welcome to InfluxDB\" log_id=0abcDEF version=v2.7.10 commit=f302d9730c build_date=2024-08-16T20:19:28Z log_level=info", "stated": "info"}
+{"format": "etcd/cri", "line": "2026-10-11T10:00:00.123456789Z stderr F {\"level\":\"warn\",\"ts\":\"2026-10-11T10:00:00.123456Z\",\"caller\":\"etcdserver/util.go:170\",\"msg\":\"apply request took too long\",\"took\":\"112.345ms\",\"expected-duration\":\"100ms\",\"prefix\":\"read-only range \",\"request\":\"key:\\\"/registry/pods/default/\\\" \",\"response\":\"range_response_count:12 size:51234\"}", "stated": "warning"}
+{"format": "ceph/cluster-log", "line": "2026-10-11T10:00:00.123456+0000 mon.a (mon.0) 1234 : cluster [WRN] Health check failed: 1 osds down (OSD_DOWN)", "stated": "warning"}
+{"format": "ceph/cluster-log", "line": "2026-10-11T10:00:00.123456+0000 mgr.a (mgr.4123) 42 : cluster [DBG] pgmap v1234: 129 pgs: 129 active+clean; 1.2 GiB data, 3.6 GiB used, 296 GiB / 300 GiB avail", "stated": "debug"}
+{"format": "hclog/consul", "line": "2026-10-11T10:00:00.123Z [ERROR] agent.anti_entropy: failed to sync remote state: error=\"No cluster leader\"", "stated": "error"}
+{"format": "hclog/vault", "line": "2026-10-11T10:00:00.123Z [INFO]  core: vault is unsealed", "stated": "info"}
+{"format": "hclog/nomad", "line": "2026-10-11T10:00:00.123Z [WARN]  client.alloc_runner.task_runner: some environment variables not available for rendering: alloc_id=3f1c9a2e task=web keys=\"NOMAD_ADDR_db\"", "stated": "warning"}
+{"format": "klog", "line": "I1011 10:00:00.123456       1 leaderelection.go:268] successfully acquired lease kube-system/kube-controller-manager", "stated": "info"}
+{"format": "klog", "line": "E1011 10:00:00.123456       1 reflector.go:150] k8s.io/client-go/informers/factory.go:160: Failed to watch *v1.Endpoints: the server has asked for the client to provide credentials", "stated": "error"}
+{"format": "kubelet/syslog", "line": "Oct 11 10:00:00 node1 kubelet[1234]: I1011 10:00:00.123456    1234 kubelet.go:2412] \"SyncLoop (probe)\" probe=\"readiness\" status=\"\" pod=\"default/web-7d9f8b6c4-x2x9z\"", "stated": "info"}
+{"format": "cert-manager", "line": "I1011 10:00:00.123456       1 conditions.go:192] Found status change for Certificate \"web-tls\" condition \"Ready\": \"False\" -> \"True\"; setting lastTransitionTime to 2026-10-11 10:00:00.123456 +0000 UTC m=+12.345", "stated": "info"}
+{"format": "calico/felix", "line": "2026-10-11 10:00:00.123 [INFO][73] felix/int_dataplane.go 1953: Received interface update msg=&intdataplane.ifaceStateUpdate{Name:\"cali1a2b3c4d5e6\", State:\"up\", Index:42}", "stated": "info"}
+{"format": "cilium", "line": "level=info msg=\"Rewrote endpoint BPF program\" ciliumEndpointName=default/web-7d9f8b6c4-x2x9z containerID=1a2b3c4d5e endpointID=1234 identity=5678 ipv4=10.0.1.23 subsys=endpoint", "stated": "info"}
+{"format": "argocd", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"Comparing app state (cluster: https://kubernetes.default.svc, namespace: default)\" application=argocd/web", "stated": "info"}
+{"format": "coredns", "line": "[INFO] plugin/reload: Running configuration SHA512 = 1a2b3c4d5e6f", "stated": "info"}
+{"format": "coredns", "line": "[ERROR] plugin/errors: 2 api.example.com. AAAA: read udp 10.244.0.5:51234->10.0.0.10:53: i/o timeout", "stated": "error"}
+{"format": "dockerd", "line": "time=\"2026-10-11T10:00:00.123456789Z\" level=info msg=\"ignoring event\" container=1a2b3c4d5e6f module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"", "stated": "info"}
+{"format": "containerd", "line": "time=\"2026-10-11T10:00:00.123456789Z\" level=error msg=\"ContainerStatus for \\\"1a2b3c\\\" failed\" error=\"rpc error: code = NotFound desc = an error occurred when try to find container \\\"1a2b3c\\\": not found\"", "stated": "error"}
+{"format": "prometheus2", "line": "ts=2026-10-11T10:00:00.123Z caller=compact.go:576 level=info component=tsdb msg=\"write block\" mint=1791705600000 maxt=1791712800000 ulid=01J9XYZ duration=123.4ms", "stated": "info"}
+{"format": "prometheus3", "line": "time=2026-10-11T10:00:00.123Z level=WARN source=scrape.go:1847 msg=\"Error on ingesting out-of-order samples\" component=\"scrape manager\" scrape_pool=node target=http://10.0.0.5:9100/metrics num_dropped=12", "stated": "warning"}
+{"format": "alertmanager", "line": "ts=2026-10-11T10:00:00.123Z caller=dispatch.go:353 level=error component=dispatcher msg=\"Notify for alerts failed\" num_alerts=2 err=\"slack/slack[0]: notify retry canceled due to unrecoverable error after 1 attempts: channel \\\"#ops\\\": unexpected status code 404: no_service\"", "stated": "error"}
+{"format": "loki", "line": "level=info ts=2026-10-11T10:00:00.123456789Z caller=table_manager.go:136 index-store=tsdb-2024-04-01 msg=\"uploading tables\"", "stated": "info"}
+{"format": "grafana", "line": "logger=sqlstore t=2026-10-11T10:00:00.123456789Z level=info msg=\"Connecting to DB\" dbtype=sqlite3", "stated": "info"}
+{"format": "fluent-bit", "line": "[2026/10/11 10:00:00] [ info] [input:tail:tail.0] inotify_fs_add(): inode=1234567 watch_fd=12 name=/var/log/containers/web-7d9f8b6c4-x2x9z_default_web-1a2b3c.log", "stated": "info"}
+{"format": "fluentd", "line": "2026-10-11 10:00:00 +0000 [warn]: #0 [out_es] failed to flush the buffer. retry_times=3 next_retry_time=2026-10-11 10:00:16 +0000 chunk=\"61f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6\" error_class=Faraday::ConnectionFailed error=\"Connection refused - connect(2) for 10.0.0.9:9200 (Errno::ECONNREFUSED)\"", "stated": "warning"}
+{"format": "vector", "line": "2026-10-11T10:00:00.123456Z ERROR sink{component_kind=\"sink\" component_id=es component_type=elasticsearch}: vector::sinks::util::retries: Not retriable; dropping the request. reason=\"error type: mapper_parsing_exception, reason: failed to parse field [level]\" internal_log_rate_limit=true", "stated": "error"}
+{"format": "logstash", "line": "[2026-10-11T10:00:00,123][WARN ][logstash.outputs.elasticsearch][main] Attempted to resurrect connection to dead ES instance, but got an error {:url=>\"http://es:9200/\", :exception=>LogStash::Outputs::ElasticSearch::HttpClient::Pool::HostUnreachableError, :message=>\"Elasticsearch Unreachable: [http://es:9200/][Manticore::SocketException] Connection refused\"}", "stated": "warning"}
+{"format": "filebeat/cri", "line": "2026-10-11T10:00:00.123456789Z stderr F {\"log.level\":\"error\",\"@timestamp\":\"2026-10-11T10:00:00.123Z\",\"log.logger\":\"publisher_pipeline_output\",\"message\":\"Failed to connect to backoff(elasticsearch(http://es:9200)): Get \\\"http://es:9200\\\": dial tcp 10.0.0.9:9200: connect: connection refused\",\"service.name\":\"filebeat\",\"ecs.version\":\"1.6.0\"}", "stated": "error"}
+{"format": "datadog-agent", "line": "2026-10-11 10:00:00 UTC | CORE | WARN | (pkg/collector/corechecks/loader.go:65 in Load) | core.loader: could not configure check nvidia_jetson: tegrastats not found", "stated": "warning"}
+{"format": "terraform", "line": "Error: Failed to query available provider packages", "stated": "error"}
+{"format": "terraform", "line": "Plan: 3 to add, 1 to change, 0 to destroy.", "stated": ""}
+{"format": "ansible", "line": "TASK [nginx : Restart nginx] ****************************************************", "stated": ""}
+{"format": "ansible", "line": "changed: [web01]", "stated": ""}
+{"format": "ansible", "line": "[WARNING]: Platform linux on host web01 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could change the meaning of that path.", "stated": "warning"}
+{"format": "github-actions/raw-log", "line": "2026-10-11T10:00:00.1234567Z ##[error]Process completed with exit code 1.", "stated": "error"}
+{"format": "github-actions/raw-log", "line": "2026-10-11T10:00:00.1234567Z ##[warning]Node.js 16 actions are deprecated. Please update the following actions to use Node.js 20: actions/checkout@v3.", "stated": "warning"}
+{"format": "github-actions/raw-log", "line": "2026-10-11T10:00:00.1234567Z ##[group]Run npm ci", "stated": ""}
+{"format": "jenkins/console", "line": "[Pipeline] sh", "stated": ""}
+{"format": "jenkins/console", "line": "Finished: FAILURE", "stated": ""}
+{"format": "buildkit/plain", "line": "#8 [web 3/7] RUN npm ci", "stated": ""}
+{"format": "buildkit/plain", "line": "ERROR: failed to solve: process \"/bin/sh -c npm ci\" did not complete successfully: exit code: 1", "stated": "error"}
+{"format": "pip", "line": "ERROR: Could not find a version that satisfies the requirement torch==2.9.9 (from versions: 2.4.0, 2.4.1, 2.5.0)", "stated": "error"}
+{"format": "pip", "line": "WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager.", "stated": "warning"}
+{"format": "cargo", "line": "warning: unused import: `std::io::Read`", "stated": "warning"}
+{"format": "cargo", "line": "error: could not compile `orders` (bin \"orders\") due to 2 previous errors", "stated": "error"}
+{"format": "gcc", "line": "src/main.c:12:5: warning: implicit declaration of function 'foo' [-Wimplicit-function-declaration]", "stated": "warning"}
+{"format": "gcc", "line": "src/main.c:20:1: error: expected ';' before '}' token", "stated": "error"}
+{"format": "go build", "line": "./main.go:12:2: undefined: handler", "stated": ""}
+{"format": "python/basic", "line": "WARNING:urllib3.connectionpool:Connection pool is full, discarding connection: api.example.com. Connection pool size: 10", "stated": "warning"}
+{"format": "python/cookbook", "line": "2026-10-11 10:00:00,123 - app.payments - CRITICAL - Payment provider unreachable for 300s, disabling checkout", "stated": "critical"}
+{"format": "django/simple", "line": "ERROR Internal Server Error: /api/orders/", "stated": "error"}
+{"format": "werkzeug", "line": "127.0.0.1 - - [11/Oct/2026 10:00:00] \"POST /login HTTP/1.1\" 401 -", "stated": ""}
+{"format": "werkzeug", "line": "WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.", "stated": "warning"}
+{"format": "celery", "line": "[2026-10-11 10:00:00,123: INFO/MainProcess] Task payments.tasks.charge[3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f01] succeeded in 0.512s: None", "stated": "info"}
+{"format": "celery-beat", "line": "[2026-10-11 10:00:00,123: INFO/MainProcess] Scheduler: Sending due task cleanup-failed-jobs (jobs.tasks.cleanup_failed)", "stated": "info"}
+{"format": "gunicorn", "line": "[2026-10-11 10:00:00 +0000] [1] [INFO] Handling signal: term", "stated": "info"}
+{"format": "uvicorn", "line": "INFO:     Shutting down", "stated": "info"}
+{"format": "uvicorn", "line": "ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 8000): address already in use", "stated": "error"}
+{"format": "vllm", "line": "INFO 10-11 10:00:00 api_server.py:527] vLLM API server version 0.6.3", "stated": "info"}
+{"format": "vllm", "line": "WARNING 10-11 10:00:00 arg_utils.py:1019] Chunked prefill is enabled by default for models with max_model_len > 32K.", "stated": "warning"}
+{"format": "nccl", "line": "node1:1234:1290 [0] NCCL INFO Channel 00/02 :    0   1", "stated": "info"}
+{"format": "nccl", "line": "node1:1234:1290 [0] misc/socket.cc:484 NCCL WARN socketStartConnect: Connect to 10.0.0.6<45678> failed : Software caused connection abort", "stated": "warning"}
+{"format": "rails/logger", "line": "I, [2026-10-11T10:00:00.123456 #1]  INFO -- : [3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f01] Started POST \"/api/payments\" for 10.0.0.7 at 2026-10-11 10:00:00 +0000", "stated": "info"}
+{"format": "rails/logger", "line": "W, [2026-10-11T10:00:00.123456 #1]  WARN -- : [3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f01] Can't verify CSRF token authenticity.", "stated": "warning"}
+{"format": "rails7/stdout", "line": "[3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f01] Completed 422 Unprocessable Entity in 12ms (Views: 0.2ms | ActiveRecord: 3.1ms | Allocations: 2345)", "stated": ""}
+{"format": "sidekiq", "line": "2026-10-11T10:00:00.123Z pid=7 tid=2kqj class=InvoiceJob jid=b4a577edbccf1d805744efa9 INFO: start", "stated": "info"}
+{"format": "sidekiq", "line": "2026-10-11T10:00:00.123Z pid=7 tid=2kqj WARN: {\"context\":\"Job raised exception\",\"job\":{\"retry\":true,\"queue\":\"default\",\"class\":\"InvoiceJob\",\"args\":[42],\"jid\":\"b4a577edbccf1d805744efa9\"}}", "stated": "warning"}
+{"format": "puma", "line": "* Puma version: 6.4.3 (ruby 3.3.5-p100) (\"The Eagle of Durango\")", "stated": ""}
+{"format": "puma", "line": "* Listening on http://0.0.0.0:3000", "stated": ""}
+{"format": "php-fpm", "line": "[11-Oct-2026 10:00:00] WARNING: [pool www] child 42 exited on signal 9 (SIGKILL) after 12.345678 seconds from start", "stated": "warning"}
+{"format": "php-fpm", "line": "[11-Oct-2026 10:00:00] NOTICE: [pool www] child 43 started", "stated": "notice"}
+{"format": "php/error_log", "line": "[11-Oct-2026 10:00:00 UTC] PHP Notice:  Trying to access array offset on value of type null in /var/www/html/report.php on line 88", "stated": "notice"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] production.ERROR: Call to a member function charge() on null {\"userId\":42,\"exception\":\"[object] (Error(code: 0): Call to a member function charge() on null at /var/www/app/Http/Controllers/PaymentController.php:42)\"}", "stated": "error"}
+{"format": "laravel", "line": "[2026-10-11 10:00:00] local.INFO: Queue worker started {\"queue\":\"default\"}", "stated": "info"}
+{"format": "symfony/monolog", "line": "[2026-10-11T10:00:00.123456+00:00] doctrine.DEBUG: SELECT t0.id AS id_1 FROM orders t0 WHERE t0.status = ? [\"failed\"] []", "stated": "debug"}
+{"format": "codeigniter3", "line": "ERROR - 2026-10-11 10:00:00 --> 404 Page Not Found: wp-login.php", "stated": "error"}
+{"format": "codeigniter3", "line": "DEBUG - 2026-10-11 10:00:00 --> UTF-8 Support Enabled", "stated": "debug"}
+{"format": "codeigniter3", "line": "INFO - 2026-10-11 10:00:00 --> Config Class Initialized", "stated": "info"}
+{"format": "codeigniter3", "line": "ERROR - 2026-10-11 10:00:00 --> Severity: Warning --> Undefined variable $total /var/www/application/controllers/Cart.php 42", "stated": "error"}
+{"format": "wordpress", "line": "[11-Oct-2026 10:00:00 UTC] PHP Warning:  Undefined array key \"HTTP_HOST\" in /var/www/html/wp-config.php on line 92", "stated": "warning"}
+{"format": "winston-json/docker-json-file", "line": "{\"level\":\"warn\",\"message\":\"Rate limit approaching\",\"service\":\"api\",\"timestamp\":\"2026-10-11T10:00:00.123Z\"}", "stated": "warning"}
+{"format": "zerolog-json/docker-json-file", "line": "{\"level\":\"warn\",\"time\":\"2026-10-11T10:00:00Z\",\"message\":\"slow query\",\"duration_ms\":1532}", "stated": "warning"}
+{"format": "morgan/dev", "line": "GET /api/orders 500 12.345 ms - 21", "stated": ""}
+{"format": "npm", "line": "npm error code ENOENT", "stated": "error"}
+{"format": "npm", "line": "npm warn config production Use `--omit=dev` instead.", "stated": "warning"}
+{"format": "pnpm", "line": "WARN  deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it.", "stated": "warning"}
+{"format": "yarn-berry", "line": "➤ YN0000: · Yarn 4.5.0", "stated": ""}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM     LOG [NestApplication] Nest application successfully started +3ms", "stated": "info"}
+{"format": "springboot3", "line": "2026-10-11T10:00:00.123Z ERROR 1 --- [orders] [nio-8080-exec-7] o.h.engine.jdbc.spi.SqlExceptionHelper   : ERROR: deadlock detected", "stated": "error"}
+{"format": "springboot3", "line": "2026-10-11T10:00:00.123Z  WARN 1 --- [orders] [           main] o.s.b.a.m.MustacheAutoConfiguration      : Cannot find template location: classpath:/templates/ (please add some templates, check your Mustache configuration, or set spring.mustache.check-template-location=false)", "stated": "warning"}
+{"format": "logback", "line": "10:00:00.123 [http-nio-8080-exec-2] INFO  c.e.o.web.OrderController - Order 42 marked as FAILED by payment provider", "stated": "info"}
+{"format": "log4j2/default", "line": "10:00:00.123 [main] ERROR com.example.App - Startup failed", "stated": "error"}
+{"format": "tomcat/catalina", "line": "11-Oct-2026 10:00:00.123 INFO [main] org.apache.coyote.AbstractProtocol.start Starting ProtocolHandler [\"http-nio-8080\"]", "stated": "info"}
+{"format": "jetty9/stderrlog", "line": "2026-10-11 10:00:00.123:WARN:oejs.HttpChannel:qtp1234567-42: /api/orders", "stated": "warning"}
+{"format": "jetty9/stderrlog", "line": "2026-10-11 10:00:00.123:INFO:oejs.Server:main: Started @1234ms", "stated": "info"}
+{"format": "jetty12/slf4j-simple", "line": "[main] INFO org.eclipse.jetty.server.Server - Started oejs.Server@1a2b3c4d{STARTING}[12.0.14,sto=0] @1234ms", "stated": "info"}
+{"format": "gradle", "line": "> Task :app:compileJava FAILED", "stated": ""}
+{"format": "gradle", "line": "FAILURE: Build failed with an exception.", "stated": ""}
+{"format": "maven", "line": "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.1:test (default-test) on project orders: There are test failures.", "stated": "error"}
+{"format": "hibernate/show_sql", "line": "Hibernate: select o1_0.id,o1_0.status from orders o1_0 where o1_0.status=?", "stated": ""}
+{"format": "jvm/unified-gc", "line": "[2026-10-11T10:00:00.123+0000][12.345s][info][gc] GC(42) Pause Young (Normal) (G1 Evacuation Pause) 512M->128M(1024M) 12.345ms", "stated": "info"}
+{"format": "jvm/stderr", "line": "Exception in thread \"main\" java.lang.IllegalStateException: Failed to load ApplicationContext", "stated": ""}
+{"format": "hadoop", "line": "2026-10-11 10:00:00,123 WARN org.apache.hadoop.util.NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable", "stated": "warning"}
+{"format": "spark", "line": "26/10/11 10:00:00 ERROR Executor: Exception in task 3.0 in stage 12.0 (TID 42)", "stated": "error"}
+{"format": "akka", "line": "[ERROR] [10/11/2026 10:00:00.123] [OrderSystem-akka.actor.default-dispatcher-5] [akka://OrderSystem/user/orders] Order 42 failed", "stated": "error"}
+{"format": "sbt", "line": "[info] welcome to sbt 1.10.2 (Eclipse Adoptium Java 21.0.4)", "stated": "info"}
+{"format": "sbt", "line": "[error] (Compile / compileIncremental) Compilation failed", "stated": "error"}
+{"format": "sbt", "line": "[warn] there were 3 deprecation warnings; re-run with -deprecation for details", "stated": "warning"}
+{"format": "mel/console", "line": "info: Microsoft.Hosting.Lifetime[0]\n      Application started. Press Ctrl+C to shut down.", "stated": "info"}
+{"format": "mel/console", "line": "warn: Microsoft.EntityFrameworkCore.Model.Validation[10400]\n      Sensitive data logging is enabled. Log entries and exception messages may include sensitive application data; this mode should only be enabled during development.", "stated": "warning"}
+{"format": "serilog/console", "line": "[10:00:00 WRN] Retrying HTTP request after 2000ms (attempt 2 of 3)", "stated": "warning"}
+{"format": "nlog", "line": "2026-10-11 10:00:00.1234|ERROR|MyApp.Services.PaymentService|Charge failed for order 42", "stated": "error"}
+{"format": "log4net", "line": "2026-10-11 10:00:00,123 [5] ERROR MyApp.Jobs.Sync [(null)] - Sync failed", "stated": "error"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"Pulled image\" image=\"nginx:1.27\" took=3.2s", "stated": "info"}
+{"format": "zap/cri-json", "line": "2026-10-11T10:00:00.123456789Z stderr F {\"level\":\"error\",\"ts\":1791712800.123,\"caller\":\"server/handler.go:42\",\"msg\":\"request failed\",\"error\":\"context deadline exceeded\"}", "stated": "error"}
+{"format": "slog/text", "line": "time=2026-10-11T10:00:00.000Z level=INFO msg=\"server started\" addr=:8080", "stated": "info"}
+{"format": "slog/default", "line": "2026/10/11 10:00:00 ERROR request failed method=POST path=/api/orders err=\"context canceled\"", "stated": "error"}
+{"format": "go/log net/http", "line": "2026/10/11 10:00:00 http: TLS handshake error from 203.0.113.9:51234: remote error: tls: bad certificate", "stated": ""}
+{"format": "go/log net/http", "line": "2026/10/11 10:00:00 http: panic serving 10.0.0.5:51234: runtime error: invalid memory address or nil pointer dereference", "stated": ""}
+{"format": "go/log", "line": "2026/10/11 10:00:00 Starting server on :8080", "stated": ""}
+{"format": "ollama/slog", "line": "time=2026-10-11T10:00:00.123Z level=INFO source=server.go:123 msg=\"llama runner started in 2.34 seconds\"", "stated": "info"}
+{"format": "tracing-fmt", "line": "2026-10-11T10:00:00.123456Z  WARN my_app::cache: cache miss ratio high ratio=0.42", "stated": "warning"}
+{"format": "env_logger", "line": "[2026-10-11T10:00:00Z INFO  my_app::server] listening on 0.0.0.0:8080", "stated": "info"}
+{"format": "phoenix", "line": "10:00:00.123 [info] GET /api/orders", "stated": "info"}
+{"format": "phoenix", "line": "10:00:00.123 request_id=F1a2b3c4d5e6 [info] Sent 200 in 12ms", "stated": "info"}
+{"format": "phoenix", "line": "10:00:00.123 [error] GenServer MyApp.Worker terminating", "stated": "error"}
+{"format": "erlang/otp-logger", "line": "2026-10-11T10:00:00.123456+00:00 notice: application: mnesia, exited: stopped, type: temporary", "stated": "notice"}
+{"format": "fail2ban", "line": "2026-10-11 10:00:00,123 fail2ban.actions        [1234]: NOTICE  [sshd] Ban 203.0.113.9", "stated": "notice"}
+{"format": "fail2ban", "line": "2026-10-11 10:00:00,123 fail2ban.filter         [1234]: INFO    [sshd] Found 203.0.113.9 - 2026-10-11 10:00:00", "stated": "info"}
+{"format": "fail2ban", "line": "2026-10-11 10:00:00,123 fail2ban.actions        [1234]: WARNING [sshd] 203.0.113.9 already banned", "stated": "warning"}
+{"format": "suricata/fast.log", "line": "10/11/2026-10:00:00.123456  [**] [1:2210020:2] SURICATA STREAM ESTABLISHED packet out of window [**] [Classification: Generic Protocol Command Decode] [Priority: 3] {TCP} 10.0.0.5:443 -> 203.0.113.9:51234", "stated": "", "guess": "info"}
+{"format": "suricata-6/suricata.log", "line": "11/10/2026 -- 10:00:00 - <Notice> - all 5 packet processing threads, 4 management threads initialized, engine started.", "stated": "notice"}
+{"format": "falco", "line": "10:00:00.123456789: Warning Sensitive file opened for reading by non-trusted program (user=root user_loginuid=-1 program=cat command=cat /etc/shadow pid=4321 file=/etc/shadow parent=bash container_id=host image=<NA>)", "stated": "warning"}
+{"format": "falco", "line": "10:00:00.123456789: Notice A shell was spawned in a container with an attached terminal (user=root user_loginuid=-1 k8s.ns=default k8s.pod=web container=1a2b3c4d5e6f shell=bash parent=runc cmdline=bash terminal=34816 container_id=1a2b3c4d5e6f image=nginx)", "stated": "notice"}
+{"format": "crowdsec", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"Ip 203.0.113.9 performed 'crowdsecurity/ssh-bf' (6 events over 1.234s) at 2026-10-11 10:00:00.123 +0000 UTC\"", "stated": "info"}
+{"format": "clamd", "line": "Sun Oct 11 10:00:00 2026 -> /var/www/uploads/invoice.pdf: Pdf.Exploit.CVE_2018_4993-6497296-0 FOUND", "stated": ""}
+{"format": "freshclam", "line": "Sun Oct 11 10:00:00 2026 -> WARNING: Your ClamAV installation is OUTDATED!", "stated": "warning"}
+{"format": "wazuh/alerts.log", "line": "Rule: 5716 (level 5) -> 'sshd: authentication failed.'", "stated": ""}
+{"format": "postfix", "line": "Oct 11 10:00:00 mail postfix/smtpd[2345]: connect from unknown[203.0.113.7]", "stated": ""}
+{"format": "postfix", "line": "Oct 11 10:00:00 mail postfix/smtpd[2345]: lost connection after AUTH from unknown[203.0.113.7]", "stated": ""}
+{"format": "postfix", "line": "Oct 11 10:00:00 mail postfix/qmgr[1234]: 4F2A51C0F12: from=<alerts@example.com>, size=2048, nrcpt=1 (queue active)", "stated": ""}
+{"format": "postfix", "line": "Oct 11 10:00:00 mail postfix/smtp[2347]: 4F2A51C0F12: to=<bob@example.net>, relay=mx.example.net[198.51.100.20]:25, delay=0.5, delays=0.1/0/0.2/0.2, dsn=5.1.1, status=bounced (host mx.example.net[198.51.100.20] said: 550 5.1.1 <bob@example.net>: Recipient address rejected: User unknown in virtual mailbox table (in reply to RCPT TO command))", "stated": ""}
+{"format": "dovecot", "line": "Oct 11 10:00:00 mail dovecot: imap-login: Disconnected: Connection closed (auth failed, 3 attempts in 12 secs): user=<alice@example.com>, method=PLAIN, rip=203.0.113.9, lip=10.0.0.2, TLS, session=<dGVzdA>", "stated": ""}
+{"format": "exim/mainlog", "line": "2026-10-11 10:00:00 1qABCD-000123-AB <= alerts@example.com H=localhost (web01) [127.0.0.1] P=esmtp S=2048 id=20261011100000.1234@web01", "stated": ""}
+{"format": "exim/mainlog", "line": "2026-10-11 10:00:00 1qABCD-000123-AB ** bob@example.net R=dnslookup T=remote_smtp H=mx.example.net [198.51.100.20]: SMTP error from remote mail server after RCPT TO:<bob@example.net>: 550 5.1.1 User unknown", "stated": ""}
+{"format": "opendkim", "line": "Oct 11 10:00:00 mail opendkim[812]: 4F2A51C0F12: DKIM-Signature field added (s=mail, d=example.com)", "stated": ""}
+{"format": "bind", "line": "Oct 11 10:00:00 ns1 named[700]: zone example.com/IN: loaded serial 2026101101", "stated": ""}
+{"format": "unbound", "line": "Oct 11 10:00:00 ns1 unbound: [812:0] info: generate keytag query _ta-4f66. NULL IN", "stated": "info"}
+{"format": "unbound", "line": "Oct 11 10:00:00 ns1 unbound: [812:0] error: SERVFAIL <example.com. A IN>: all the configured stub or forward servers failed, at zone . upstream server timeout", "stated": "error"}
+{"format": "dnsmasq", "line": "Oct 11 10:00:00 gw dnsmasq-dhcp[812]: DHCPACK(br0) 10.0.0.42 aa:bb:cc:dd:ee:ff laptop", "stated": ""}
+{"format": "pihole-ftl-v6", "line": "2026-10-11 10:00:00.123 UTC [1234M] INFO: ########## FTL started on pi.hole! ##########", "stated": "info"}
+{"format": "pihole-ftl-v6", "line": "2026-10-11 10:00:00.123 UTC [1234/T1240] WARNING: Long-term load (15min avg) larger than number of processors: 4.2 > 4", "stated": "warning"}
+{"format": "home-assistant", "line": "2026-10-11 10:00:00.123 WARNING (MainThread) [homeassistant.components.http.ban] Login attempt or request with invalid authentication from 203.0.113.9 (203.0.113.9). Requested URL: '/auth/login_flow/3f1c9a2e'. (Mozilla/5.0)", "stated": "warning"}
+{"format": "home-assistant", "line": "2026-10-11 10:00:00.123 ERROR (MainThread) [homeassistant.setup] Setup failed for 'zha': Integration failed to initialize.", "stated": "error"}
+{"format": "zigbee2mqtt", "line": "[2026-10-11 10:00:00] info: \tz2m: Logging to console, file (filename: log.log)", "stated": "info"}
+{"format": "zigbee2mqtt", "line": "[2026-10-11 10:00:00] error: \tz2m: Failed to ping 'living_room_plug' (attempt 1/1, Read after write failed)", "stated": "error"}
+{"format": "mosquitto", "line": "1791712800: New client connected from 10.0.0.42:51234 as sensor-1 (p2, c1, k60, u'iot').", "stated": ""}
+{"format": "mosquitto", "line": "1791712800: Error: Address in use", "stated": "error"}
+{"format": "mosquitto", "line": "1791712800: Warning: Mosquitto should not be run as root/administrator.", "stated": "warning"}
+{"format": "plex", "line": "Oct 11, 2026 10:00:00.123 [0x7f1a2b3c4d50] INFO - Plex Media Server v1.41.0.8994-f2c27da23 - ubuntu docker x86_64 - build: linux-x86_64 debian - GMT 00:00", "stated": "info"}
+{"format": "jellyfin", "line": "[10:00:00] [INF] [12] Emby.Server.Implementations.ApplicationHost: Jellyfin version: 10.9.11", "stated": "info"}
+{"format": "jellyfin", "line": "[10:00:00] [ERR] [42] MediaBrowser.MediaEncoding.Transcoding.TranscodeManager: FFmpeg exited with code 1", "stated": "error"}
+{"format": "openvpn", "line": "2026-10-11 10:00:00 alice/203.0.113.9:51234 TLS Error: TLS key negotiation failed to occur within 60 seconds (check your network connectivity)", "stated": ""}
+{"format": "strongswan", "line": "Oct 11 10:00:00 vpn charon[1234]: 12[IKE] <conn1|3> IKE_SA conn1[3] established between 10.0.0.2[vpn.example.com]...203.0.113.9[203.0.113.9]", "stated": ""}
+{"format": "asterisk", "line": "[Oct 11 10:00:00] NOTICE[1234]: res_pjsip/pjsip_distributor.c:676 log_failed_request: Request 'REGISTER' from '\"100\" <sip:100@203.0.113.9>' failed for '203.0.113.9:5060' (callid: 1a2b3c4d) - No matching endpoint found", "stated": "notice"}
+{"format": "asterisk", "line": "[Oct 11 10:00:00] VERBOSE[1234][C-00000001] pbx.c: Executing [100@from-internal:1] Dial(\"PJSIP/101-00000001\", \"PJSIP/100,30\") in new stack", "stated": "debug"}
+{"format": "freeswitch", "line": "2026-10-11 10:00:00.123456 [WARNING] sofia_reg.c:1854 SIP auth failure (REGISTER) on sofia profile 'internal' for [100@10.0.0.2] from ip 203.0.113.9", "stated": "warning"}
+{"format": "kamailio", "line": "Oct 11 10:00:00 sip kamailio[1234]: ERROR: <core> [core/tcp_main.c:4808]: tcpconn_main_timeout(): connect 203.0.113.9:5060 failed (timeout)", "stated": "error"}
+{"format": "go/log.Fatal", "line": "2026/10/11 10:00:00 listen tcp :80: bind: permission denied", "stated": ""}
+{"format": "go/log.Fatal", "line": "2026/10/11 10:00:00 open /data/app.db: permission denied", "stated": ""}
+{"format": "docker/cli", "line": "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: Get \"http://%2Fvar%2Frun%2Fdocker.sock/v1.47/containers/json\": dial unix /var/run/docker.sock: connect: permission denied", "stated": ""}
+{"format": "bash", "line": "bash: /usr/local/bin/deploy.sh: Permission denied", "stated": ""}
+{"format": "mysql/client", "line": "ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)", "stated": "error"}
+{"format": "psql", "line": "psql: error: connection to server on socket \"/var/run/postgresql/.s.PGSQL.5432\" failed: FATAL:  Peer authentication failed for user \"postgres\"", "stated": "error"}
+{"format": "git", "line": "warning: in the working copy of 'src/app.js', LF will be replaced by CRLF the next time Git touches it", "stated": "warning"}
+{"format": "git", "line": "hint: Updates were rejected because the tip of your current branch is behind", "stated": ""}
+{"format": "git", "line": "fatal: unable to access 'https://github.com/acme/app.git/': Could not resolve host: github.com", "stated": "critical"}
+{"format": "docker/cli", "line": "WARNING: The requested image's platform (linux/amd64) does not match the detected host platform (linux/arm64/v8) and no specific platform was requested", "stated": "warning"}
+{"format": "helm", "line": "WARNING: Kubernetes configuration file is group-readable. This is insecure. Location: /root/.kube/config", "stated": "warning"}
+{"format": "kubectl", "line": "error: You must be logged in to the server (Unauthorized)", "stated": "error"}
+{"format": "kubectl", "line": "E1011 10:00:00.123456   12345 memcache.go:265] couldn't get current server API group list: Get \"https://10.0.0.1:6443/api?timeout=32s\": dial tcp 10.0.0.1:6443: connect: connection refused", "stated": "error"}
+{"format": "ssh -v", "line": "debug1: Reading configuration data /etc/ssh/ssh_config", "stated": "debug"}
+{"format": "ssh", "line": "Warning: Permanently added 'github.com' (ED25519) to the list of known hosts.", "stated": "warning"}
+{"format": "s6-overlay", "line": "s6-rc: info: service s6rc-oneshot-runner: starting", "stated": "info"}
+{"format": "s6-overlay", "line": "s6-rc: warning: unable to start service svc-nginx: command exited 1", "stated": "warning"}
+{"format": "bitnami", "line": "nginx 10:00:00.12 INFO  ==> ** Starting NGINX setup **", "stated": "info"}
+{"format": "bitnami", "line": "postgresql 10:00:00.12 WARN  ==> You set the environment variable ALLOW_EMPTY_PASSWORD=yes. For safety reasons, do not use this flag in a production environment.", "stated": "warning"}
+{"format": "linuxserver/init", "line": "[custom-init] No custom files found, skipping...", "stated": ""}
+{"format": "vite", "line": "10:00:00 AM [vite] hmr update /src/App.tsx", "stated": ""}
+{"format": "strapi", "line": "[2026-10-11 10:00:00.123] info: Server started", "stated": "info"}
+{"format": "ghost", "line": "[2026-10-11 10:00:00] INFO \"GET /ghost/api/admin/site/\" 200 12ms", "stated": "info"}
+{"format": "vaultwarden", "line": "[2026-10-11 10:00:00.123][vaultwarden::api::identity][ERROR] Username or password is incorrect. Try again. IP: 203.0.113.9. Username: alice@example.com.", "stated": "error"}
+{"format": "paperless-ngx", "line": "[2026-10-11 10:00:00,123] [INFO] [paperless.consumer] Consuming invoice-42.pdf", "stated": "info"}
+{"format": "adguard-home", "line": "2026/10/11 10:00:00.123456 [info] AdGuard Home, version v0.107.54", "stated": "info"}
+{"format": "adguard-home", "line": "2026/10/11 10:00:00.123456 [error] dnsproxy: upstream 1.1.1.1:53: exchanging: read udp 10.0.0.5:51234->1.1.1.1:53: i/o timeout", "stated": "error"}
+{"format": "portainer", "line": "2026/10/11 10:00:00AM INF github.com/portainer/portainer/api/cmd/portainer/main.go:123 > starting Portainer | build_number=1234 version=2.21.3", "stated": "info"}
+{"format": "watchtower", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"Found new nginx:latest image (1a2b3c4d5e6f)\"", "stated": "info"}
+{"format": "immich/nestjs", "line": "[Nest] 7  - 10/11/2026, 10:00:00 AM     LOG [Microservices:MetadataService] Initialized local reverse geocoder", "stated": "info"}
+{"format": "uptime-kuma", "line": "2026-10-11T10:00:00+00:00 [MONITOR] WARN: Monitor #3 'api': Failing: Request failed with status code 503 | Interval: 60 seconds | Type: http | Down Count: 0 | Resend Interval: 0", "stated": "warning"}
+{"format": "meilisearch", "line": "[2026-10-11T10:00:00Z INFO  actix_server::builder] starting 4 workers", "stated": "info"}
+{"format": "qdrant", "line": "2026-10-11T10:00:00.123456Z  INFO qdrant::actix: Qdrant HTTP listening on 6333", "stated": "info"}
+{"format": "xray", "line": "2026/10/11 10:00:00 [Warning] core: Xray 1.8.24 started", "stated": "warning"}
+{"format": "syncthing", "line": "[ABCDE] 2026/10/11 10:00:00 INFO: Syncthing starting", "stated": "info"}
+{"format": "plain/print", "line": "Error connecting to database: connection refused", "stated": ""}
+{"format": "plain/print", "line": "Warning sign detected on conveyor 3", "stated": ""}
+{"format": "plain/print", "line": "Debug mode is on, do not use in production", "stated": "", "guess": "info"}
+{"format": "plain/print", "line": "Info desk ticket #42 closed by alice", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 info about user 42 refreshed from LDAP", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 notice board sync finished in 3s", "stated": "", "guess": "info"}
+{"format": "logback", "line": "2026-10-11 10:00:00,123 [scheduler-3] WARN  c.e.billing.InvoiceJob - Invoice 42 retried; status=ERROR from gateway", "stated": "warning"}
+{"format": "springboot3", "line": "2026-10-11T10:00:00.123Z  INFO 1 --- [orders] [nio-8080-exec-3] c.e.orders.web.AlertController           : Alert 42 escalated to CRITICAL by rule cpu-high", "stated": "info"}
+{"format": "python/cookbook", "line": "2026-10-11 10:00:00,123 - app.audit - INFO - User alice changed log level to DEBUG", "stated": "info"}
+{"format": "python/cookbook", "line": "2026-10-11 10:00:00,123 - app.alerts - INFO - Forwarded alert with severity=critical to pagerduty", "stated": "info"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"upstream returned ERROR: rate limited\" upstream=payments", "stated": "info"}
+{"format": "slog/text", "line": "time=2026-10-11T10:00:00.000Z level=INFO msg=\"alert received\" alertname=DiskFull severity=critical", "stated": "info"}
+{"format": "zap/dev-console", "line": "2026-10-11T10:00:00.000Z\tINFO\talerts/router.go:88\tforwarding alert\t{\"severity\": \"critical\", \"alertname\": \"DiskFull\"}", "stated": "info"}
+{"format": "winston/simple", "line": "info: Received webhook {\"level\":\"error\",\"source\":\"stripe\"}", "stated": "info"}
+{"format": "pino-pretty", "line": "[10:00:00.123] INFO (42): job failed permanently, moving to dead-letter queue", "stated": "info"}
+{"format": "serilog/console", "line": "[10:00:00 INF] Health check \"db\" returned Unhealthy: FATAL: the database system is starting up", "stated": "info"}
+{"format": "rails/logger", "line": "E, [2026-10-11T10:00:00.123456 #1] ERROR -- : [ActiveJob] [ChargeJob] [3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f01] Error performing ChargeJob (Job ID: 3f1c9a2e) from Sidekiq(default) in 12.3ms: Stripe::CardError (Your card was declined.)", "stated": "error"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [info] 29#29: *1240 client 10.0.0.1 closed keepalive connection", "stated": "info"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [crit] 29#29: *1241 SSL_do_handshake() failed (SSL: error:0A00006C:SSL routines::bad key share) while SSL handshaking, client: 203.0.113.9, server: 0.0.0.0:443", "stated": "critical"}
+{"format": "haproxy/stderr", "line": "[NOTICE]   (1) : New worker (8) forked", "stated": "notice"}
+{"format": "haproxy/stderr", "line": "[ALERT]    (1) : Current worker (8) exited with code 139 (Segmentation fault)", "stated": "critical"}
+{"format": "mysql8", "line": "2026-10-11T10:00:00.123456Z 12 [Warning] [MY-010057] [Server] IP address '10.0.0.5' has been resolved to the host name 'web-1', which resembles IPv4-address itself.", "stated": "warning"}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [1234] WARNING:  you don't own a lock of type ExclusiveLock", "stated": "warning"}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [1234] LOG:  process 1234 still waiting for ShareLock on transaction 5678 after 1000.123 ms", "stated": "info"}
+{"format": "postgres", "line": "2026-10-11 10:00:00.123 UTC [1234] DETAIL:  Process holding the lock: 4321. Wait queue: 1234.", "stated": ""}
+{"format": "mongodb-legacy", "line": "2026-10-11T10:00:00.123+0000 I NETWORK  [listener] connection accepted from 10.0.0.5:50412 #42 (3 connections now open)", "stated": "info"}
+{"format": "redis", "line": "1:M 11 Oct 2026 10:00:00.123 # WARNING Memory overcommit must be enabled! Without it, a background save or replication may fail under low memory condition.", "stated": "warning"}
+{"format": "redis", "line": "1:C 11 Oct 2026 10:00:00.123 * Redis version=7.4.1, bits=64, commit=00000000, modified=0, pid=1, just started", "stated": "notice"}
+{"format": "elasticsearch", "line": "[2026-10-11T10:00:00,123][ERROR][o.e.b.Elasticsearch      ] [node-1] fatal exception while booting Elasticsearch", "stated": "error"}
+{"format": "kafka", "line": "[2026-10-11 10:00:00,123] ERROR Error while creating ephemeral at /brokers/ids/1, node already exists and owner '72057594037927936' does not match current session '72057594037927937' (kafka.zk.KafkaZkClient$CheckedEphemeral)", "stated": "error"}
+{"format": "zookeeper", "line": "2026-10-11 10:00:00,123 [myid:1] - WARN  [QuorumPeer[myid=1](plain=0.0.0.0:2181)(secure=disabled):Follower@131] - Exception when following the leader", "stated": "warning"}
+{"format": "apache24/error", "line": "[Sun Oct 11 10:00:00.123456 2026] [core:info] [pid 1234:tid 140028315387648] [client 203.0.113.9:51234] AH00128: File does not exist: /var/www/html/wp-login.php", "stated": "info"}
+{"format": "apache24/error", "line": "[Sun Oct 11 10:00:00.123456 2026] [php:error] [pid 1234:tid 140028315387648] [client 203.0.113.9:51234] PHP Parse error:  syntax error, unexpected token \"}\" in /var/www/html/index.php on line 42", "stated": "error"}
+{"format": "traefik3", "line": "2026-10-11T10:00:00Z WRN github.com/traefik/traefik/v3/pkg/provider/kubernetes/crd/kubernetes.go:342 > Cross-namespace reference between IngressRoutes and resources is enabled, please ensure that this is expected (see AllowCrossNamespace option) providerName=kubernetescrd", "stated": "warning"}
+{"format": "envoy/app", "line": "[2026-10-11 10:00:00.123][14][warning][config] [source/common/config/grpc_stream.h:201] DeltaAggregatedResources gRPC config stream to xds_cluster closed since 42s ago: 14, upstream connect error or disconnect/reset before headers. reset reason: connection failure", "stated": "warning"}
+{"format": "coredns", "line": "[WARNING] plugin/kubernetes: starting server with unsynced Kubernetes API", "stated": "warning"}
+{"format": "cilium", "line": "level=warning msg=\"Unable to update ipcache map entry on pod add\" error=\"ipcache entry owned by kvstore or agent\" hostIP=10.0.0.5 k8sNamespace=default k8sPodName=web-7d9f8b6c4-x2x9z podIP=10.0.1.23 subsys=k8s-watcher", "stated": "warning"}
+{"format": "k8s-events", "line": "45s         Warning   Unhealthy           pod/web-7d9f8b6c4-x2x9z         Readiness probe failed: HTTP probe failed with statuscode: 503", "stated": "warning"}
+{"format": "argo-workflows", "line": "time=\"2026-10-11T10:00:00.123Z\" level=info msg=\"node changed\" namespace=argo new.message=\"Error (exit code 1)\" new.phase=Failed new.progress=0/1 nodeID=etl-42 old.message= old.phase=Running old.progress=0/1 workflow=etl", "stated": "info"}
+{"format": "terraform", "line": "│ Warning: Argument is deprecated", "stated": "warning"}
+{"format": "ansible", "line": "fatal: [web02]: UNREACHABLE! => {\"changed\": false, \"msg\": \"Failed to connect to the host via ssh: ssh: connect to host 10.0.0.6 port 22: Connection timed out\", \"unreachable\": true}", "stated": "critical"}
+{"format": "windows/eventlog-text", "line": "Level:         Error", "stated": "error"}
+{"format": "sqlserver/errorlog", "line": "2026-10-11 10:00:00.12 Server      Microsoft SQL Server 2022 (RTM-CU15) (KB5041321) - 16.0.4145.4 (X64)", "stated": ""}
+{"format": "frp", "line": "2026-10-11 10:00:00.123 [I] [frps/root.go:105] frps uses config file: /etc/frp/frps.toml", "stated": "info"}
+{"format": "frp", "line": "2026-10-11 10:00:00.123 [W] [frpc/service.go:301] login to server failed: dial tcp 203.0.113.9:7000: connect: connection refused", "stated": "warning"}
+{"format": "glog-0.7/typesense", "line": "I20261011 10:00:00.123456  1234 typesense_server_utils.cpp:330] Starting Typesense 27.1", "stated": "info"}
+{"format": "glog-0.7/typesense", "line": "E20261011 10:00:00.123456  1290 raft_server.cpp:771] 1 queued writes > healthy write lag of 500", "stated": "error"}
+{"format": "nginx-proxy-manager/signale", "line": "[10/11/2026] [10:00:00 AM] [Global   ] › ℹ  info      Using MySQL configuration", "stated": "info", "gap": "niche formatter (signale); the guess is right"}
+{"format": "nginx-proxy-manager/signale", "line": "[10/11/2026] [10:00:00 AM] [SSL      ] › ✖  error     Error: Command failed: certbot renew --non-interactive --quiet", "stated": "error", "gap": "niche formatter (signale); the guess is right"}
+{"format": "asterisk", "line": "[Oct 11 10:00:00] WARNING[1234][C-00000002]: chan_pjsip.c:2843 hangup_cause2sip: Unable to convert cause 21 to SIP response", "stated": "warning"}
+{"format": "mysql/general_log", "line": "2026-10-11T10:00:00.123456Z\t   42 Query\tSELECT id, message FROM app_logs WHERE level IN ('ERROR','FATAL') ORDER BY id DESC LIMIT 50", "stated": "", "guess": "info", "gap": "a level word in a SQL literal; masking quotes would hide real levels"}
+{"format": "windows/cbs.log", "line": "2026-10-11 10:00:00, Info                  CBS    Loaded Servicing Stack v10.0.19041.4597 with Core: C:\\Windows\\winsxs\\amd64_microsoft-windows-servicingstack_31bf3856ad364e35_10.0.19041.4597_none_7cd3e8d4b3b0e1a2\\cbscore.dll", "stated": "info"}
+{"format": "windows/cbs.log", "line": "2026-10-11 10:00:00, Error                 CSI    00000001 (F) STATUS_SXS_ASSEMBLY_MISSING #12345# from Windows::ServicingAPI::CCSITransaction::ICSITransaction_PinDeployment(Flags = 0, a = 1a2b3c4d5e6f, version 10.0.19041.4597, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35})", "stated": "error"}
+{"format": "springboot3+ansi", "line": "\u001b[2m2026-10-11T10:00:00.123Z\u001b[0;39m \u001b[33m WARN\u001b[0;39m \u001b[35m1\u001b[0;39m \u001b[2m---\u001b[0;39m \u001b[2m[orders] [           main]\u001b[0;39m \u001b[36mo.s.b.a.orm.jpa.DatabaseLookup         \u001b[0;39m \u001b[2m:\u001b[0;39m Unable to determine jdbc url from datasource", "stated": "warning"}
+{"format": "python/colorlog", "line": "\u001b[33mWARNING \u001b[0m \u001b[34mRetrying connection to broker (attempt 3)\u001b[0m", "stated": "warning"}

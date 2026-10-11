@@ -1,0 +1,120 @@
+{"format": "go/log+shortfile", "line": "2026/10/11 10:00:00.123456 main.go:42: connected to postgres at 10.0.0.5:5432", "stated": ""}
+{"format": "go/log", "line": "2026/10/11 10:00:00 error rate over last 5m: 0.02% (1 of 4812 requests)", "stated": "", "guess": "info", "gap": "'error rate' is as often a problem report; keyword guessing can't tell, the engine can"}
+{"format": "go/log+shortfile", "line": "2026/10/11 10:00:00 main.go:61: debug endpoint listening on 127.0.0.1:6060", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 log level set to \"WARN\"", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 migration 0042_add_index finished, no errors occurred", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 fetched https://docs.example.com/runbooks/fatal-oom.html in 84ms", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 GET /api/v1/logs?level=error&limit=100 200 12.4ms", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:00 config check passed: no errors, 0 warnings", "stated": "", "guess": "info"}
+{"format": "go/log+lego", "line": "2026/10/11 10:00:00 [INFO] [example.com] acme: Obtaining bundled SAN certificate", "stated": "info"}
+{"format": "gin", "line": "[GIN] 2026/10/11 - 10:00:00 | 200 |       152.4µs |       127.0.0.1 | GET      \"/docs/fatal-errors\"", "stated": "", "guess": "info"}
+{"format": "gin", "line": "[GIN] 2026/10/11 - 10:00:00 | 404 |         1.2µs |     203.0.113.9 | TRACE    \"/\"", "stated": "", "guess": "info"}
+{"format": "echo", "line": "{\"time\":\"2026-10-11T10:00:00.123456789Z\",\"id\":\"\",\"remote_ip\":\"10.0.0.1\",\"host\":\"api.example.com\",\"method\":\"GET\",\"uri\":\"/api/v1/status\",\"user_agent\":\"curl/8.4.0\",\"status\":200,\"error\":\"\",\"latency\":152340,\"latency_human\":\"152.34µs\",\"bytes_in\":0,\"bytes_out\":27}", "stated": "", "guess": "info"}
+{"format": "logrus/tty", "line": "INFO[0000] Starting server                               addr=\":8080\"", "stated": "info"}
+{"format": "logrus/tty", "line": "DEBU[0001] cache warm-up complete                        entries=1024", "stated": "debug"}
+{"format": "logrus/tty", "line": "TRAC[0001] polling queue                                 queue=orders", "stated": "debug"}
+{"format": "logrus/tty", "line": "WARN[0042] no errors in last sync but 3 objects skipped  namespace=default", "stated": "warning"}
+{"format": "logrus/tty", "line": "ERRO[0042] failed to publish event                       error=\"nats: timeout\" subject=orders.created", "stated": "error"}
+{"format": "logrus/tty", "line": "FATA[0003] cannot load config                            error=\"open /etc/app/config.yaml: no such file or directory\"", "stated": "critical"}
+{"format": "logrus/tty", "line": "PANI[0007] invariant violated: negative balance          account=42", "stated": "critical"}
+{"format": "logrus/tty+ansi", "line": "\u001b[33mWARN\u001b[0m[0042] disk usage above threshold                    \u001b[33mpath\u001b[0m=/var/lib/docker \u001b[33musage\u001b[0m=\"91%\"", "stated": "warning"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:00Z\" level=trace msg=\"sending heartbeat\" peer=10.0.0.3", "stated": "debug"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:00+02:00\" level=warning msg=\"retrying request\" attempt=2 error=\"dial tcp 10.0.0.5:5432: connect: connection refused\"", "stated": "warning"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:00Z\" level=fatal msg=\"failed to load config\" error=\"open /etc/app/config.yaml: no such file or directory\"", "stated": "critical"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:00Z\" level=panic msg=\"unrecoverable state\" component=ledger", "stated": "critical"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"no errors detected, fatal checks disabled\" checks=12", "stated": "info"}
+{"format": "dockerd/journald", "line": "Oct 11 10:00:00 node1 dockerd[812]: time=\"2026-10-11T10:00:00.123456789Z\" level=warning msg=\"Your kernel does not support cgroup blkio weight\"", "stated": "warning"}
+{"format": "dockerd/journald", "line": "Oct 11 10:00:00 node1 dockerd[812]: time=\"2026-10-11T10:00:00.123456789Z\" level=error msg=\"Handler for POST /v1.45/containers/create returned error: No such image: myapp:latest\"", "stated": "error"}
+{"format": "containerd/journald", "line": "Oct 11 10:00:00 node1 containerd[700]: time=\"2026-10-11T10:00:00.123456789Z\" level=info msg=\"StartContainer for \\\"9b1f2c3d4e5f\\\" returns successfully\"", "stated": "info"}
+{"format": "docker/cli", "line": "WARNING: No swap limit support", "stated": "warning"}
+{"format": "dockerd/journald-json", "line": "time=\"2026-10-11T10:00:00.123456789Z\" level=error msg=\"Handler for GET /v1.45/containers/web/json returned error: No such container: web\"", "stated": "error", "level": "6"}
+{"format": "buildkit", "line": "#8 ERROR: process \"/bin/sh -c npm ci\" did not complete successfully: exit code: 1", "stated": "error"}
+{"format": "zap/dev-console", "line": "2026-10-11T10:00:00.000Z\tDEBUG\tcache/lru.go:57\tevicted entry\t{\"key\": \"user:42\"}", "stated": "debug"}
+{"format": "zap/dev-console", "line": "2026-10-11T10:00:00.000Z\tWARN\tworker/pool.go:131\terror rate above 1%, shedding load\t{\"rate\": 0.013}", "stated": "warning"}
+{"format": "zap/dev-console", "line": "2026-10-11T10:00:00.000Z\tERROR\tgrpc\tserver/handler.go:42\tfinished call with error\t{\"grpc.code\": \"Unavailable\", \"error\": \"connection refused\"}", "stated": "error"}
+{"format": "zap/dev-console", "line": "2026-10-11T10:00:00.000Z\tDPANIC\tstore/kv.go:212\tinvariant violated: duplicate key\t{\"key\": \"order:42\"}", "stated": "critical"}
+{"format": "zap/dev-console", "line": "2026-10-11T10:00:00.000Z\tPANIC\tstore/kv.go:230\tunrecoverable store state", "stated": "critical"}
+{"format": "zap/dev-console", "line": "2026-10-11T10:00:00.000Z\tFATAL\tcmd/main.go:31\tcannot open database\t{\"error\": \"open /data/app.db: permission denied\"}", "stated": "critical"}
+{"format": "zap/dev-console", "line": "2026-10-11T12:00:00.000+0200\tINFO\tconfig/watch.go:73\tlog level changed\t{\"level\": \"debug\"}", "stated": "info"}
+{"format": "zap/prod-console", "line": "1.7601768001234567e+09\twarn\tserver/server.go:120\tslow request\t{\"path\": \"/api/orders\", \"duration\": 1.532}", "stated": "warning"}
+{"format": "controller-runtime", "line": "2026-10-11T10:00:00Z\tERROR\tReconciler error\t{\"controller\": \"deployment\", \"controllerGroup\": \"apps\", \"controllerKind\": \"Deployment\", \"Deployment\": {\"name\":\"web\",\"namespace\":\"default\"}, \"namespace\": \"default\", \"name\": \"web\", \"reconcileID\": \"5c1a3b2e-9f8d-4c7b-a6e5-d4c3b2a1f0e9\", \"error\": \"Operation cannot be fulfilled on deployments.apps \\\"web\\\": the object has been modified; please apply your changes to the latest version and try again\"}", "stated": "error"}
+{"format": "zap/json-structured", "line": "invariant violated: duplicate key", "stated": "critical", "level": "dpanic"}
+{"format": "zerolog/console", "line": "10:00AM DBG cache miss key=user:42", "stated": "debug"}
+{"format": "zerolog/console", "line": "10:00AM TRC entering handler path=/api/v1/users", "stated": "debug"}
+{"format": "zerolog/console", "line": "10:00AM WRN slow query duration=1532.4 query=\"SELECT id FROM jobs WHERE state = 'error'\"", "stated": "warning"}
+{"format": "zerolog/console", "line": "10:00AM ERR failed to publish event error=\"nats: timeout\" subject=orders.created", "stated": "error"}
+{"format": "zerolog/console", "line": "10:00AM FTL cannot start server error=\"listen tcp :8080: bind: address already in use\"", "stated": "critical"}
+{"format": "zerolog/console", "line": "10:00AM PNC unrecoverable ledger state error=\"negative balance\" account=42", "stated": "critical"}
+{"format": "zerolog/console", "line": "<nil> INF request handled method=GET status=200", "stated": "info"}
+{"format": "zerolog/console", "line": "10:00AM INF alert forwarded alertname=DiskFull severity=critical", "stated": "info"}
+{"format": "zerolog/console+ansi", "line": "\u001b[90m10:00AM\u001b[0m \u001b[33mWRN\u001b[0m \u001b[1mconsumer lag growing\u001b[0m \u001b[36mlag=\u001b[0m15230 \u001b[36mtopic=\u001b[0morders", "stated": "warning"}
+{"format": "traefik3", "line": "2026-10-11T10:00:00Z ERR error=\"accept tcp [::]:80: use of closed network connection\" entryPointName=web", "stated": "error"}
+{"format": "traefik3", "line": "2026-10-11T10:00:00Z DBG github.com/traefik/traefik/v3/pkg/server/service/loadbalancer/wrr/wrr.go:207 > Service selected by WRR: 1a2b3c4d5e6f7a8b", "stated": "debug"}
+{"format": "traefik/clf", "line": "203.0.113.9 - - [11/Oct/2026:10:00:00 +0000] \"TRACE / HTTP/1.1\" 405 18 \"-\" \"Mozilla/5.0\" 43 \"web@docker\" \"http://172.18.0.3:80\" 1ms", "stated": "", "guess": "info"}
+{"format": "traefik/clf", "line": "10.0.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /api/v1/logs?level=error&limit=100 HTTP/1.1\" 200 20480 \"-\" \"Mozilla/5.0\" 44 \"logs@docker\" \"http://172.18.0.4:8080\" 12ms", "stated": "", "guess": "info"}
+{"format": "slog/text", "line": "time=2026-10-11T10:00:00.000Z level=ERROR msg=\"request failed\" method=GET path=/api/orders err=\"context deadline exceeded\"", "stated": "error"}
+{"format": "slog/text", "line": "time=2026-10-11T10:00:00.000Z level=DEBUG-4 msg=\"wire bytes\" n=512", "stated": "debug"}
+{"format": "slog/text", "line": "time=2026-10-11T10:00:00.000+02:00 level=WARN source=/app/internal/db/pool.go:88 msg=\"pool exhausted\" waiting=12", "stated": "warning"}
+{"format": "slog/default", "line": "2026/10/11 10:00:00 INFO no errors found in 128 manifests", "stated": "info"}
+{"format": "slog/json-structured", "line": "wire bytes", "stated": "debug", "level": "DEBUG-4"}
+{"format": "hclog/consul", "line": "2026-10-11T10:00:00.123Z [INFO]  agent: Synced node info", "stated": "info"}
+{"format": "hclog/consul", "line": "2026-10-11T10:00:00.123Z [DEBUG] agent: Node info in sync", "stated": "debug"}
+{"format": "hclog/consul", "line": "2026-10-11T10:00:00.123Z [ERROR] agent.client: RPC failed to server: method=Catalog.Register server=10.0.0.3:8300 error=\"rpc error making call: No cluster leader\"", "stated": "error"}
+{"format": "hclog/vault", "line": "2026-10-11T10:00:00.123Z [WARN]  no `api_addr` value specified in config or in VAULT_API_ADDR; falling back to detection if possible, but this value should be manually set", "stated": "warning"}
+{"format": "hclog/consul+journald", "line": "Oct 11 10:00:00 node1 consul[1234]: 2026-10-11T10:00:00.123Z [WARN]  agent.router.manager: No servers available", "stated": "warning"}
+{"format": "hclog/terraform", "line": "2026-10-11T10:00:00.123+0200 [TRACE] statemgr.Filesystem: reading latest snapshot from terraform.tfstate", "stated": "debug"}
+{"format": "terraform/diag", "line": "│ Error: Invalid reference", "stated": "error"}
+{"format": "terraform/diag", "line": "│ Warning: Argument is deprecated", "stated": "warning"}
+{"format": "klog", "line": "W1011 10:00:00.123456       1 reflector.go:561] k8s.io/client-go/informers/factory.go:160: failed to list *v1.ConfigMap: configmaps is forbidden: User \"system:serviceaccount:kube-system:x\" cannot list resource \"configmaps\" in API group \"\" at the cluster scope", "stated": "warning"}
+{"format": "klog", "line": "F1011 10:00:00.123456       1 server.go:166] failed to create listener: failed to listen on 0.0.0.0:10259: listen tcp 0.0.0.0:10259: bind: address already in use", "stated": "critical"}
+{"format": "klog", "line": "I1011 10:00:00.123456       1 controller.go:162] \"re-queuing item due to optimistic locking on resource\" logger=\"cert-manager.certificaterequests-issuer-acme\" key=\"default/web-tls-1\" error=\"Operation cannot be fulfilled on certificaterequests.cert-manager.io \\\"web-tls-1\\\": the object has been modified; please apply your changes to the latest version and try again\"", "stated": "info"}
+{"format": "klog", "line": "I1011 10:00:00.123456       1 event.go:389] \"Event occurred\" object=\"default/web-7d9f8b6c4-x2x9z\" fieldPath=\"\" kind=\"Pod\" apiVersion=\"v1\" type=\"Warning\" reason=\"FailedScheduling\" message=\"0/3 nodes are available: 3 Insufficient cpu.\"", "stated": "info"}
+{"format": "klog/syslog", "line": "Oct 11 10:00:00 node1 kubelet[1234]: W1011 10:00:00.123456    1234 watcher.go:93] Error while processing event (\"/sys/fs/cgroup/kubepods.slice\": 0x40000100 == IN_CREATE|IN_ISDIR): inotify_add_watch /sys/fs/cgroup/kubepods.slice: no such file or directory", "stated": "warning"}
+{"format": "klog/journalctl-short-precise", "line": "Oct 11 10:00:00.123456 node1 kubelet[1234]: E1011 10:00:00.123400    1234 pod_workers.go:1301] \"Error syncing pod, skipping\" err=\"failed to \\\"StartContainer\\\" for \\\"web\\\" with CrashLoopBackOff: \\\"back-off 5m0s restarting failed container=web pod=web-0_default(0b8f1c2d-3e4f-5a6b-7c8d-9e0f1a2b3c4d)\\\"\" pod=\"default/web-0\" podUID=\"0b8f1c2d-3e4f-5a6b-7c8d-9e0f1a2b3c4d\"", "stated": "error"}
+{"format": "klog/journald-json", "line": "E1011 10:00:00.123456    1234 kubelet_node_status.go:549] \"Error updating node status, will retry\" err=\"error getting node \\\"node1\\\": Get \\\"https://10.0.0.1:6443/api/v1/nodes/node1?timeout=10s\\\": context deadline exceeded\"", "stated": "error", "level": "6"}
+{"format": "crio+logrus", "line": "2026-10-11T10:00:00.123456789+00:00 stdout F time=\"2026-10-11T10:00:00Z\" level=warning msg=\"Failed to save cluster info\" error=\"etcdserver: request timed out\"", "stated": "warning"}
+{"format": "cri+nginx-access", "line": "2026-10-11T10:00:00.123456789Z stdout F 10.244.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /healthz HTTP/1.1\" 200 2 \"-\" \"kube-probe/1.31\"", "stated": "", "guess": "info"}
+{"format": "cri+etcd-json", "line": "2026-10-11T10:00:00.12345678Z stderr F {\"level\":\"warn\",\"ts\":\"2026-10-11T10:00:00.123456Z\",\"caller\":\"etcdserver/util.go:170\",\"msg\":\"apply request took too long\",\"took\":\"152.734ms\",\"expected-duration\":\"100ms\"}", "stated": "warning"}
+{"format": "kubectl-ts+klog", "line": "2026-10-11T10:00:00.123456789Z E1011 10:00:00.123456       1 leaderelection.go:332] error retrieving resource lock kube-system/kube-scheduler: leases.coordination.k8s.io \"kube-scheduler\" is forbidden: User \"system:kube-scheduler\" cannot get resource \"leases\" in API group \"coordination.k8s.io\" in the namespace \"kube-system\"", "stated": "error"}
+{"format": "kubectl-ts+klog", "line": "2026-10-11T10:00:00.123456789Z W1011 10:00:00.123456       1 client_config.go:659] Neither --kubeconfig nor --master was specified.  Using the inClusterConfig.  This might not work.", "stated": "warning"}
+{"format": "k8s-events", "line": "12m         Normal    Scheduled           pod/web-7d9f8b6c4-x2x9z         Successfully assigned default/web-7d9f8b6c4-x2x9z to node-1", "stated": "info"}
+{"format": "k8s-events", "line": "3m21s       Warning   BackOff             pod/web-7d9f8b6c4-x2x9z         Back-off restarting failed container web in pod web-7d9f8b6c4-x2x9z_default(0b8f1c2d-3e4f-5a6b-7c8d-9e0f1a2b3c4d)", "stated": "warning"}
+{"format": "k8s-events/all-ns", "line": "default       2m10s       Warning   FailedScheduling   pod/web-7d9f8b6c4-x2x9z         0/3 nodes are available: 3 Insufficient cpu. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.", "stated": "warning"}
+{"format": "k8s-events/all-ns", "line": "kube-system   5m          Normal    Pulled             pod/coredns-7db6d8ff4d-abcde    Container image \"registry.k8s.io/coredns/coredns:v1.11.3\" already present on machine", "stated": "info"}
+{"format": "kubectl", "line": "Warning: resource deployments/web is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.", "stated": "warning"}
+{"format": "helm", "line": "Error: INSTALLATION FAILED: cannot re-use a name that is still in use", "stated": "error"}
+{"format": "etcd/capnslog", "line": "2026-10-11 10:00:00.123456 I | etcdmain: etcd Version: 3.4.34", "stated": "info"}
+{"format": "etcd/capnslog", "line": "2026-10-11 10:00:00.123456 W | etcdserver: read-only range request \"key:\\\"/registry/health\\\" \" with result \"range_response_count:0 size:5\" took too long (152.734ms) to execute", "stated": "warning"}
+{"format": "etcd/capnslog", "line": "2026-10-11 10:00:00.123456 N | etcdserver/membership: set the initial cluster version to 3.4", "stated": "notice"}
+{"format": "etcd/capnslog", "line": "2026-10-11 10:00:00.123456 C | etcdmain: listen tcp 10.0.0.2:2380: bind: cannot assign requested address", "stated": "critical"}
+{"format": "prometheus2", "line": "ts=2026-10-11T10:00:00.123Z caller=notifier.go:530 level=error component=notifier alertmanager=http://alertmanager:9093/api/v2/alerts count=1 msg=\"Error sending alert\" err=\"Post \\\"http://alertmanager:9093/api/v2/alerts\\\": dial tcp: lookup alertmanager on 10.96.0.10:53: no such host\"", "stated": "error"}
+{"format": "prometheus2", "line": "ts=2026-10-11T10:00:00.123Z caller=scrape.go:1400 level=debug component=\"scrape manager\" scrape_pool=node target=http://10.0.0.5:9100/metrics msg=\"Scrape failed\" err=\"context deadline exceeded\"", "stated": "debug"}
+{"format": "prometheus3", "line": "time=2026-10-11T10:00:00.123Z level=INFO source=main.go:1308 msg=\"Starting Prometheus Server\" mode=server version=\"(version=3.0.1, branch=HEAD, revision=1f56e8492c31a558ccea833027db4bd7f8b6d0e9)\"", "stated": "info"}
+{"format": "alertmanager", "line": "ts=2026-10-11T10:00:00.123Z caller=cluster.go:177 level=warn component=cluster err=\"couldn't deduce an advertise address: no private IP found, explicit advertise addr not provided\"", "stated": "warning"}
+{"format": "promtail", "line": "level=warn ts=2026-10-11T10:00:00.123456789Z caller=client.go:419 component=client host=loki:3100 msg=\"error sending batch, will retry\" status=429 tenant= error=\"server returned HTTP status 429 Too Many Requests (429): Ingestion rate limit exceeded\"", "stated": "warning"}
+{"format": "grafana9", "line": "logger=context userId=1 orgId=1 uname=admin t=2026-10-11T10:00:00.123456789Z level=error msg=\"Request Completed\" method=GET path=/api/datasources/proxy/uid/abc/api/v1/query status=502 remote_addr=10.0.0.1 time_ms=30001 duration=30.001s size=0 referer= handler=/api/datasources/proxy/uid/:uid/* status_source=downstream", "stated": "error"}
+{"format": "grafana7/log15", "line": "t=2026-10-11T10:00:00+0000 lvl=eror msg=\"Failed to look up user based on cookie\" logger=context error=\"user token not found\"", "stated": "error"}
+{"format": "grafana7/log15", "line": "t=2026-10-11T10:00:00+0000 lvl=dbug msg=\"Database locked, sleeping then retrying\" logger=sqlstore error=\"database is locked\" retry=0", "stated": "debug"}
+{"format": "caddy/console", "line": "2026/10/11 10:00:00.000\tWARN\thttp.auto_https\tserver is listening only on the HTTP port, so no automatic HTTPS will be applied to this server\t{\"server_name\": \"srv0\", \"http_port\": 80}", "stated": "warning"}
+{"format": "caddy/console", "line": "2026/10/11 10:00:00.000\tERROR\thttp.log.error\tdial tcp 127.0.0.1:9000: connect: connection refused\t{\"request\": {\"remote_ip\": \"10.0.0.1\", \"remote_port\": \"50412\", \"client_ip\": \"10.0.0.1\", \"proto\": \"HTTP/1.1\", \"method\": \"GET\", \"host\": \"example.com\", \"uri\": \"/\", \"headers\": {\"User-Agent\": [\"curl/8.4.0\"], \"Accept\": [\"*/*\"]}}, \"duration\": 0.000812, \"status\": 502, \"err_id\": \"x1y2z3a4b\", \"err_trace\": \"reverseproxy.statusError (reverseproxy.go:1269)\"}", "stated": "error"}
+{"format": "caddy/journald-json", "line": "Oct 11 10:00:00 web1 caddy[901]: {\"level\":\"info\",\"ts\":1760176800.1234567,\"logger\":\"http.log.access.log0\",\"msg\":\"handled request\",\"request\":{\"remote_ip\":\"10.0.0.1\",\"remote_port\":\"50412\",\"client_ip\":\"10.0.0.1\",\"proto\":\"HTTP/2.0\",\"method\":\"GET\",\"host\":\"docs.example.com\",\"uri\":\"/docs/fatal-errors\",\"headers\":{}},\"bytes_read\":0,\"user_id\":\"\",\"duration\":0.0012,\"size\":5120,\"status\":200,\"resp_headers\":{}}", "stated": "info"}
+{"format": "env_logger", "line": "[2026-10-11T10:00:00Z WARN  my_app::db] connection pool at 90% capacity", "stated": "warning"}
+{"format": "env_logger", "line": "[2026-10-11T10:00:00Z ERROR my_app::worker] job 42 failed: deadline has elapsed", "stated": "error"}
+{"format": "env_logger", "line": "[2026-10-11T10:00:00Z DEBUG hyper::proto::h1::io] flushed 210 bytes", "stated": "debug"}
+{"format": "env_logger", "line": "[2026-10-11T10:00:00Z TRACE mio::poll] registering event source with poller: token=Token(1), interests=READABLE | WRITABLE", "stated": "debug"}
+{"format": "env_logger", "line": "[2026-10-11T10:00:00.123Z INFO  my_app] 0 errors, 2 warnings during config validation", "stated": "info"}
+{"format": "tracing-fmt", "line": "2026-10-11T10:00:00.123456Z  INFO my_app: listening addr=0.0.0.0:3000", "stated": "info"}
+{"format": "tracing-fmt", "line": "2026-10-11T10:00:00.123456Z  WARN my_app::cache: cache miss ratio high ratio=0.42", "stated": "warning"}
+{"format": "tracing-fmt", "line": "2026-10-11T10:00:00.123456Z ERROR my_app::db: query failed error=connection reset by peer (os error 104)", "stated": "error"}
+{"format": "tracing-fmt", "line": "2026-10-11T10:00:00.123456Z DEBUG request{method=GET uri=/docs/fatal-errors version=HTTP/1.1}: tower_http::trace::on_response: finished processing request latency=0 ms status=200", "stated": "debug"}
+{"format": "tracing-fmt", "line": "2026-10-11T10:00:00.123456Z TRACE tokio_util::codec::framed_impl: attempting to decode a frame", "stated": "debug"}
+{"format": "tracing-fmt", "line": "2026-10-11T10:00:00.123456Z  INFO my_app::alerts: forwarding alert alertname=\"HighErrorRate\" severity=\"warning\"", "stated": "info"}
+{"format": "tracing-fmt+ansi", "line": "\u001b[2m2026-10-11T10:00:00.123456Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2mmy_app::cache\u001b[0m\u001b[2m:\u001b[0m cache miss ratio high \u001b[3mratio\u001b[0m\u001b[2m=\u001b[0m0.42", "stated": "warning"}
+{"format": "tracing-fmt+ansi", "line": "\u001b[2m2026-10-11T10:00:00.123456Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mmy_app::db\u001b[0m\u001b[2m:\u001b[0m query failed \u001b[3merror\u001b[0m\u001b[2m=\u001b[0mpool timed out while waiting for an open connection", "stated": "error"}
+{"format": "vector", "line": "2026-10-11T10:00:00.123456Z  INFO vector::app: Log level is enabled. level=\"vector=info,codec=info,vrl=info,file_source=info,tower_limit=info,rdkafka=info,buffers=info,lapin=info,kube=info\"", "stated": "info"}
+{"format": "linkerd-proxy", "line": "[  1234.567890s]  WARN ThreadId(01) outbound:proxy{addr=10.96.12.34:8080}: linkerd_reconnect: Failed to connect error=Connection refused (os error 111)", "stated": "warning"}
+{"format": "rust/panic", "line": "thread 'main' panicked at src/main.rs:42:10:", "stated": ""}
+{"format": "coredns", "line": "[INFO] 10.244.1.7:52344 - 36123 \"AAAA IN fatal-errors.docs.svc.cluster.local. udp 50 false 512\" NXDOMAIN qr,aa,rd 143 0.000123s", "stated": "info"}
+{"format": "fluent-bit", "line": "[2026/10/11 10:00:00] [ info] [fluent bit] version=3.1.9, commit=431fa79ae2, pid=1", "stated": "info"}
+{"format": "fluent-bit", "line": "[2026/10/11 10:00:00] [ warn] [engine] failed to flush chunk '1-1760176800.123456789.flb', retry in 9 seconds: task_id=3, input=tail.0 > output=es.0 (out_id=0)", "stated": "warning"}
+{"format": "fluent-bit", "line": "[2026/10/11 10:00:00] [error] [output:es:es.0] HTTP status=400 URI=/_bulk, response:", "stated": "error"}

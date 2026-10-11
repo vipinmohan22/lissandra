@@ -1,0 +1,346 @@
+{"format": "nginx/access", "line": "203.0.113.5 - - [11/Oct/2026:10:00:00 +0000] \"GET / HTTP/1.1\" 200 615 \"-\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36\"", "stated": "", "guess": "info"}
+{"format": "nginx/access", "line": "203.0.113.5 - - [11/Oct/2026:10:00:01 +0000] \"GET /static/js/ErrorBoundary.3f9a2c1b.chunk.js HTTP/1.1\" 200 4821 \"https://shop.example.com/cart\" \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15\"", "stated": "", "guess": "info"}
+{"format": "nginx/access", "line": "198.51.100.23 - - [11/Oct/2026:10:00:02 +0000] \"POST /api/v1/errors HTTP/1.1\" 202 0 \"https://app.example.com/dashboard\" \"Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0\"", "stated": "", "guess": "info"}
+{"format": "nginx/access", "line": "10.0.0.12 - - [11/Oct/2026:10:00:03 +0000] \"GET /healthz HTTP/1.1\" 200 2 \"-\" \"kube-probe/1.31\"", "stated": "", "guess": "info"}
+{"format": "nginx/access", "line": "203.0.113.9 - - [11/Oct/2026:10:00:04 +0000] \"GET /.env HTTP/1.1\" 404 153 \"-\" \"Mozilla/5.0 zgrab/0.x\"", "stated": "", "guess": "info"}
+{"format": "nginx/access", "line": "10.0.0.7 - - [11/Oct/2026:10:00:14 +0000] \"GET /api/v1/logs?level=error&since=1h HTTP/1.1\" 200 8812 \"-\" \"Grafana/11.2.2\"", "stated": "", "guess": "info"}
+{"format": "nginx/access", "line": "203.0.113.9 - - [11/Oct/2026:10:00:19 +0000] \"TRACE / HTTP/1.1\" 405 157 \"-\" \"Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)\"", "stated": "", "guess": "info"}
+{"format": "nginx-docker/access", "line": "172.18.0.1 - - [11/Oct/2026:10:00:21 +0000] \"GET /api/errors/recent HTTP/1.1\" 200 312 \"-\" \"curl/8.5.0\" \"-\"", "stated": "", "guess": "info"}
+{"format": "ingress-nginx/access", "line": "10.244.0.1 - - [11/Oct/2026:10:00:22 +0000] \"POST /api/v1/orders HTTP/1.1\" 500 49 \"https://shop.example.com/checkout\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36\" 1532 0.214 [shop-api-8080] [] 10.244.2.15:8080 49 0.214 500 8c1f2a3b4d5e6f708192a3b4c5d6e7f8", "stated": ""}
+{"format": "ingress-nginx/access", "line": "10.244.0.1 - - [11/Oct/2026:10:00:23 +0000] \"GET /api/v1/errors?page=2 HTTP/2.0\" 200 1834 \"https://admin.example.com/errors\" \"Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0\" 512 0.034 [shop-api-8080] [] 10.244.2.15:8080 1834 0.034 200 b7e2c9d1a0f34e5b8c6d7e8f9a0b1c2d", "stated": "", "guess": "info"}
+{"format": "apache/access", "line": "203.0.113.5 - - [11/Oct/2026:10:00:00 +0000] \"GET /index.php HTTP/1.1\" 200 3456 \"-\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36\"", "stated": "", "guess": "info"}
+{"format": "apache/access", "line": "10.0.0.5 - - [11/Oct/2026:10:00:01 +0000] \"GET /server-status?auto HTTP/1.1\" 200 812 \"-\" \"Go-http-client/1.1\"", "stated": "", "guess": "info"}
+{"format": "apache/vhost_combined", "line": "www.example.com:443 203.0.113.5 - - [11/Oct/2026:10:00:04 +0000] \"POST /wp-admin/admin-ajax.php HTTP/1.1\" 200 47 \"https://www.example.com/wp-admin/\" \"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15\"", "stated": "", "guess": "info"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [notice] 1#1: using the \"epoll\" event method", "stated": "notice"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [notice] 1#1: nginx/1.27.2", "stated": "notice"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [notice] 1#1: built by gcc 12.2.0 (Debian 12.2.0-14)", "stated": "notice"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [notice] 1#1: OS: Linux 6.8.0-45-generic", "stated": "notice"}
+{"format": "nginx/error", "line": "2026/10/11 10:00:00 [notice] 1#1: getrlimit(RLIMIT_NOFILE): 1048576:1048576", "stated": "notice"}
+{"format": "nginx-docker/compose", "line": "web-1  | 2026/10/11 10:00:00 [notice] 1#1: start worker processes", "stated": "notice"}
+{"format": "nginx-docker/entrypoint", "line": "/docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration", "stated": "", "guess": "info"}
+{"format": "nginx-docker/entrypoint", "line": "/docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh", "stated": "", "guess": "info"}
+{"format": "apache/error", "line": "[Sun Oct 11 10:00:00.123456 2026] [mpm_event:notice] [pid 1:tid 140245119538048] AH00489: Apache/2.4.62 (Unix) configured -- resuming normal operations", "stated": "notice"}
+{"format": "apache/error", "line": "[Sun Oct 11 10:00:00.123789 2026] [core:notice] [pid 1:tid 140245119538048] AH00094: Command line: 'httpd -D FOREGROUND'", "stated": "notice"}
+{"format": "apache/error", "line": "[Sun Oct 11 10:00:01.234567 2026] [php:error] [pid 23] [client 203.0.113.5:52314] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Connection refused in /var/www/html/db.php:12", "stated": "error"}
+{"format": "apache/stderr", "line": "AH00558: apache2: Could not reliably determine the server's fully qualified domain name, using 172.17.0.3. Set the 'ServerName' directive globally to suppress this message", "stated": ""}
+{"format": "kubelet/journalctl", "line": "Oct 11 10:00:00 node1 kubelet[1234]: I1011 10:00:00.123456    1234 kubelet.go:2400] \"SyncLoop ADD\" source=\"api\" pods=[\"default/web-7d4b9c5f6-x2k9p\"]", "stated": "info"}
+{"format": "kubelet/journalctl", "line": "Oct 11 10:00:15 node1 kubelet[1234]: E1011 10:00:15.678901    1234 remote_runtime.go:432] \"ContainerStatus from runtime service failed\" err=\"rpc error: code = NotFound desc = an error occurred when try to find container \\\"9a8b7c6d5e4f\\\": not found\" containerID=\"9a8b7c6d5e4f\"", "stated": "error"}
+{"format": "kubelet/journald-json", "line": "I1011 10:00:01.234567    1234 kuberuntime_container.go:779] \"Killing container with a grace period\" pod=\"default/web-7d4b9c5f6-x2k9p\" podUID=\"0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b\" containerName=\"app\" containerID=\"containerd://9a8b7c6d5e4f\" gracePeriod=30", "level": "6", "stated": "info"}
+{"format": "kubelet/journald-json", "line": "E1011 10:00:02.345678    1234 pod_workers.go:1301] \"Error syncing pod, skipping\" err=\"failed to \\\"StartContainer\\\" for \\\"app\\\" with CrashLoopBackOff: \\\"back-off 5m0s restarting failed container=app pod=web-7d4b9c5f6-x2k9p_default(0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b)\\\"\" pod=\"default/web-7d4b9c5f6-x2k9p\" podUID=\"0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b\"", "level": "6", "stated": "error"}
+{"format": "kubelet/journald-json", "line": "I1011 10:00:03.456789    1234 prober.go:107] \"Probe failed\" probeType=\"Readiness\" pod=\"default/web-7d4b9c5f6-x2k9p\" podUID=\"0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b\" containerName=\"app\" probeResult=\"failure\" output=\"Get \\\"http://10.244.1.7:8080/ready\\\": dial tcp 10.244.1.7:8080: connect: connection refused\"", "level": "6", "stated": "info"}
+{"format": "kubelet/journald-json", "line": "W1011 10:00:04.567890    1234 reflector.go:561] object-\"default\"/\"web-config\": failed to list *v1.ConfigMap: configmaps \"web-config\" is forbidden: User \"system:node:node1\" cannot list resource \"configmaps\" in API group \"\" in the namespace \"default\": no relationship found between node 'node1' and this object", "level": "6", "stated": "warning"}
+{"format": "kubelet/journald-json", "line": "E1011 10:00:04.567999    1234 reflector.go:158] \"Unhandled Error\" err=\"object-\\\"default\\\"/\\\"web-config\\\": Failed to watch *v1.ConfigMap: failed to list *v1.ConfigMap: configmaps \\\"web-config\\\" is forbidden\" logger=\"UnhandledError\"", "level": "6", "stated": "error"}
+{"format": "kubelet/journald-json", "line": "I1011 10:00:05.678901    1234 scope.go:117] \"RemoveContainer\" containerID=\"9a8b7c6d5e4f3a2b1c0d\"", "level": "6", "stated": "info"}
+{"format": "kubelet/journald-json", "line": "E1011 10:00:08.901234    1234 kubelet.go:2902] \"Container runtime network not ready\" networkReady=\"NetworkReady=false reason:NetworkPluginNotReady message:Network plugin returns error: cni plugin not initialized\"", "level": "6", "stated": "error"}
+{"format": "kubelet/journald-json", "line": "E1011 10:00:10.123456    1234 kubelet_node_status.go:95] \"Unable to register node with API server\" err=\"Post \\\"https://10.0.0.1:6443/api/v1/nodes\\\": dial tcp 10.0.0.1:6443: connect: connection refused\" node=\"node1\"", "level": "6", "stated": "error"}
+{"format": "kubelet/journald-json", "line": "W1011 10:00:13.456789    1234 watcher.go:93] Error while processing event (\"/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod0f1e2d3c.slice/cri-containerd-9a8b7c6d.scope\": 0x40000100 == IN_CREATE|IN_ISDIR): inotify_add_watch /sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod0f1e2d3c.slice/cri-containerd-9a8b7c6d.scope: no such file or directory", "level": "6", "stated": "warning"}
+{"format": "containerd/journalctl", "line": "Oct 11 10:00:00 node1 containerd[812]: time=\"2026-10-11T10:00:00.123456789Z\" level=info msg=\"StartContainer for \\\"9a8b7c6d5e4f\\\" returns successfully\"", "stated": "info"}
+{"format": "containerd/journalctl", "line": "Oct 11 10:00:01 node1 containerd[812]: time=\"2026-10-11T10:00:01.234567890Z\" level=info msg=\"RunPodSandbox for &PodSandboxMetadata{Name:web-7d4b9c5f6-x2k9p,Uid:0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b,Namespace:default,Attempt:0,} returns sandbox id \\\"5e4f3a2b1c0d\\\"\"", "stated": "info"}
+{"format": "containerd/journald-json", "line": "time=\"2026-10-11T10:00:02.345678901Z\" level=error msg=\"ContainerStatus for \\\"9a8b7c6d5e4f\\\" failed\" error=\"rpc error: code = NotFound desc = an error occurred when try to find container \\\"9a8b7c6d5e4f\\\": not found\"", "level": "6", "stated": "error"}
+{"format": "containerd/journald-json", "line": "time=\"2026-10-11T10:00:03.456789012Z\" level=info msg=\"shim disconnected\" id=9a8b7c6d5e4f namespace=k8s.io", "level": "6", "stated": "info"}
+{"format": "containerd/journald-json", "line": "time=\"2026-10-11T10:00:03.456800000Z\" level=warning msg=\"cleaning up after shim disconnected\" id=9a8b7c6d5e4f namespace=k8s.io", "level": "6", "stated": "warning"}
+{"format": "containerd/journald-json", "line": "time=\"2026-10-11T10:00:04.567890123Z\" level=error msg=\"PullImage \\\"registry.example.com/shop/api:v2.3.1\\\" failed\" error=\"failed to pull and unpack image \\\"registry.example.com/shop/api:v2.3.1\\\": failed to resolve reference \\\"registry.example.com/shop/api:v2.3.1\\\": registry.example.com/shop/api:v2.3.1: not found\"", "level": "6", "stated": "error"}
+{"format": "containerd/journald-json", "line": "time=\"2026-10-11T10:00:05.678901234Z\" level=info msg=\"ImageUpdate event name:\\\"docker.io/library/nginx:1.27\\\" labels:{key:\\\"io.cri-containerd.image\\\" value:\\\"managed\\\"}\"", "level": "6", "stated": "info"}
+{"format": "dockerd/journalctl", "line": "Oct 11 10:00:00 web1 dockerd[900]: time=\"2026-10-11T10:00:00.123456789Z\" level=info msg=\"ignoring event\" container=9a8b7c6d5e4f module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"", "stated": "info"}
+{"format": "dockerd/journalctl", "line": "Oct 11 10:00:01 web1 dockerd[900]: time=\"2026-10-11T10:00:01.234567890Z\" level=warning msg=\"ShouldRestart failed, container will not be restarted\" container=9a8b7c6d5e4f daemonShuttingDown=false error=\"restart canceled\" execDuration=1m2.345s exitStatus=\"{137 2026-10-11 10:00:01.234 +0000 UTC}\" hasBeenManuallyStopped=true restartCount=0", "stated": "warning"}
+{"format": "cri/coredns", "line": "2026-10-11T10:00:00.123456789Z stdout F [INFO] 10.244.0.5:51234 - 12345 \"A IN api.example.com. udp 32 false 512\" NOERROR qr,rd,ra 64 0.001234s", "stated": "info"}
+{"format": "cri/coredns", "line": "2026-10-11T10:00:01.234567890Z stdout F [INFO] 10.244.1.7:39876 - 4242 \"AAAA IN redis.default.svc.cluster.local.default.svc.cluster.local. udp 74 false 512\" NXDOMAIN qr,aa,rd 167 0.000123s", "stated": "info"}
+{"format": "cri/kube-proxy", "line": "2026-10-11T10:00:04.567890123Z stderr F I1011 10:00:04.567890       1 server_linux.go:66] \"Using iptables proxy\"", "stated": "info"}
+{"format": "cri/kube-proxy", "line": "2026-10-11T10:00:04.600000000Z stderr F I1011 10:00:04.600000       1 shared_informer.go:313] Waiting for caches to sync for service config", "stated": "info"}
+{"format": "cri/kube-apiserver", "line": "2026-10-11T10:00:05.678901234Z stderr F I1011 10:00:05.678901       1 log.go:245] http: TLS handshake error from 10.0.0.15:41234: EOF", "stated": "info"}
+{"format": "cri/kube-apiserver", "line": "2026-10-11T10:00:06.789012345Z stderr F W1011 10:00:06.789012       1 dispatcher.go:225] Failed calling webhook, failing closed validate.nginx.ingress.kubernetes.io: failed calling webhook \"validate.nginx.ingress.kubernetes.io\": failed to call webhook: Post \"https://ingress-nginx-controller-admission.ingress-nginx.svc:443/networking/v1/ingresses?timeout=10s\": dial tcp 10.96.45.12:443: connect: connection refused", "stated": "warning"}
+{"format": "cri/kube-scheduler", "line": "2026-10-11T10:00:09.012345678Z stderr F I1011 10:00:09.012345       1 schedule_one.go:1055] \"Unable to schedule pod; no fit; waiting\" pod=\"default/web-7d4b9c5f6-q8r7s\" err=\"0/3 nodes are available: 1 node(s) had untolerated taint {node-role.kubernetes.io/control-plane: }, 2 Insufficient cpu. preemption: 0/3 nodes are available: 1 Preemption is not helpful for scheduling, 2 No preemption victims found for incoming pod.\"", "stated": "info"}
+{"format": "cri/kube-controller-manager", "line": "2026-10-11T10:00:10.123456789Z stderr F I1011 10:00:10.123456       1 event.go:389] \"Event occurred\" object=\"default/web\" fieldPath=\"\" kind=\"Deployment\" apiVersion=\"apps/v1\" type=\"Normal\" reason=\"ScalingReplicaSet\" message=\"Scaled up replica set web-7d4b9c5f6 to 3 from 2\"", "stated": "info"}
+{"format": "cri/kube-controller-manager", "line": "2026-10-11T10:00:11.234567890Z stderr F I1011 10:00:11.234567       1 event.go:389] \"Event occurred\" object=\"default/data-postgres-0\" fieldPath=\"\" kind=\"PersistentVolumeClaim\" apiVersion=\"v1\" type=\"Warning\" reason=\"ProvisioningFailed\" message=\"storageclass.storage.k8s.io \\\"fast-ssd\\\" not found\"", "stated": "info"}
+{"format": "cri/etcd", "line": "2026-10-11T10:00:12.345678901Z stderr F {\"level\":\"warn\",\"ts\":\"2026-10-11T10:00:12.345678Z\",\"caller\":\"etcdserver/util.go:170\",\"msg\":\"apply request took too long\",\"took\":\"123.456789ms\",\"expected-duration\":\"100ms\",\"prefix\":\"read-only range \",\"request\":\"key:\\\"/registry/pods/default/\\\" range_end:\\\"/registry/pods/default0\\\" \",\"response\":\"range_response_count:12 size:45678\"}", "stated": "warning"}
+{"format": "cri/etcd", "line": "2026-10-11T10:00:13.456789012Z stderr F {\"level\":\"info\",\"ts\":\"2026-10-11T10:00:13.456789Z\",\"caller\":\"mvcc/index.go:214\",\"msg\":\"compact tree index\",\"revision\":123456}", "stated": "info"}
+{"format": "cri/ingress-nginx", "line": "2026-10-11T10:00:14.567890123Z stderr F W1011 10:00:14.567890       7 controller.go:1216] Service \"default/web\" does not have any active Endpoint.", "stated": "warning"}
+{"format": "cri/ingress-nginx", "line": "2026-10-11T10:00:15.678901234Z stderr F I1011 10:00:15.678901       7 event.go:377] Event(v1.ObjectReference{Kind:\"Ingress\", Namespace:\"default\", Name:\"web\", UID:\"3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f\", APIVersion:\"networking.k8s.io/v1\", ResourceVersion:\"123456\", FieldPath:\"\"}): type: 'Normal' reason: 'Sync' Scheduled for sync", "stated": "info"}
+{"format": "cri/ingress-nginx", "line": "2026-10-11T10:00:16.789012345Z stdout F 10.244.0.1 - - [11/Oct/2026:10:00:16 +0000] \"GET /api/v1/alerts?severity=critical HTTP/1.1\" 200 1834 \"https://admin.example.com/alerts\" \"Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0\" 512 0.034 [shop-api-8080] [] 10.244.2.15:8080 1834 0.034 200 b7e2c9d1a0f34e5b8c6d7e8f9a0b1c2d", "stated": "", "guess": "info"}
+{"format": "cri/spring-boot", "line": "2026-10-11T10:00:17.890123456Z stdout F 2026-10-11T10:00:17.890Z  INFO 1 --- [shop-api] [           main] c.e.shop.ShopApplication                 : Started ShopApplication in 6.789 seconds (process running for 7.456)", "stated": "info"}
+{"format": "cri/zap partial", "line": "2026-10-11T10:00:18.901234567Z stdout P {\"level\":\"info\",\"ts\":1791712818.901,\"caller\":\"server/http.go:88\",\"msg\":\"request\",\"method\":\"POST\",\"path\":\"/v1/events\",\"status\":200,\"bytes\":", "stated": "info"}
+{"format": "cri/nginx", "line": "2026-10-11T10:00:19.012345678Z stderr F 2026/10/11 10:00:19 [error] 30#30: *61 open() \"/usr/share/nginx/html/api/health\" failed (2: No such file or directory), client: 10.244.0.1, server: localhost, request: \"GET /api/health HTTP/1.1\", host: \"10.244.1.9:80\"", "stated": "error"}
+{"format": "cri/python app", "line": "2026-10-11T10:00:20.123456789Z stderr F INFO:     10.244.0.1:40312 - \"GET /healthz HTTP/1.1\" 200 OK", "stated": "info"}
+{"format": "systemd/journalctl", "line": "Oct 11 10:00:00 web1 systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.", "stated": "", "guess": "info"}
+{"format": "systemd/journalctl", "line": "Oct 11 10:00:00 web1 systemd[1]: Starting apt-daily.service - Daily apt download activities...", "stated": "", "guess": "info"}
+{"format": "systemd/journalctl", "line": "Oct 11 10:00:01 web1 systemd[1]: apt-daily.service: Deactivated successfully.", "stated": "", "guess": "info"}
+{"format": "systemd/journalctl", "line": "Oct 11 10:00:01 web1 systemd[1]: Finished apt-daily.service - Daily apt download activities.", "stated": "", "guess": "info"}
+{"format": "systemd/journalctl", "line": "Oct 11 10:00:02 web1 systemd[1]: Started apport-autoreport.path - Process error reports when automatic reporting is enabled (file watch).", "stated": "", "guess": "info"}
+{"format": "systemd/journalctl-short-iso", "line": "2026-10-11T10:00:24+0000 web1 systemd[1]: Started certbot.timer - Run certbot twice daily.", "stated": "", "guess": "info"}
+{"format": "systemd/journalctl-short-iso", "line": "2026-10-11T10:00:25+0000 web1 systemd[1]: certbot.service: Deactivated successfully.", "stated": "", "guess": "info"}
+{"format": "systemd/journald-json", "line": "Started nginx.service - A high performance web server and a reverse proxy server.", "level": "6", "stated": "info"}
+{"format": "systemd/journald-json", "line": "Failed to start myapp.service - My App.", "level": "3", "stated": "error"}
+{"format": "journald-json/python service", "line": "ERROR:root:Database connection failed: could not connect to server: Connection refused", "level": "6", "stated": "error"}
+{"format": "journald-json/python service", "line": "WARNING:urllib3.connectionpool:Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x7f3a2b4c5d60>: Failed to establish a new connection: [Errno 111] Connection refused')': /v1/push", "level": "6", "stated": "warning"}
+{"format": "journald-json/node service", "line": "Server listening on port 3000", "level": "6", "stated": "info"}
+{"format": "journald-json/go service", "line": "2026/10/11 10:00:00 http: TLS handshake error from 203.0.113.9:40022: remote error: tls: bad certificate", "level": "6", "stated": "info"}
+{"format": "journald-json/gunicorn service", "line": "[2026-10-11 10:00:00 +0000] [1234] [ERROR] Worker (pid:1240) was sent SIGKILL! Perhaps out of memory?", "level": "6", "stated": "error"}
+{"format": "docker-journald/nginx stderr", "line": "2026/10/11 10:00:00 [notice] 1#1: start worker processes", "level": "3", "stated": "notice"}
+{"format": "docker-journald/nginx stdout", "line": "172.18.0.1 - - [11/Oct/2026:10:00:00 +0000] \"GET /api/errors HTTP/1.1\" 200 615 \"-\" \"curl/8.5.0\" \"-\"", "level": "6", "stated": "info"}
+{"format": "docker-journald/gunicorn stderr", "line": "[2026-10-11 10:00:00 +0000] [7] [INFO] Booting worker with pid: 7", "level": "3", "stated": "info"}
+{"format": "docker-journald/uvicorn stderr", "line": "INFO:     Application startup complete.", "level": "3", "stated": "info"}
+{"format": "docker-journald/postgres stderr", "line": "2026-10-11 10:00:00.150 UTC [1] LOG:  database system is ready to accept connections", "level": "3", "stated": "info"}
+{"format": "docker-journald/redis stdout", "line": "1:M 11 Oct 2026 10:00:00.128 * Ready to accept connections tcp", "level": "6", "stated": "notice"}
+{"format": "sshd/journalctl", "line": "Oct 11 10:00:00 web1 sshd[2345]: Accepted password for alice from 198.51.100.23 port 61022 ssh2", "stated": "", "guess": "info"}
+{"format": "sshd/journalctl", "line": "Oct 11 10:00:01 web1 sshd[2345]: pam_unix(sshd:session): session opened for user alice(uid=1000) by alice(uid=0)", "stated": "", "guess": "info"}
+{"format": "sshd/journalctl", "line": "Oct 11 10:00:02 web1 sshd[2399]: Invalid user admin from 203.0.113.9 port 40022", "stated": ""}
+{"format": "sshd/journalctl", "line": "Oct 11 10:00:02 web1 sshd[2399]: Failed password for invalid user admin from 203.0.113.9 port 40022 ssh2", "stated": ""}
+{"format": "sshd/journalctl", "line": "Oct 11 10:00:03 web1 sshd[2399]: Connection closed by invalid user admin 203.0.113.9 port 40022 [preauth]", "stated": ""}
+{"format": "sshd/journalctl openssh-9.8", "line": "Oct 11 10:00:13 web1 sshd-session[2415]: Accepted publickey for deploy from 10.0.0.5 port 52320 ssh2: RSA SHA256:9fA0bC1dE2fG3hI4jK5lM6nO7pQ8rS9tU0vW1xY2zA3", "stated": "", "guess": "info"}
+{"format": "sshd/rsyslog", "line": "Oct 11 10:00:14 web1 sshd[2417]: message repeated 2 times: [ Failed password for root from 203.0.113.9 port 40044 ssh2]", "stated": ""}
+{"format": "sudo/journalctl", "line": "Oct 11 10:00:00 web1 sudo[3456]:    alice : TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/usr/bin/journalctl -u myapp -p err --since today", "stated": "", "guess": "info"}
+{"format": "sudo/journalctl", "line": "Oct 11 10:00:00 web1 sudo[3456]: pam_unix(sudo:session): session opened for user root(uid=0) by alice(uid=1000)", "stated": "", "guess": "info"}
+{"format": "sudo/journalctl", "line": "Oct 11 10:00:03 web1 sudo[3462]:    alice : 3 incorrect password attempts ; TTY=pts/0 ; PWD=/home/alice ; USER=root ; COMMAND=/usr/bin/tail -f /var/log/nginx/error.log", "stated": ""}
+{"format": "cron/journalctl", "line": "Oct 11 10:17:01 web1 CRON[4321]: (root) CMD (cd / && run-parts --report /etc/cron.hourly)", "stated": "", "guess": "info"}
+{"format": "cron/journalctl", "line": "Oct 11 10:17:01 web1 CRON[4320]: pam_unix(cron:session): session opened for user root(uid=0) by root(uid=0)", "stated": "", "guess": "info"}
+{"format": "cronie/journalctl", "line": "Oct 11 10:01:01 web1 CROND[4500]: (root) CMD (run-parts /etc/cron.hourly)", "stated": "", "guess": "info"}
+{"format": "cronie/journalctl", "line": "Oct 11 10:01:01 web1 run-parts[4503]: (/etc/cron.hourly) starting 0anacron", "stated": "", "guess": "info"}
+{"format": "kernel/journalctl", "line": "Oct 11 10:00:00 web1 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=02:42:ac:11:00:02:02:42:0a:00:00:01:08:00 SRC=203.0.113.9 DST=10.0.0.5 LEN=40 TOS=0x00 PREC=0x00 TTL=243 ID=54321 PROTO=TCP SPT=40022 DPT=23 WINDOW=1024 RES=0x00 SYN URGP=0", "stated": ""}
+{"format": "kernel/journalctl", "line": "Oct 11 10:00:01 web1 kernel: Out of memory: Killed process 4321 (java) total-vm:8123456kB, anon-rss:4012345kB, file-rss:0kB, shmem-rss:0kB, UID:1000 pgtables:8192kB oom_score_adj:0", "stated": ""}
+{"format": "kernel/journalctl", "line": "Oct 11 10:00:04 web1 kernel: audit: type=1400 audit(1791712804.123:42): apparmor=\"DENIED\" operation=\"open\" class=\"file\" profile=\"snap.lxd.daemon\" name=\"/proc/1/environ\" pid=4321 comm=\"lxd\" requested_mask=\"r\" denied_mask=\"r\" fsuid=0 ouid=0", "stated": ""}
+{"format": "postgres/docker", "line": "2026-10-11 10:00:00.123 UTC [1] LOG:  starting PostgreSQL 16.4 (Debian 16.4-1.pgdg120+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit", "stated": "info"}
+{"format": "postgres/docker", "line": "2026-10-11 10:00:00.124 UTC [1] LOG:  listening on IPv4 address \"0.0.0.0\", port 5432", "stated": "info"}
+{"format": "postgres/docker", "line": "2026-10-11 10:00:00.140 UTC [29] LOG:  database system was shut down at 2026-10-11 09:59:58 UTC", "stated": "info"}
+{"format": "postgres/docker", "line": "2026-10-11 10:00:00.150 UTC [1] LOG:  database system is ready to accept connections", "stated": "info"}
+{"format": "postgres/docker", "line": "2026-10-11 10:05:00.200 UTC [27] LOG:  checkpoint starting: time", "stated": "info"}
+{"format": "postgres/debian %q%u@%d", "line": "2026-10-11 10:06:29.000 UTC [1417] app@shop ERROR:  null value in column \"customer_id\" of relation \"orders\" violates not-null constraint", "stated": "error"}
+{"format": "postgres/debian %q%u@%d", "line": "2026-10-11 10:06:29.001 UTC [1417] app@shop DETAIL:  Failing row contains (42, null, pending, 2026-10-11 10:06:29.000+00).", "stated": ""}
+{"format": "postgres/docker-entrypoint", "line": "PostgreSQL Database directory appears to contain a database; Skipping initialization", "stated": "", "guess": "info"}
+{"format": "postgres/docker-entrypoint", "line": "PostgreSQL init process complete; ready for start up.", "stated": "", "guess": "info"}
+{"format": "postgres/compose", "line": "db-1  | 2026-10-11 10:00:00.150 UTC [1] LOG:  database system is ready to accept connections", "stated": "info"}
+{"format": "mysql8", "line": "2026-10-11T10:00:00.123456Z 0 [System] [MY-010116] [Server] /usr/sbin/mysqld (mysqld 8.4.2) starting as process 1", "stated": "info"}
+{"format": "mysql8", "line": "2026-10-11T10:00:00.234567Z 1 [System] [MY-013576] [InnoDB] InnoDB initialization has started.", "stated": "info"}
+{"format": "mysql/docker-entrypoint", "line": "2026-10-11 10:00:00+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 8.4.2-1.el9 started.", "stated": "notice"}
+{"format": "mysql/docker-entrypoint", "line": "2026-10-11 10:00:00+00:00 [Note] [Entrypoint]: Switching to dedicated user 'mysql'", "stated": "notice"}
+{"format": "mariadb", "line": "2026-10-11 10:00:00 0 [Note] Starting MariaDB 11.4.3-MariaDB-ubu2404 source revision 5c9e1c5c4c4d3f8e1c8b5a7f9e2d1c0b3a4f5e6d as process 1", "stated": "notice"}
+{"format": "mariadb", "line": "2026-10-11 10:00:00 0 [Note] InnoDB: Buffer pool(s) load completed at 261011 10:00:00", "stated": "notice"}
+{"format": "redis7", "line": "1:C 11 Oct 2026 10:00:00.123 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo", "stated": "notice"}
+{"format": "redis7", "line": "1:M 11 Oct 2026 10:00:00.125 * monotonic clock: POSIX clock_gettime", "stated": "notice"}
+{"format": "redis7", "line": "1:M 11 Oct 2026 10:00:00.126 * Running mode=standalone, port=6379.", "stated": "notice"}
+{"format": "redis7/compose", "line": "redis-1  | 1:M 11 Oct 2026 10:00:00.128 * Ready to accept connections tcp", "stated": "notice"}
+{"format": "spring-boot3", "line": "2026-10-11T10:00:00.123Z  INFO 1 --- [           main] c.e.shop.ShopApplication                 : Starting ShopApplication v1.4.2 using Java 21.0.4 with PID 1 (/app/app.jar started by app in /app)", "stated": "info"}
+{"format": "spring-boot3", "line": "2026-10-11T10:00:00.456Z  INFO 1 --- [           main] c.e.shop.ShopApplication                 : No active profile set, falling back to 1 default profile: \"default\"", "stated": "info"}
+{"format": "spring-boot3", "line": "2026-10-11T10:00:02.789Z  INFO 1 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)", "stated": "info"}
+{"format": "spring-boot3", "line": "2026-10-11T10:00:03.012Z  INFO 1 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...", "stated": "info"}
+{"format": "spring-boot3.2 app name", "line": "2026-10-11T10:00:17.678Z  INFO 1 --- [shop-api] [           main] .s.b.a.l.ConditionEvaluationReportLogger :", "stated": "info"}
+{"format": "spring-boot3.2 app name", "line": "2026-10-11T10:00:17.700Z ERROR 1 --- [shop-api] [           main] o.s.b.d.LoggingFailureAnalysisReporter   :", "stated": "error"}
+{"format": "spring-boot/console", "line": "Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.", "stated": ""}
+{"format": "spring-boot/console", "line": "Description:", "stated": ""}
+{"format": "spring-boot/console", "line": "Web server failed to start. Port 8080 was already in use.", "stated": ""}
+{"format": "java/stacktrace folded", "line": "java.lang.IllegalStateException: Order 42 not found\n\tat com.example.shop.OrderService.get(OrderService.java:42) ~[!/:1.4.2]\n\tat com.example.shop.OrderController.show(OrderController.java:27) ~[!/:1.4.2]\n\tat java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]", "stated": ""}
+{"format": "spring-boot2", "line": "2026-10-11 10:00:18.901  INFO 1 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8080 (http) with context path ''", "stated": "info"}
+{"format": "spring-boot2", "line": "2026-10-11 10:00:19.012 ERROR 1 --- [nio-8080-exec-7] c.e.shop.web.GlobalExceptionHandler      : Unhandled exception on POST /api/orders", "stated": "error"}
+{"format": "logback/default", "line": "10:00:00.123 [main] INFO  com.example.Main - Server started on port 8080", "stated": "info"}
+{"format": "logback/default", "line": "10:00:01.456 [pool-2-thread-1] ERROR c.e.worker.MessageHandler - Failed to process message id=42", "stated": "error"}
+{"format": "log4j2/default", "line": "10:00:04.345 [main] ERROR com.example.App - Configuration file not found, using defaults", "stated": "error"}
+{"format": "tomcat/catalina.out", "line": "11-Oct-2026 10:00:00.123 INFO [main] org.apache.catalina.startup.Catalina.start Server startup in [1234] milliseconds", "stated": "info"}
+{"format": "tomcat/catalina.out", "line": "11-Oct-2026 10:00:01.456 SEVERE [main] org.apache.catalina.core.StandardContext.startInternal One or more listeners failed to start. Full details will be found in the appropriate container log file", "stated": "error"}
+{"format": "python/basicConfig", "line": "INFO:root:Starting sync for 42 accounts", "stated": "info"}
+{"format": "python/basicConfig", "line": "WARNING:root:Retrying request to /v1/charges in 2.0 seconds", "stated": "warning"}
+{"format": "python/logging asctime-name-levelname", "line": "2026-10-11 10:00:00,123 - app.sync - INFO - Synced 120 records, 0 errors", "stated": "info"}
+{"format": "python/logging asctime-name-levelname", "line": "2026-10-11 10:00:01,456 - app.sync - ERROR - Sync failed for account 42: HTTPError 503", "stated": "error"}
+{"format": "python/traceback folded", "line": "Traceback (most recent call last):\n  File \"/app/worker.py\", line 88, in run\n    self.process(job)\n  File \"/app/worker.py\", line 120, in process\n    conn = psycopg2.connect(dsn)", "stated": ""}
+{"format": "python/exception", "line": "psycopg2.OperationalError: connection to server at \"db\" (10.0.0.10), port 5432 failed: Connection refused", "stated": "", "guess": "error"}
+{"format": "gunicorn/error", "line": "[2026-10-11 10:00:00 +0000] [1] [INFO] Starting gunicorn 23.0.0", "stated": "info"}
+{"format": "gunicorn/error", "line": "[2026-10-11 10:00:00 +0000] [1] [INFO] Listening at: http://0.0.0.0:8000 (1)", "stated": "info"}
+{"format": "gunicorn/error", "line": "[2026-10-11 10:00:00 +0000] [1] [INFO] Using worker: sync", "stated": "info"}
+{"format": "gunicorn/access", "line": "10.0.0.5 - - [11/Oct/2026:10:00:36 +0000] \"GET /api/errors/summary HTTP/1.1\" 200 812 \"-\" \"python-requests/2.32.3\"", "stated": "", "guess": "info"}
+{"format": "uvicorn", "line": "INFO:     Started server process [1]", "stated": "info"}
+{"format": "uvicorn", "line": "INFO:     Waiting for application startup.", "stated": "info"}
+{"format": "uvicorn", "line": "INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)", "stated": "info"}
+{"format": "uvicorn/compose", "line": "api-1  | INFO:     Application startup complete.", "stated": "info"}
+{"format": "django/runserver", "line": "Watching for file changes with StatReloader", "stated": "", "guess": "info"}
+{"format": "django/runserver", "line": "Performing system checks...", "stated": "", "guess": "info"}
+{"format": "django/runserver", "line": "System check identified no issues (0 silenced).", "stated": "", "guess": "info"}
+{"format": "celery", "line": "[2026-10-11 10:00:00,123: INFO/MainProcess] Connected to redis://redis:6379/0", "stated": "info"}
+{"format": "celery", "line": "[2026-10-11 10:00:00,234: INFO/MainProcess] mingle: searching for neighbors", "stated": "info"}
+{"format": "flask/werkzeug", "line": "* Serving Flask app 'app'", "stated": "", "guess": "info"}
+{"format": "flask/werkzeug", "line": "* Debug mode: off", "stated": "", "guess": "info"}
+{"format": "pino/json", "line": "{\"level\":30,\"time\":1791712800123,\"pid\":1,\"hostname\":\"api-7d4b9c5f6-x2k9p\",\"msg\":\"Server listening at http://0.0.0.0:3000\"}", "stated": "info"}
+{"format": "pino/json", "line": "{\"level\":30,\"time\":1791712801234,\"pid\":1,\"hostname\":\"api-7d4b9c5f6-x2k9p\",\"reqId\":\"req-1\",\"req\":{\"method\":\"GET\",\"url\":\"/api/errors\",\"hostname\":\"api.example.com\",\"remoteAddress\":\"10.244.0.1\",\"remotePort\":52314},\"msg\":\"incoming request\"}", "stated": "info"}
+{"format": "pino/json", "line": "{\"level\":30,\"time\":1791712801240,\"pid\":1,\"hostname\":\"api-7d4b9c5f6-x2k9p\",\"reqId\":\"req-1\",\"res\":{\"statusCode\":500},\"responseTime\":5.83,\"msg\":\"request completed\"}", "stated": "info"}
+{"format": "pino/json", "line": "{\"level\":50,\"time\":1791712801238,\"pid\":1,\"hostname\":\"api-7d4b9c5f6-x2k9p\",\"reqId\":\"req-1\",\"err\":{\"type\":\"Error\",\"message\":\"connect ECONNREFUSED 10.0.0.10:5432\",\"stack\":\"Error: connect ECONNREFUSED 10.0.0.10:5432\\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1607:16)\",\"errno\":-111,\"code\":\"ECONNREFUSED\",\"syscall\":\"connect\",\"address\":\"10.0.0.10\",\"port\":5432},\"msg\":\"connect ECONNREFUSED 10.0.0.10:5432\"}", "stated": "error"}
+{"format": "pino/json", "line": "{\"level\":40,\"time\":1791712802345,\"pid\":1,\"hostname\":\"api-7d4b9c5f6-x2k9p\",\"msg\":\"Slow query detected: 1532ms\"}", "stated": "warning"}
+{"format": "pino/json label", "line": "{\"level\":\"info\",\"time\":\"2026-10-11T10:00:03.456Z\",\"pid\":1,\"hostname\":\"api\",\"msg\":\"Connected to MongoDB\"}", "stated": "info"}
+{"format": "pino/structured", "line": "Server listening at http://0.0.0.0:3000", "level": "30", "stated": "info"}
+{"format": "pino/structured", "line": "Request body exceeds 1MB, truncating log", "level": "40", "stated": "warning"}
+{"format": "winston/json", "line": "{\"level\":\"info\",\"message\":\"Server started on port 3000\",\"timestamp\":\"2026-10-11T10:00:00.123Z\"}", "stated": "info"}
+{"format": "winston/json", "line": "{\"level\":\"error\",\"message\":\"Unhandled rejection: TypeError: Cannot read properties of undefined (reading 'id')\",\"stack\":\"TypeError: Cannot read properties of undefined (reading 'id')\\n    at /app/src/routes/orders.js:42:31\",\"timestamp\":\"2026-10-11T10:00:01.234Z\"}", "stated": "error"}
+{"format": "winston/simple", "line": "info: Server started on port 3000", "stated": "info"}
+{"format": "winston/simple", "line": "error: Database connection failed {\"code\":\"ECONNREFUSED\",\"errno\":-111}", "stated": "error"}
+{"format": "winston/colorize", "line": "\u001b[32minfo\u001b[39m: Listening on port 3000", "stated": "info"}
+{"format": "winston/colorize", "line": "\u001b[31merror\u001b[39m: Payment webhook signature mismatch", "stated": "error"}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM     LOG [NestFactory] Starting Nest application...", "stated": "info"}
+{"format": "nestjs", "line": "[Nest] 1  - 10/11/2026, 10:00:00 AM     LOG [RoutesResolver] ErrorsController {/api/errors}: +1ms", "stated": "info"}
+{"format": "node/stderr", "line": "(node:1) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.", "stated": "", "guess": "warning"}
+{"format": "node/stdout", "line": "Server listening on port 3000", "stated": "", "guess": "info"}
+{"format": "npm", "line": "npm notice New minor version of npm available! 10.8.2 -> 10.9.0", "stated": "notice"}
+{"format": "npm", "line": "npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.", "stated": "warning"}
+{"format": "nextjs", "line": "✓ Ready in 1234ms", "stated": "", "guess": "info"}
+{"format": "zap/json", "line": "{\"level\":\"info\",\"ts\":1791712800.1234567,\"caller\":\"server/main.go:42\",\"msg\":\"starting HTTP server\",\"addr\":\":8080\"}", "stated": "info"}
+{"format": "zap/json", "line": "{\"level\":\"error\",\"ts\":1791712801.2345678,\"caller\":\"orders/handler.go:88\",\"msg\":\"failed to fetch order\",\"order_id\":42,\"error\":\"sql: no rows in result set\",\"stacktrace\":\"github.com/acme/shop/orders.(*Handler).Get\\n\\t/src/orders/handler.go:88\\nnet/http.HandlerFunc.ServeHTTP\\n\\t/usr/local/go/src/net/http/server.go:2220\"}", "stated": "error"}
+{"format": "zap/console", "line": "2026-10-11T10:00:05.678Z\tINFO\tserver/main.go:42\tstarting HTTP server\t{\"addr\": \":8080\"}", "stated": "info"}
+{"format": "zap/console", "line": "2026-10-11T10:00:06.789Z\tERROR\torders/handler.go:88\tfailed to fetch order\t{\"order_id\": 42, \"error\": \"sql: no rows in result set\"}", "stated": "error"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"Starting server on :8080\"", "stated": "info"}
+{"format": "logrus/text", "line": "time=\"2026-10-11T10:00:01Z\" level=error msg=\"failed to publish event\" error=\"nats: connection closed\" subject=orders.created", "stated": "error"}
+{"format": "logrus/tty", "line": "INFO[0000] Starting server on :8080", "stated": "info"}
+{"format": "logrus/tty", "line": "ERRO[0042] failed to publish event                         error=\"nats: connection closed\"", "stated": "error"}
+{"format": "slog/text", "line": "time=2026-10-11T10:00:00.123Z level=INFO msg=\"server started\" addr=:8080", "stated": "info"}
+{"format": "slog/text", "line": "time=2026-10-11T10:00:01.234Z level=ERROR msg=\"query failed\" err=\"pq: canceling statement due to statement timeout\" query=ListOrders", "stated": "error"}
+{"format": "slog/default", "line": "2026/10/11 10:00:03 INFO server started addr=:8080", "stated": "info"}
+{"format": "slog/default", "line": "2026/10/11 10:00:04 ERROR query failed err=\"context deadline exceeded\"", "stated": "error"}
+{"format": "slog/json", "line": "{\"time\":\"2026-10-11T10:00:05.123456789Z\",\"level\":\"INFO\",\"msg\":\"server started\",\"addr\":\":8080\"}", "stated": "info"}
+{"format": "slog/json", "line": "{\"time\":\"2026-10-11T10:00:06.234567891Z\",\"level\":\"ERROR\",\"msg\":\"request failed\",\"method\":\"POST\",\"path\":\"/api/orders\",\"status\":500,\"err\":\"upstream timeout\"}", "stated": "error"}
+{"format": "go/log", "line": "2026/10/11 10:00:07 Listening on :8080", "stated": "", "guess": "info"}
+{"format": "go/log", "line": "2026/10/11 10:00:08 http: TLS handshake error from 203.0.113.9:40022: EOF", "stated": ""}
+{"format": "go/log", "line": "2026/10/11 10:00:11 error loading config: open config.yaml: no such file or directory", "stated": "", "guess": "error"}
+{"format": "prometheus2", "line": "ts=2026-10-11T10:00:00.123Z caller=main.go:1150 level=info msg=\"Server is ready to receive web requests.\"", "stated": "info"}
+{"format": "prometheus2", "line": "ts=2026-10-11T10:00:01.234Z caller=compact.go:576 level=info component=tsdb msg=\"write block\" mint=1791705600000 maxt=1791712800000 ulid=01J9ZK2N3P4Q5R6S7T8V9W0X1Y duration=1.234s", "stated": "info"}
+{"format": "prometheus3", "line": "time=2026-10-11T10:00:03.456Z level=INFO source=main.go:1230 msg=\"Server is ready to receive web requests.\"", "stated": "info"}
+{"format": "prometheus3", "line": "time=2026-10-11T10:00:04.567Z level=ERROR source=notifier.go:624 msg=\"Error sending alert\" component=notifier alertmanager=http://alertmanager:9093/api/v2/alerts count=3 err=\"Post \\\"http://alertmanager:9093/api/v2/alerts\\\": dial tcp 10.0.0.30:9093: connect: connection refused\"", "stated": "error"}
+{"format": "grafana", "line": "logger=context userId=1 orgId=1 uname=admin t=2026-10-11T10:00:05.678901234Z level=info msg=\"Request Completed\" method=GET path=/api/alertmanager/grafana/api/v2/alerts status=200 remote_addr=10.0.0.5 time_ms=12 duration=12.345ms size=1234 referer=http://grafana.example.com/alerting/list handler=/api/alertmanager/grafana/api/v2/alerts status_source=server", "stated": "info"}
+{"format": "grafana", "line": "logger=ngalert.scheduler rule_uid=a1b2c3 org_id=1 t=2026-10-11T10:00:06.789012345Z level=error msg=\"Failed to evaluate rule\" error=\"failed to execute query A: Post \\\"http://prometheus:9090/api/v1/query_range\\\": dial tcp 10.0.0.31:9090: connect: connection refused\" duration=1.234ms", "stated": "error"}
+{"format": "dotnet/console (indent folded)", "line": "info: Microsoft.Hosting.Lifetime[14]\n      Now listening on: http://[::]:8080", "stated": "info"}
+{"format": "dotnet/console (indent folded)", "line": "info: Microsoft.Hosting.Lifetime[0]\n      Hosting environment: Production", "stated": "info"}
+{"format": "dotnet/console (line by line)", "line": "info: Microsoft.Hosting.Lifetime[0]", "stated": "info"}
+{"format": "dotnet/console (line by line)", "line": "Application is shutting down...", "stated": "", "guess": "info"}
+{"format": "dotnet/json-console", "line": "{\"EventId\":14,\"LogLevel\":\"Information\",\"Category\":\"Microsoft.Hosting.Lifetime\",\"Message\":\"Now listening on: http://[::]:8080\",\"State\":{\"Message\":\"Now listening on: http://[::]:8080\",\"address\":\"http://[::]:8080\",\"{OriginalFormat}\":\"Now listening on: {address}\"}}", "stated": "info"}
+{"format": "dotnet/json-console", "line": "{\"EventId\":1,\"LogLevel\":\"Error\",\"Category\":\"Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware\",\"Message\":\"An unhandled exception has occurred while executing the request.\",\"Exception\":\"System.InvalidOperationException: Sequence contains no elements\\n   at System.Linq.ThrowHelper.ThrowNoElementsException()\",\"State\":{\"Message\":\"An unhandled exception has occurred while executing the request.\",\"{OriginalFormat}\":\"An unhandled exception has occurred while executing the request.\"}}", "stated": "error"}
+{"format": "rails7/Logger::Formatter", "line": "I, [2026-10-11T10:00:00.123456 #1]  INFO -- : [3f2e1d0c-9b8a-4c7d-8e6f-5a4b3c2d1e0f] Started GET \"/orders/42\" for 10.0.0.5 at 2026-10-11 10:00:00 +0000", "stated": "info"}
+{"format": "rails7/Logger::Formatter", "line": "I, [2026-10-11T10:00:00.124567 #1]  INFO -- : [3f2e1d0c-9b8a-4c7d-8e6f-5a4b3c2d1e0f] Processing by OrdersController#show as HTML", "stated": "info"}
+{"format": "rails8/TaggedLogging", "line": "[3f2e1d0c-9b8a-4c7d-8e6f-5a4b3c2d1e0f] Started GET \"/up\" for 10.0.0.5 at 2026-10-11 10:00:05 +0000", "stated": "", "guess": "info"}
+{"format": "rails8/TaggedLogging", "line": "[3f2e1d0c-9b8a-4c7d-8e6f-5a4b3c2d1e0f] Processing by Rails::HealthController#show as HTML", "stated": "", "guess": "info"}
+{"format": "puma", "line": "Puma starting in single mode...", "stated": "", "guess": "info"}
+{"format": "puma", "line": "* Puma version: 6.4.3 (ruby 3.3.5-p100) (\"The Eagle of Durango\")", "stated": "", "guess": "info"}
+{"format": "sidekiq7", "line": "2026-10-11T10:00:07.123Z pid=1 tid=2xk4p class=OrderMailerJob jid=3f2e1d0c9b8a4c7d INFO: start", "stated": "info"}
+{"format": "sidekiq7", "line": "2026-10-11T10:00:07.250Z pid=1 tid=2xk4p class=OrderMailerJob jid=3f2e1d0c9b8a4c7d elapsed=0.127 INFO: done", "stated": "info"}
+{"format": "journald-json/python cookbook format", "line": "2026-10-11 10:00:01,456 - app.sync - ERROR - Sync failed for account 42: HTTPError 503", "level": "6", "stated": "error"}
+{"format": "journald-json/python cookbook format", "line": "2026-10-11 10:00:02,789 - app.sync - WARNING - Rate limited, retrying in 5s", "level": "6", "stated": "warning"}
+{"format": "journald-json/python cookbook format", "line": "2026-10-11 10:00:00,123 - app.sync - INFO - Synced 120 records, 0 errors", "level": "6", "stated": "info"}
+{"format": "docker-gelf/python cookbook stderr", "line": "2026-10-11 10:00:00,123 - app.sync - INFO - Synced 120 records, 0 errors", "level": "3", "stated": "info"}
+{"format": "docker-gelf/python cookbook stderr", "line": "2026-10-11 10:00:02,789 - app.sync - WARNING - Rate limited, retrying in 5s", "level": "3", "stated": "warning"}
+{"format": "docker-journald/python name-levelname stderr", "line": "2026-10-11 10:00:03,012 shop.worker INFO Processed job 42 in 0.12s", "level": "3", "stated": "info"}
+{"format": "docker-journald/logrus stderr", "line": "time=\"2026-10-11T10:00:00Z\" level=info msg=\"Starting server on :8080\"", "level": "3", "stated": "info"}
+{"format": "docker-journald/logrus stderr", "line": "time=\"2026-10-11T10:00:01Z\" level=warning msg=\"config file not found, using defaults\"", "level": "3", "stated": "warning"}
+{"format": "docker-journald/klog stderr", "line": "I1011 10:00:00.123456       1 leaderelection.go:254] attempting to acquire leader lease kube-system/cert-manager-controller...", "level": "3", "stated": "info"}
+{"format": "journald-json/hotspot stderr", "line": "OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended", "level": "6", "stated": "warning"}
+{"format": "journald-json/log4j1 stderr", "line": "log4j:WARN No appenders could be found for logger (org.apache.kafka.clients.producer.ProducerConfig).", "level": "6", "stated": "warning"}
+{"format": "journald-json/log4j2 status", "line": "ERROR StatusLogger Log4j2 could not find a logging implementation. Please add log4j-core to the classpath. Using SimpleLogger to log to the console...", "level": "6", "stated": "error"}
+{"format": "journald-json/node stderr", "line": "(node:1) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification.", "level": "6", "stated": "warning"}
+{"format": "journald-json/ruby warning", "line": "/usr/local/bundle/gems/redis-4.8.1/lib/redis.rb:269: warning: Redis#exists(key) will return an Integer in redis-rb 4.3. exists? returns a boolean.", "level": "6", "stated": "warning"}
+{"format": "docker-gelf/spring-boot stdout", "line": "2026-10-11T10:00:12.890Z ERROR 1 --- [nio-8080-exec-3] o.a.c.c.C.[.[.[/].[dispatcherServlet]    : Servlet.service() for servlet [dispatcherServlet] threw exception", "level": "6", "stated": "error"}
+{"format": "docker-gelf/apache httpd stderr", "line": "[Sun Oct 11 10:00:00.123456 2026] [mpm_event:notice] [pid 1:tid 140245119538048] AH00489: Apache/2.4.62 (Unix) configured -- resuming normal operations", "level": "3", "stated": "notice"}
+{"format": "docker-gelf/mysql stderr", "line": "2026-10-11T10:00:01.890123Z 0 [System] [MY-010931] [Server] /usr/sbin/mysqld: ready for connections. Version: '8.4.2'  socket: '/var/run/mysqld/mysqld.sock'  port: 3306  MySQL Community Server - GPL.", "level": "3", "stated": "info"}
+{"format": "docker-gelf/mariadb stderr", "line": "2026-10-11 10:00:01 0 [Note] mariadbd: ready for connections.", "level": "3", "stated": "notice"}
+{"format": "docker-gelf/php-fpm stderr", "line": "[11-Oct-2026 10:00:00] NOTICE: ready to handle connections", "level": "3", "stated": "notice"}
+{"format": "docker-gelf/celery stderr", "line": "[2026-10-11 10:00:02,567: INFO/MainProcess] Task shop.tasks.send_receipt[3f2e1d0c-9b8a-4c7d-8e6f-5a4b3c2d1e0f] received", "level": "3", "stated": "info"}
+{"format": "docker-gelf/python basicConfig stderr", "line": "INFO:root:Starting sync for 42 accounts", "level": "3", "stated": "info"}
+{"format": "docker-gelf/haproxy stderr", "line": "[NOTICE]   (1) : New worker (8) forked", "level": "3", "stated": "notice"}
+{"format": "docker-gelf/haproxy stderr", "line": "[WARNING]  (8) : Server be_app/app1 is DOWN, reason: Layer4 connection problem, info: \"Connection refused\", check duration: 0ms. 1 active and 0 backup servers left. 0 sessions active, 0 requeued, 0 remaining in queue.", "level": "3", "stated": "warning"}
+{"format": "docker-gelf/fluent-bit stderr", "line": "[2026/10/11 10:00:00] [ info] [fluent bit] version=3.1.9, commit=431fa79ae2, pid=1", "level": "3", "stated": "info"}
+{"format": "docker-gelf/tornado stderr", "line": "[I 261011 10:00:00 web:2348] 200 GET /api/health (10.0.0.5) 1.23ms", "level": "3", "stated": "info"}
+{"format": "docker-syslog/python cookbook stderr", "line": "<27>Oct 11 10:00:00 web1 shop-sync[900]: 2026-10-11 10:00:00,123 - app.sync - INFO - Synced 120 records, 0 errors", "stated": "info"}
+{"format": "docker-syslog/python cookbook stdout", "line": "<30>Oct 11 10:00:01 web1 shop-sync[900]: 2026-10-11 10:00:01,456 - app.sync - ERROR - Sync failed for account 42: HTTPError 503", "stated": "error"}
+{"format": "docker-syslog/gunicorn stderr", "line": "<27>Oct 11 10:00:00 web1 shop-api[901]: [2026-10-11 10:00:00 +0000] [7] [INFO] Booting worker with pid: 7", "stated": "info"}
+{"format": "rsyslog-fwd rfc5424/python", "line": "<30>1 2026-10-11T10:00:01.456789+00:00 web1 python3 1234 - - 2026-10-11 10:00:01,456 - app.sync - ERROR - Sync failed for account 42: HTTPError 503", "stated": "error"}
+{"format": "compose-logs container_name/aspnet", "line": "api  | info: Microsoft.Hosting.Lifetime[14]", "stated": "info"}
+{"format": "compose-logs container_name/aspnet", "line": "api  | fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]", "stated": "error"}
+{"format": "compose-logs container_name/winston", "line": "app  | error: Database connection failed {\"code\":\"ECONNREFUSED\"}", "stated": "error"}
+{"format": "compose-logs container_name/postgres", "line": "postgres  | 2026-10-11 10:00:00.150 UTC [1] LOG:  database system is ready to accept connections", "stated": "info"}
+{"format": "compose-logs container_name/uvicorn", "line": "backend  | INFO:     Application startup complete.", "stated": "info"}
+{"format": "compose-logs container_name/nginx", "line": "nginx  | 2026/10/11 10:00:13 [error] 30#30: *49 connect() failed (111: Connection refused) while connecting to upstream, client: 172.18.0.1, server: _, request: \"GET /api/ HTTP/1.1\", upstream: \"http://172.18.0.5:8000/api/\", host: \"localhost\"", "stated": "error"}
+{"format": "compose-logs/redis", "line": "redis-1  | 1:C 11 Oct 2026 10:00:00.123 # Warning: no config file specified, using the default config. In order to specify a config file use redis-server /path/to/redis.conf", "stated": "warning"}
+{"format": "compose-logs/node", "line": "web-1  | > shop-web@1.4.2 start", "stated": "", "guess": "info"}
+{"format": "python/tornado", "line": "[I 261011 10:00:00 web:2348] 200 GET /api/health (10.0.0.5) 1.23ms", "stated": "info"}
+{"format": "python/tornado", "line": "[W 261011 10:00:01 web:2348] 404 GET /favicon.ico (10.0.0.5) 0.52ms", "stated": "warning"}
+{"format": "python/tornado", "line": "[E 261011 10:00:02 web:1875] Uncaught exception GET /api/orders (10.0.0.5)", "stated": "error"}
+{"format": "jupyter-server", "line": "[I 2026-10-11 10:00:00.123 ServerApp] Jupyter Server 2.14.2 is running at:", "stated": "info"}
+{"format": "python/warnings stderr", "line": "/usr/local/lib/python3.12/site-packages/urllib3/connectionpool.py:1099: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.example.com'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings\n  warnings.warn(", "stated": "", "guess": "warning"}
+{"format": "node/stderr", "line": "(node:1) Warning: Setting the NODE_TLS_REJECT_UNAUTHORIZED environment variable to '0' makes TLS connections and HTTPS requests insecure by disabling certificate verification.", "stated": "warning"}
+{"format": "npm run", "line": "> shop-api@1.4.2 start", "stated": "", "guess": "info"}
+{"format": "npm run", "line": "> node dist/main.js", "stated": "", "guess": "info"}
+{"format": "yarn v1", "line": "yarn run v1.22.22", "stated": "", "guess": "info"}
+{"format": "yarn v1", "line": "$ node dist/main.js", "stated": "", "guess": "info"}
+{"format": "morgan/dev", "line": "GET /api/errors 200 12.345 ms - 512", "stated": "", "guess": "info"}
+{"format": "morgan/dev", "line": "POST /api/orders 500 45.678 ms - 21", "stated": ""}
+{"format": "express/stdout", "line": "Server listening on http://localhost:3000", "stated": "", "guess": "info"}
+{"format": "dotnet/unhandled", "line": "Unhandled exception. System.InvalidOperationException: Unable to resolve service for type 'Shop.Data.ShopContext' while attempting to activate 'Shop.Controllers.OrdersController'.", "stated": "", "guess": "error"}
+{"format": "go/panic", "line": "panic: runtime error: invalid memory address or nil pointer dereference", "stated": "critical"}
+{"format": "go/panic", "line": "[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x6b2f3a]", "stated": ""}
+{"format": "go/log pgx", "line": "2026/10/11 10:00:00 failed to connect to `host=db user=app database=shop`: failed SASL auth (FATAL: password authentication failed for user \"app\" (SQLSTATE 28P01))", "stated": ""}
+{"format": "go/log", "line": "2026/10/11 10:00:12 sync complete: 120 ok, 0 failed", "stated": "", "guess": "info"}
+{"format": "java/stderr", "line": "log4j:WARN No appenders could be found for logger (org.apache.kafka.clients.producer.ProducerConfig).", "stated": "warning"}
+{"format": "java/stderr", "line": "log4j:WARN Please initialize the log4j system properly.", "stated": "warning"}
+{"format": "java/exception header", "line": "org.postgresql.util.PSQLException: ERROR: duplicate key value violates unique constraint \"orders_pkey\"", "stated": ""}
+{"format": "java/exception header", "line": "org.postgresql.util.PSQLException: FATAL: password authentication failed for user \"app\"", "stated": ""}
+{"format": "java/exception header", "line": "Caused by: org.postgresql.util.PSQLException: Connection to db:5432 refused. Check that the hostname and port are correct and that the postmaster is accepting TCP/IP connections.", "stated": ""}
+{"format": "hibernate", "line": "2026-10-11T10:00:12.880Z  WARN 1 --- [nio-8080-exec-3] o.h.engine.jdbc.spi.SqlExceptionHelper   : SQL Error: 0, SQLState: 23505", "stated": "warning"}
+{"format": "hibernate", "line": "2026-10-11T10:00:12.881Z ERROR 1 --- [nio-8080-exec-3] o.h.engine.jdbc.spi.SqlExceptionHelper   : ERROR: duplicate key value violates unique constraint \"orders_pkey\"", "stated": "error"}
+{"format": "spring-boot3.4/ecs-json", "line": "{\"@timestamp\":\"2026-10-11T10:00:00.123Z\",\"log.level\":\"INFO\",\"process.pid\":1,\"process.thread.name\":\"main\",\"service.name\":\"shop\",\"log.logger\":\"com.example.shop.ShopApplication\",\"message\":\"Started ShopApplication in 6.789 seconds (process running for 7.456)\",\"ecs.version\":\"8.11\"}", "stated": "info"}
+{"format": "systemd-245/journalctl", "line": "Oct 11 10:00:02 web1 systemd[1]: Started Process error reports when automatic reporting is enabled (file watch).", "stated": "", "guess": "info"}
+{"format": "systemd-245/journalctl", "line": "Oct 11 10:00:02 web1 systemd[1]: Started Download data for packages that failed at package install time.", "stated": "", "guess": "info"}
+{"format": "systemd-245/journalctl", "line": "Oct 11 10:00:03 web1 systemd[1]: Starting Cleanup of Temporary Directories...", "stated": "", "guess": "info"}
+{"format": "rsyslog/journalctl", "line": "Oct 11 00:00:01 web1 rsyslogd[700]: [origin software=\"rsyslogd\" swVersion=\"8.2312.0\" x-pid=\"700\" x-info=\"https://www.rsyslog.com\"] rsyslogd was HUPed", "stated": "", "guess": "info"}
+{"format": "logrotate/journalctl", "line": "Oct 11 00:00:01 web1 logrotate[4321]: error: skipping \"/var/log/nginx/access.log\" because parent directory has insecure permissions (It's world writable or writable by group which is not \"root\") Set \"su\" directive in config file to tell logrotate which user/group should be used for rotation.", "stated": "error"}
+{"format": "NetworkManager/journalctl", "line": "Oct 11 10:00:05 web1 NetworkManager[812]: <info>  [1791712805.1234] device (eth0): state change: activated -> deactivating (reason 'user-requested', sys-iface-state: 'managed')", "stated": "info"}
+{"format": "NetworkManager/journalctl", "line": "Oct 11 10:00:06 web1 NetworkManager[812]: <warn>  [1791712806.2345] dhcp4 (eth0): request timed out", "stated": "warning"}
+{"format": "postfix/journalctl", "line": "Oct 11 10:00:07 web1 postfix/smtpd[4322]: warning: hostname unknown.example does not resolve to address 203.0.113.9: Name or service not known", "stated": "warning"}
+{"format": "postfix/journalctl", "line": "Oct 11 10:00:07 web1 postfix/smtpd[4322]: connect from unknown[203.0.113.9]", "stated": "", "guess": "info"}
+{"format": "unattended-upgrades", "line": "2026-10-11 06:25:01,123 INFO Starting unattended upgrades script", "stated": "info"}
+{"format": "unattended-upgrades", "line": "2026-10-11 06:25:05,789 WARNING Package linux-image-6.8.0-47-generic is kept back because a related package is kept back or due to local apt_preferences(5).", "stated": "warning"}
+{"format": "certbot", "line": "Saving debug log to /var/log/letsencrypt/letsencrypt.log", "stated": "", "guess": "info"}
+{"format": "certbot", "line": "Failed to renew certificate example.com with error: Some challenges have failed.", "stated": "", "guess": "error"}
+{"format": "php-fpm", "line": "[11-Oct-2026 10:00:05] WARNING: [pool www] server reached pm.max_children setting (5), consider raising it", "stated": "warning"}
+{"format": "php-fpm", "line": "[11-Oct-2026 10:00:06] WARNING: [pool www] child 42 said into stderr: \"NOTICE: PHP message: PHP Warning:  Undefined variable $x in /var/www/html/index.php on line 3\"", "stated": "warning"}
+{"format": "php-fpm/access", "line": "172.18.0.3 -  11/Oct/2026:10:00:00 +0000 \"GET /index.php\" 200", "stated": "", "guess": "info"}
+{"format": "pgbouncer", "line": "2026-10-11 10:00:00.123 UTC [1] LOG stats: 12 xacts/s, 34 queries/s, 0 client parses/s, 0 server parses/s, 0 binds/s, in 5678 B/s, out 12345 B/s, xact 1234 us, query 456 us, wait 0 us", "stated": "info"}
+{"format": "pgbouncer", "line": "2026-10-11 10:00:01.234 UTC [1] LOG C-0x55d5b1a2c3d0: shop/app@10.0.0.5:52314 closing because: client close request (age=0s)", "stated": "info"}
+{"format": "postgres/initdb", "line": "initdb: warning: enabling \"trust\" authentication for local connections", "stated": "warning"}
+{"format": "postgres/psql initdb.d", "line": "psql:/docker-entrypoint-initdb.d/init.sql:3: NOTICE:  extension \"uuid-ossp\" already exists, skipping", "stated": "notice"}
+{"format": "mysql/client", "line": "mysql: [Warning] Using a password on the command line interface can be insecure.", "stated": "warning"}
+{"format": "calico/felix", "line": "2026-10-11 10:00:00.123 [INFO][62] felix/int_dataplane.go 1937: Received *proto.HostMetadataV4V6Update update from calculation graph msg=hostname:\"node1\" ipv4_addr:\"10.0.0.11/24\"", "stated": "info"}
+{"format": "calico/felix", "line": "2026-10-11 10:00:01.234 [WARNING][62] felix/int_dataplane.go 2093: failed to wipe the XDP state error=failed to load BPF program (/usr/lib/calico/bpf/filter.o): stat /usr/lib/calico/bpf/filter.o: no such file or directory", "stated": "warning"}
+{"format": "bitnami/postgresql", "line": "postgresql 10:00:00.12 INFO  ==> ** Starting PostgreSQL setup **", "stated": "info"}
+{"format": "bitnami/postgresql", "line": "postgresql 10:00:00.15 WARN  ==> You set the environment variable ALLOW_EMPTY_PASSWORD=yes. For safety reasons, do not use this flag in a production environment.", "stated": "warning"}
+{"format": "docker/runc", "line": "exec /usr/local/bin/docker-entrypoint.sh: no such file or directory", "stated": "", "guess": "error"}
+{"format": "docker/runc", "line": "exec /app/server: permission denied", "stated": "", "guess": "error"}
+{"format": "sh", "line": "/docker-entrypoint.sh: line 12: /app/start.sh: Permission denied", "stated": "", "guess": "error"}
+{"format": "selinux/audit.log", "line": "type=AVC msg=audit(1791712800.123:42): avc:  denied  { read } for  pid=4321 comm=\"nginx\" name=\"index.html\" dev=\"sda1\" ino=12345 scontext=system_u:system_r:httpd_t:s0 tcontext=unconfined_u:object_r:user_home_t:s0 tclass=file permissive=0", "stated": ""}
+{"format": "traefik3", "line": "2026-10-11T10:00:00Z INF github.com/traefik/traefik/v3/cmd/traefik/traefik.go:103 > Traefik version 3.1.6 built on 2024-10-09T10:00:00Z version=3.1.6", "stated": "info"}
+{"format": "traefik3", "line": "2026-10-11T10:00:01Z ERR github.com/traefik/traefik/v3/pkg/provider/docker/pdocker.go:123 > Provider error, retrying in 2.469s error=\"Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\" providerName=docker", "stated": "error"}
+{"format": "s6-overlay", "line": "s6-rc: info: service s6rc-oneshot-runner: starting", "stated": "info"}
+{"format": "journald-json/php-cli stderr", "line": "PHP Warning:  Undefined array key \"id\" in /var/www/app/artisan on line 12", "level": "6", "stated": "warning"}
+{"format": "journald-json/php-cli stderr", "line": "PHP Fatal error:  Uncaught Error: Class \"App\\Jobs\\SyncOrders\" not found in /var/www/app/vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php:62", "level": "6", "stated": "critical"}
+{"format": "journald-json/php-cli stderr", "line": "PHP Deprecated:  Creation of dynamic property App\\Models\\Order::$total is deprecated in /var/www/app/app/Models/Order.php on line 30", "level": "6", "stated": "warning"}
+{"format": "docker-gelf/php-cli stderr", "line": "PHP Notice:  Undefined index: id in /var/www/html/cron.php on line 7", "level": "3", "stated": "notice"}
+{"format": "php-cli/stderr", "line": "PHP Warning:  Undefined array key \"id\" in /var/www/app/artisan on line 12", "stated": "warning"}
+{"format": "journald-json/java-hotspot", "line": "Java HotSpot(TM) 64-Bit Server VM warning: Option UseConcMarkSweepGC was deprecated in version 9.0 and will likely be removed in a future release.", "level": "6", "stated": "warning"}
+{"format": "journald-json/python name-levelname", "line": "2026-10-11 10:00:03,012 shop.worker ERROR Job 42 failed: timeout after 30s", "level": "6", "stated": "error"}
+{"format": "journald-json/python name-levelname", "line": "2026-10-11 10:00:03,013 shop.worker WARNING Job 43 retried (attempt 2)", "level": "6", "stated": "warning"}
+{"format": "docker-journald/python cookbook stderr", "line": "2026-10-11 10:00:01,456 - app.sync - ERROR - Sync failed for account 42: HTTPError 503", "level": "3", "stated": "error"}
+{"format": "docker-journald/python cookbook stderr", "line": "2026-10-11 10:00:04,001 - app.sync - DEBUG - Fetched page 3 of 12", "level": "3", "stated": "debug"}
+{"format": "compose-logs container_name/prometheus", "line": "prometheus  | ts=2026-10-11T10:00:00.123Z caller=main.go:1150 level=info msg=\"Server is ready to receive web requests.\"", "stated": "info"}
+{"format": "compose-logs container_name/grafana", "line": "grafana  | logger=settings t=2026-10-11T10:00:00.123456789Z level=info msg=\"Starting Grafana\" version=11.2.2 commit=c47b921ef4 branch=HEAD compiled=2026-10-11T10:00:00Z", "stated": "info"}
+{"format": "compose-logs container_name/grafana", "line": "grafana  | logger=ngalert.scheduler t=2026-10-11T10:00:06.789012345Z level=error msg=\"Failed to evaluate rule\" error=\"failed to execute query A\"", "stated": "error"}
+{"format": "compose-logs/grafana", "line": "grafana-1  | logger=ngalert.scheduler t=2026-10-11T10:00:06.789012345Z level=error msg=\"Failed to evaluate rule\" error=\"failed to execute query A\"", "stated": "error"}
+{"format": "compose-logs container_name/traefik", "line": "traefik  | 2026-10-11T10:00:00Z INF github.com/traefik/traefik/v3/cmd/traefik/traefik.go:103 > Traefik version 3.1.6 built on 2024-10-09T10:00:00Z version=3.1.6", "stated": "info"}
+{"format": "compose-logs container_name/spring", "line": "shop-api  | 2026-10-11T10:00:12.890Z ERROR 1 --- [nio-8080-exec-3] c.e.shop.web.GlobalExceptionHandler      : Unhandled exception on POST /api/orders", "stated": "error"}
+{"format": "compose-logs container_name/redis", "line": "redis  | 1:M 11 Oct 2026 10:00:00.128 * Ready to accept connections tcp", "stated": "notice"}
+{"format": "compose-logs container_name/mysql", "line": "mysql  | 2026-10-11T10:00:01.456789Z 0 [Warning] [MY-010068] [Server] CA certificate ca.pem is self signed.", "stated": "warning"}
+{"format": "compose-logs container_name/pino", "line": "api  | {\"level\":50,\"time\":1791712801238,\"pid\":1,\"hostname\":\"3f2e1d0c9b8a\",\"msg\":\"connect ECONNREFUSED 172.18.0.3:5432\"}", "stated": "error"}
+{"format": "docker-syslog/python basicConfig stderr", "line": "<27>Oct 11 10:00:00 web1 shop-sync[900]: INFO:root:Starting sync for 42 accounts", "stated": "info"}
+{"format": "docker-syslog/klog stderr", "line": "<27>Oct 11 10:00:00 web1 cert-manager[902]: I1011 10:00:00.123456       1 leaderelection.go:254] attempting to acquire leader lease kube-system/cert-manager-controller...", "stated": "info"}
+{"format": "docker-syslog/python cookbook stdout", "line": "<30>Oct 11 10:00:02 web1 shop-sync[900]: 2026-10-11 10:00:02,789 - app.sync - WARNING - Rate limited, retrying in 5s", "stated": "warning"}
+{"format": "docker-syslog/hotspot stderr", "line": "<27>Oct 11 10:00:00 web1 shop-api[901]: OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended", "stated": "warning"}
+{"format": "journald-json/python cookbook", "line": "2026-10-11 10:00:05,000 - app.sync - CRITICAL - Giving up after 5 failed attempts", "level": "6", "stated": "critical"}
+{"format": "journalctl-short-full/containerd", "line": "Sun 2026-10-11 10:00:00 UTC node containerd[812]: time=\"2026-10-11T10:00:00.123456789Z\" level=error msg=\"ContainerStatus for \\\"9a8b7c6d5e4f\\\" failed\" error=\"not found\"", "stated": "error"}
+{"format": "journalctl-short-full/prometheus", "line": "Sun 2026-10-11 10:00:00 UTC monitoring prometheus[900]: ts=2026-10-11T10:00:00.123Z caller=main.go:1150 level=info msg=\"Server is ready to receive web requests.\"", "stated": "info"}
+{"format": "journalctl-short-unix/dockerd", "line": "1791712800.123456 docker dockerd[900]: time=\"2026-10-11T10:00:00.123456789Z\" level=warning msg=\"ShouldRestart failed, container will not be restarted\" container=9a8b7c6d5e4f", "stated": "warning"}
+{"format": "journalctl-short-monotonic/grafana", "line": "[ 1234.567890] grafana grafana[700]: logger=cleanup t=2026-10-11T10:00:07.890123456Z level=info msg=\"Completed cleanup jobs\" duration=12.345678ms", "stated": "info"}
+{"format": "journalctl-short/prometheus nodigit host", "line": "Oct 11 10:00:00 monitoring prometheus[900]: ts=2026-10-11T10:00:00.123Z caller=main.go:1150 level=info msg=\"Server is ready to receive web requests.\"", "stated": "info"}
+{"format": "docker-gelf/bitnami stderr", "line": "postgresql 10:00:00.12 INFO  ==> ** Starting PostgreSQL setup **", "level": "3", "stated": "info"}
+{"format": "docker-gelf/bitnami stderr", "line": "redis 10:00:00.15 INFO  ==> Initializing Redis", "level": "3", "stated": "info"}
+{"format": "docker-journald/bitnami stderr", "line": "postgresql 10:00:00.15 WARN  ==> You set the environment variable ALLOW_EMPTY_PASSWORD=yes. For safety reasons, do not use this flag in a production environment.", "level": "3", "stated": "warning"}
+{"format": "stern", "line": "web-7d4b9c5f6-x2k9p app time=\"2026-10-11T10:00:01Z\" level=error msg=\"failed to publish event\" error=\"nats: connection closed\"", "stated": "error", "gap": "stern's 'pod container' prefix is a viewer format; counting free words before a level would admit data"}
+{"format": "compose-logs container_name/logrus", "line": "worker  | time=\"2026-10-11T10:00:01Z\" level=error msg=\"failed to publish event\" error=\"nats: connection closed\"", "stated": "error"}
+{"format": "compose-logs container_name/slog-json", "line": "api  | {\"time\":\"2026-10-11T10:00:06.234567891Z\",\"level\":\"ERROR\",\"msg\":\"request failed\",\"status\":500}", "stated": "error"}

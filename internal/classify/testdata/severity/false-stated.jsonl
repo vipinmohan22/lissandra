@@ -1,0 +1,112 @@
+{"format": "rsyslog (host named alert)/alertmanager", "line": "Oct 11 10:00:00 alert alertmanager[812]: ts=2026-10-11T10:00:00.123Z caller=main.go:181 level=info msg=\"Starting Alertmanager\" version=\"(version=0.27.0, branch=HEAD, revision=0aa3c2aad14cff039931923ab16b26b7481783b5)\"", "stated": "info"}
+{"format": "rsyslog (host named alert)/alertmanager", "line": "Oct 11 10:00:12 alert alertmanager[812]: ts=2026-10-11T10:00:12.004Z caller=cluster.go:708 level=info component=cluster msg=\"gossip settled; proceeding\" elapsed=10.002s", "stated": "info"}
+{"format": "rsyslog (host named trace)/otelcol-contrib", "line": "Oct 11 10:00:00 trace otelcol-contrib[1234]: 2026-10-11T10:00:00.123Z\tinfo\tservice@v0.110.0/service.go:135\tSetting up own telemetry...", "stated": "info"}
+{"format": "rsyslog (host named trace)/tempo", "line": "Oct 11 10:00:00 trace tempo[2210]: level=warn ts=2026-10-11T10:00:00.456Z caller=main.go:129 msg=\"-- CONFIGURATION WARNINGS --\"", "stated": "warning"}
+{"format": "rsyslog (host named debug)/sshd", "line": "Oct 11 10:00:00 debug sshd[2211]: Accepted publickey for deploy from 10.0.0.5 port 51234 ssh2: ED25519 SHA256:Xk3n9Qe5mJb7Lr2Vt8Wc4Yh6Za1Ds0Fg9Hj2Kl5Pq7", "stated": "", "guess": "info"}
+{"format": "rsyslog ISO (host named alert)/systemd", "line": "2026-10-11T10:00:00.123456+00:00 alert systemd[1]: Started apt-daily.service - Daily apt download activities.", "stated": "", "guess": "info"}
+{"format": "rsyslog ISO (host named trace)/jaeger", "line": "2026-10-11T10:00:00.123456+00:00 trace jaeger-collector[912]: {\"level\":\"info\",\"ts\":1791712800.123,\"caller\":\"flags/service.go:127\",\"msg\":\"Starting HTTP server\",\"port\":14269}", "stated": "info"}
+{"format": "rsyslog forwarded with PRI (host named alert)", "line": "<30>Oct 11 10:00:00 alert alertmanager[812]: ts=2026-10-11T10:00:00.456Z caller=dispatch.go:353 level=info component=dispatcher msg=\"Notify success\" receiver=slack integration=slack[0] attempts=1", "stated": "info"}
+{"format": "go log (noun phrase 'alert rule[N]')", "line": "2026/10/11 10:00:00 alert rule[3] \"HighErrorRate\" loaded from /etc/rules/api.yml", "stated": "", "guess": "info"}
+{"format": "go log (noun phrase 'trace buffer[N]')", "line": "2026/10/11 10:00:00 trace buffer[0] flushed: 512 spans in 3.2ms", "stated": "", "guess": "info"}
+{"format": "go log (noun phrase 'debug server[N]')", "line": "2026/10/11 10:00:00 debug server[1]: listening on 127.0.0.1:6060", "stated": "", "guess": "info"}
+{"format": "esxi hostd (control)", "line": "2026-10-11T10:00:00.123Z info hostd[2099123] [Originator@6876 sub=Vimsvc.TaskManager opID=esxui-1a2b-3c4d user=root] Task Created : haTask-1-vim.VirtualMachine.powerOn-123456", "stated": "info"}
+{"format": "go log 'error connecting' (control)", "line": "2026/10/11 10:00:00 error connecting to nats://10.0.0.7:4222: dial tcp 10.0.0.7:4222: connect: connection refused", "stated": "", "guess": "error"}
+{"format": "dpkg.log (package named info)", "line": "2026-10-11 10:00:00 status installed info:amd64 7.1-3build2", "stated": "", "guess": "info"}
+{"format": "dpkg.log (package named info)", "line": "2026-10-11 10:00:00 install info:amd64 <none> 7.1-3build2", "stated": "", "guess": "info"}
+{"format": "apt term.log (package named info)", "line": "Setting up info (7.1-3build2) ...", "stated": "", "guess": "info"}
+{"format": "rsyslog/game server JSON events", "line": "Oct 11 10:00:00 mc01 gameserver[812]: {\"event\":\"player_level_up\",\"player\":\"steve\",\"level\":40,\"xp\":12850}", "stated": "", "guess": "info"}
+{"format": "rsyslog/game server JSON events", "line": "Oct 11 10:00:05 mc01 gameserver[812]: {\"event\":\"boss_defeated\",\"player\":\"alex\",\"boss\":\"warden\",\"level\":50,\"duration_s\":412}", "stated": "", "guess": "info"}
+{"format": "containerd CRI file/IoT tank telemetry JSON", "line": "2026-10-11T10:00:00.123456789Z stdout F {\"sensor\":\"tank-3\",\"level\":50,\"unit\":\"percent\",\"ts\":1791712800}", "stated": "", "guess": "info"}
+{"format": "containerd CRI file/IoT tank telemetry JSON", "line": "2026-10-11T10:00:00.223456789Z stdout F {\"sensor\":\"tank-4\",\"level\":60,\"unit\":\"percent\",\"ts\":1791712800}", "stated": "", "guess": "info"}
+{"format": "kubectl logs --timestamps/battery telemetry", "line": "2026-10-11T10:00:00.123456789Z {\"device\":\"pump-07\",\"battery\":{\"voltage\":3.71},\"level\":20,\"rssi\":-71}", "stated": "", "guess": "info"}
+{"format": "kubectl logs --prefix/game server JSON", "line": "[pod/gameserver-0/server] {\"event\":\"player_level_up\",\"player\":\"steve\",\"level\":50,\"xp\":40210}", "stated": "", "guess": "info"}
+{"format": "docker syslog driver (stdout, PRI 30)/game JSON", "line": "<30>Oct 11 10:00:00 docker01 gameserver[812]: {\"event\":\"boss_defeated\",\"player\":\"steve\",\"level\":50}", "stated": "info"}
+{"format": "journald stdout PRIORITY=6/game JSON", "line": "{\"event\":\"dungeon_cleared\",\"player\":\"alex\",\"level\":60,\"duration_s\":412}", "level": "6", "stated": "info"}
+{"format": "journald stdout PRIORITY=6/zoom-level tile log JSON", "line": "{\"msg\":\"tile rendered\",\"layer\":\"osm\",\"level\":10,\"x\":523,\"y\":340,\"ms\":42}", "level": "6", "stated": "info"}
+{"format": "rsyslog/pino (control)", "line": "Oct 11 10:00:00 web01 node[812]: {\"level\":50,\"time\":1791712800123,\"pid\":812,\"hostname\":\"web01\",\"msg\":\"request failed\"}", "stated": "error"}
+{"format": "rsyslog/graylog-style GELF numeric (control: syslog scale, not pino)", "line": "Oct 11 10:00:00 web01 app[812]: {\"version\":\"1.1\",\"host\":\"web01\",\"short_message\":\"cache warmed\",\"level\":6}", "stated": "", "guess": "info"}
+{"format": "rsyslog/node-red audit (control)", "line": "Oct 11 10:00:00 nr01 node-red[812]: 11 Oct 10:00:00 - [audit] {\"event\":\"comms.open\",\"level\":98,\"timestamp\":1791712800123}", "stated": "", "guess": "info"}
+{"format": "loki -print-config-stderr (YAML)", "line": "  log_level: warn", "stated": ""}
+{"format": "tempo -print-config-stderr (YAML)", "line": "  log_level: error", "stated": ""}
+{"format": "grafana-agent -config.expand-env print (YAML)", "line": "  log_level: debug", "stated": ""}
+{"format": "loki -print-config-stderr via docker journald (stderr, PRIORITY 3)", "line": "  log_level: warn", "level": "3", "stated": "error"}
+{"format": "python argparse print(args)", "line": "Namespace(config='/etc/exporter.yml', listen=':9100', log_level='debug', timeout=5.0)", "stated": ""}
+{"format": "python argparse print('args:', args)", "line": "args: Namespace(batch_size=32, epochs=10, log_level='warning', lr=0.001, seed=42)", "stated": ""}
+{"format": "python pydantic BaseSettings print(settings)", "line": "app_name='orders' environment='production' log_level='error' database_url=PostgresDsn('postgresql://app@db:5432/orders') workers=4", "stated": ""}
+{"format": "python dataclass repr print(config)", "line": "ServerConfig(host='0.0.0.0', port=8000, log_level='critical', reload=False)", "stated": ""}
+{"format": "python dict print(config)", "line": "{'host': '0.0.0.0', 'port': 8000, 'log_level': 'debug', 'reload': False}", "stated": ""}
+{"format": "python json.dumps(vars(args))", "line": "{\"batch_size\": 32, \"epochs\": 10, \"log_level\": \"info\", \"lr\": 0.001}", "stated": ""}
+{"format": "go log config %+v", "line": "2026/10/11 10:00:00 config: {Addr::8080 LogLevel:debug DSN:postgres://app@db:5432/app}", "stated": "", "guess": "info"}
+{"format": "go fmt.Printf config %+v", "line": "Config: {ListenAddr::9090 LogLevel:error Retention:720h0m0s}", "stated": ""}
+{"format": "helm template (PrometheusRule)", "line": "        severity: critical", "stated": ""}
+{"format": "helm template (PrometheusRule)", "line": "        severity: warning", "stated": ""}
+{"format": "vault server banner", "line": "               Log Level: info", "stated": "", "guess": "info"}
+{"format": "nomad agent banner", "line": "             Log Level: DEBUG", "stated": ""}
+{"format": "scrolls logfmt (control: at= not a level)", "line": "app=billing fn=charge_card at=start customer_id=cus_9f8e7d", "stated": "", "guess": "info"}
+{"format": "heroku router (control)", "line": "2026-10-11T10:00:00.123456+00:00 heroku[router]: at=info method=GET path=\"/\" host=shop.herokuapp.com request_id=3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f03 fwd=\"203.0.113.9\" dyno=web.1 connect=0ms service=12ms status=200 bytes=1234 protocol=https", "stated": "info"}
+{"format": "iis W3C (control: query param)", "line": "2026-10-11 10:00:00 10.0.0.5 GET /api/logs level=error&page=2 443 - 203.0.113.9 Mozilla/5.0+(X11;+Linux+x86_64) - 200 0 0 12", "stated": "", "guess": "info"}
+{"format": "python-json-logger (control)", "line": "{\"asctime\": \"2026-10-11 10:00:00,123\", \"levelname\": \"WARNING\", \"name\": \"app.sync\", \"message\": \"retrying in 5s\"}", "stated": "warning"}
+{"format": "kubernetes audit (control: level is audit level)", "line": "{\"kind\":\"Event\",\"apiVersion\":\"audit.k8s.io/v1\",\"level\":\"Metadata\",\"auditID\":\"3f1c9a2e-8b7d-4c1e-9f2a-5d6b7c8e9f04\",\"stage\":\"ResponseComplete\",\"requestURI\":\"/api/v1/namespaces/default/pods\",\"verb\":\"list\",\"user\":{\"username\":\"system:serviceaccount:kube-system:deployment-controller\"}}", "stated": ""}
+{"format": "mysql client -t (query result)", "line": "| error   |    12 |", "stated": ""}
+{"format": "mysql client -t (query result)", "line": "| info    |  4021 |", "stated": ""}
+{"format": "mysql client -t (query result)", "line": "| debug   | 18877 |", "stated": ""}
+{"format": "mysql client -t (query result) under GitHub Actions", "line": "2026-10-11T10:00:00.1234567Z | error   |    12 |", "stated": ""}
+{"format": "mysql client -t (query result) via systemd timer, PRIORITY 6", "line": "| error    |    12 |", "level": "6", "stated": "info"}
+{"format": "mysql client -t (job history)", "line": "|  1042 | nightly-etl  | SUCCESS    | 2026-10-11 02:00:00 |", "stated": ""}
+{"format": "mysql client -t (job history)", "line": "|  1043 | nightly-etl  | FAILED     | 2026-10-11 02:00:00 |", "stated": "", "guess": "error"}
+{"format": "curl -v (response header)", "line": "< Warning: 299 - \"policy/v1beta1 PodSecurityPolicy is deprecated in v1.21+, unavailable in v1.25+\"", "stated": "", "guess": "warning"}
+{"format": "curl -v (request header)", "line": "> Accept: application/json", "stated": "", "guess": "info"}
+{"format": "terraform (control)", "line": "│ Warning: Argument is deprecated", "stated": "warning"}
+{"format": "systemctl status (control)", "line": "● nginx.service - A high performance web server and a reverse proxy server", "stated": "", "guess": "info"}
+{"format": "systemctl status (control)", "line": "× app.service - Orders API", "stated": "", "guess": "info"}
+{"format": "cmake --build log (echo of config)", "line": "Release", "stated": "", "guess": "info"}
+{"format": "kubectl get events -o custom-columns (control)", "line": "Warning", "stated": "warning"}
+{"format": "ansible ad-hoc (-m ping)", "line": "web-1 | SUCCESS => {", "stated": "", "guess": "info"}
+{"format": "ansible ad-hoc (-m shell)", "line": "db_2 | FAILED | rc=1 >>", "stated": "", "guess": "error"}
+{"format": "ansible ad-hoc (-m ping)", "line": "cache-3 | UNREACHABLE! => {", "stated": "", "guess": "info"}
+{"format": "docker compose (container_name: trace)", "line": "trace  | 2026/10/11 10:00:00 OTLP receiver listening on 0.0.0.0:4317", "stated": "", "guess": "info"}
+{"format": "docker compose (container_name: debug)", "line": "debug  | Sleeping for 3600 seconds", "stated": "", "guess": "info"}
+{"format": "gdb backtrace (control: not BuildKit)", "line": "#0  0x00007f3a2b1c4e5d in __pthread_kill_implementation (no_tid=0, signo=6, threadid=<optimized out>) at ./nptl/pthread_kill.c:44", "stated": "", "guess": "info"}
+{"format": ".NET 'o' timestamp (control)", "line": "2026-10-11T10:00:00.1234567Z Now listening on: http://[::]:8080", "stated": "", "guess": "info"}
+{"format": "node ISO timestamp + morgan dev (control)", "line": "[2026-10-11T10:00:00.123Z] GET /api/orders 200 12.345 ms - 512", "stated": "", "guess": "info"}
+{"format": "BuildKit + python print(args)", "line": "#14 2.731 Namespace(env='ci', log_level='debug', workers=2)", "stated": ""}
+{"format": "Jenkins Timestamper + loki config", "line": "[2026-10-11T10:00:00.123Z]   log_level: warn", "stated": ""}
+{"format": "GitHub Actions + helm template", "line": "2026-10-11T10:00:00.1234567Z         severity: critical", "stated": ""}
+{"format": "mikrotik (control)", "line": "Oct 11 10:00:00 192.0.2.1 firewall,info input: in:ether1 out:(unknown 0), src-mac 00:11:22:33:44:55, proto TCP (SYN), 203.0.113.9:51234->192.0.2.1:22, len 60", "stated": "info"}
+{"format": "lintian (control)", "line": "E: hello: binary-without-manpage usr/bin/hello", "stated": "error"}
+{"format": "debootstrap (control)", "line": "W: Cannot check Release signature; keyring file not available /usr/share/keyrings/debian-archive-keyring.gpg", "stated": "warning"}
+{"format": "ipv6 log line opening with ::", "line": "::1 - - [11/Oct/2026:10:00:00 +0000] \"GET /healthz HTTP/1.1\" 200 2 \"-\" \"kube-probe/1.30\"", "stated": "", "guess": "info"}
+{"format": "arista via rsyslog (control)", "line": "Oct 11 10:00:00 leaf1 Ebra: %LINEPROTO-5-UPDOWN: Line protocol on Interface Ethernet1, changed state to down", "stated": "notice"}
+{"format": "junos without explicit-priority (control)", "line": "Oct 11 10:00:00 mx1 rpd[1234]: RPD_BGP_NEIGHBOR_STATE_CHANGED: BGP peer 10.0.0.2 (External AS 65002) changed state from Established to Idle (event RecvNotify) (instance master)", "stated": "", "guess": "info"}
+{"format": "cmd.exe echo of a variable", "line": "Using %JAVA_HOME%\\bin\\java.exe -Xmx2g", "stated": "", "guess": "info"}
+{"format": "kernel make oldconfig prompt", "line": "Enable loadable module support (MODULES) [Y/n/?] y", "stated": "", "guess": "info"}
+{"format": "gentoo emerge -pv", "line": "[ebuild  N     ] app-misc/jq-1.7.1::gentoo  USE=\"oniguruma -doc\" 0 KiB", "stated": "", "guess": "info"}
+{"format": "chromium (control)", "line": "[1011/100000.123456:ERROR:bus.cc(407)] Failed to connect to the bus: Could not parse server address: Unknown address type", "stated": "error"}
+{"format": "corosync via syslog without level (control)", "line": "Oct 11 10:00:00 node1 corosync[1234]:   [TOTEM ] A new membership (1.2a) was formed. Members joined: 2", "stated": "", "guess": "info"}
+{"format": "shellcheck tty", "line": "       ^-- SC2086 (info): Double quote to prevent globbing and word splitting.", "stated": "info"}
+{"format": "pihole -v (control)", "line": "FTL version is v6.0.4 (Latest: v6.0.4)", "stated": "", "guess": "info"}
+{"format": "mosquitto custom timestamp (control)", "line": "2026-10-11T10:00:00: New connection from 10.0.0.5:51234 on port 1883.", "stated": "", "guess": "info"}
+{"format": "mosquitto custom timestamp (control)", "line": "2026-10-11T10:00:00: Warning: Mosquitto should not be run as root/administrator.", "stated": "warning"}
+{"format": "windows schtasks /query", "line": "Critical Update Check                    10/11/2026 10:00:00 AM Ready", "stated": ""}
+{"format": "pyright (control)", "line": "  /src/app/main.py:12:5 - error: Import \"requests\" could not be resolved (reportMissingImports)", "stated": "error"}
+{"format": "icinga2 (control)", "line": "[2026-10-11 10:00:00 +0000] critical/ApiListener: Cannot connect to host 'icinga2-master' on port '5665'", "stated": "critical"}
+{"format": "monit (control)", "line": "[UTC Oct 11 10:00:00] info     : 'web01' Monit 5.33.0 started", "stated": "info"}
+{"format": "bind (control)", "line": "11-Oct-2026 10:00:00.123 resolver: debug 1: createfetch: example.com A", "stated": "debug"}
+{"format": "dotnet build output path", "line": "  Orders.Api -> /src/Orders.Api/bin/Debug/net8.0/Orders.Api.dll", "stated": "", "guess": "info"}
+{"format": "visual studio build banner", "line": "1>------ Build started: Project: Orders.Api, Configuration: Debug Any CPU ------", "stated": "", "guess": "info"}
+{"format": "smartctl -x error log", "line": "Error 1 [0] occurred at disk power-on lifetime: 12345 hours (514 days + 9 hours)", "stated": "", "guess": "error"}
+{"format": "make (control)", "line": "make: *** [Makefile:12: build] Error 2", "stated": "", "guess": "error"}
+{"format": "webpack 5 summary", "line": "1 error has detailed information that is not shown.", "stated": "", "guess": "error"}
+{"format": "nvme smart-log", "line": "critical_warning\t\t\t: 0", "stated": "", "guess": "info"}
+{"format": "nvme smart-log", "line": "Warning Temperature Time\t\t: 0", "stated": ""}
+{"format": "docker info", "line": " Debug Mode: false", "stated": "", "guess": "info"}
+{"format": "psql (aligned, level column)", "line": " warn  |    87", "stated": ""}
+{"format": "xorg Xorg.0.log legend, third line (control)", "line": "\t(WW) warning, (EE) error, (NI) not implemented, (??) unknown.", "stated": ""}
+{"format": "eslint stylish summary (control)", "line": "  1 error and 0 warnings potentially fixable with the `--fix` option.", "stated": ""}
+{"format": "hashicorp go-multierror (control)", "line": "1 error occurred:", "stated": ""}
+{"format": "node-red custom logger (JSON.stringify(msg), node-red scale: 20=error)", "line": "Oct 11 10:00:00 nr01 node-red[812]: {\"level\":20,\"msg\":\"TypeError: Cannot read properties of undefined (reading 'payload')\",\"type\":\"function\",\"id\":\"a1b2c3d4e5f60718\",\"z\":\"f0e1d2c3b4a59687\"}", "stated": "", "guess": "error"}
+{"format": "monolog JSON in a containerd CRI file (control)", "line": "2026-10-11T10:00:00.123456789Z stderr F {\"message\":\"Payment failed\",\"context\":{},\"level\":400,\"level_name\":\"ERROR\",\"channel\":\"app\",\"datetime\":\"2026-10-11T10:00:00.000000+00:00\",\"extra\":{}}", "stated": "error"}
+{"format": "python argparse print(args), older key spelling", "line": "Namespace(config='/etc/app.yml', loglevel='DEBUG', port=8080)", "stated": ""}
+{"format": "docker compose (container_name: alert)", "line": "alert  | 2026-10-11T10:00:00Z Loaded 14 rules from /etc/alerts/rules.yml", "stated": "", "guess": "info"}
+{"format": "rsyslog (host named alert)/node_exporter", "line": "Oct 11 10:00:00 alert node_exporter[640]: ts=2026-10-11T10:00:00.123Z caller=node_exporter.go:193 level=info msg=\"Listening on\" address=[::]:9100", "stated": "info"}
+{"format": "syslog ISO (host named debug)/kernel-style daemon", "line": "2026-10-11T10:00:00.123456+00:00 debug chronyd[702]: Selected source 10.0.0.1 (ntp.internal)", "stated": "", "guess": "info"}
