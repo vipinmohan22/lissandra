@@ -22,17 +22,10 @@ type Store struct {
 // from seedPath (if set and present) or from built-in defaults.
 func Open(path, seedPath string) (*Store, error) {
 	s := &Store{path: path}
-	data, err := os.ReadFile(path)
+	c, err := Load(path)
 	switch {
 	case err == nil:
-		var c Config
-		if err := json.Unmarshal(data, &c); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", path, err)
-		}
-		if err := Normalize(&c); err != nil {
-			return nil, fmt.Errorf("invalid config %s: %w", path, err)
-		}
-		s.cfg = &c
+		s.cfg = c
 		return s, nil
 	case errors.Is(err, os.ErrNotExist):
 		c, err := initial(seedPath)
@@ -71,6 +64,23 @@ func initial(seedPath string) (*Config, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// Load reads and validates the config at path without creating or
+// modifying anything. It is meant for offline tools such as `laya analyze`.
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c Config
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if err := Normalize(&c); err != nil {
+		return nil, fmt.Errorf("invalid config %s: %w", path, err)
+	}
+	return &c, nil
 }
 
 // Get returns a deep copy of the current configuration.

@@ -43,6 +43,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	metric("laya_ai_errors_total", "counter", "Failed Claude API calls.", fmt.Sprintf(" %d", s.ai.Errors.Load()))
 	metric("laya_ai_cache_hits_total", "counter", "AI classifications served from cache.", fmt.Sprintf(" %d", s.ai.CacheHits.Load()))
 
+	metric("laya_imports_total", "counter", "Log file analyses by outcome.",
+		fmt.Sprintf(`{status="done"} %d`, s.imports.Succeeded.Load()),
+		fmt.Sprintf(`{status="failed"} %d`, s.imports.Failed.Load()))
+	metric("laya_import_events_total", "counter", "Events classified from uploaded log files.", fmt.Sprintf(" %d", s.imports.Events.Load()))
+	metric("laya_imports_active", "gauge", "Log file analyses in progress.", fmt.Sprintf(" %d", s.imports.Active()))
+
 	var pulls []string
 	for id, ps := range s.pollers.Status() {
 		up := 0

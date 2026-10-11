@@ -69,7 +69,7 @@ type Event struct {
 	SourceID   string         `json:"source_id"`
 	SourceName string         `json:"source_name"`
 	ReceivedAt time.Time      `json:"received_at"`
-	Timestamp  time.Time      `json:"timestamp"`
+	Timestamp  time.Time      `json:"timestamp,omitzero"` // empty only for file records with no time
 	Level      string         `json:"level,omitempty"`
 	Message    string         `json:"message"`
 	Fields     map[string]any `json:"fields,omitempty"`
@@ -82,7 +82,19 @@ type Event struct {
 	Classifier   string   `json:"classifier"`
 	Summary      string   `json:"summary,omitempty"`
 	Fingerprint  string   `json:"fingerprint"`
+
+	// Set on events read from an uploaded log file rather than a live source.
+	ImportID   string `json:"import_id,omitempty"`
+	File       string `json:"file,omitempty"`
+	Line       int    `json:"line,omitempty"`        // line the record starts on
+	TimeSource string `json:"time_source,omitempty"` // "" (from the record), TimeInferred or TimeNone
 }
+
+// TimeSource values for events whose record had no timestamp.
+const (
+	TimeInferred = "inferred" // copied from the previous record in the file
+	TimeNone     = "none"     // no timestamp seen yet; Timestamp is the import time
+)
 
 // AddTag appends tag if it isn't already present.
 func (e *Event) AddTag(tag string) {

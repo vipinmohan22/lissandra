@@ -3,6 +3,7 @@
 Laya reads logs, classifies them, and alerts the right people. It runs as a single small Go service with a built-in web UI, and ships with a Nomad job for deployment.
 
 - **Ingest two ways.** Senders POST logs to Laya's ingest endpoint (push), or Laya polls your HTTP APIs for logs (pull). JSON, JSON arrays, NDJSON and plain text are all accepted.
+- **Analyze log files.** Upload a log file on the **Log files** page (or with curl, or `laya analyze` in a terminal) to get a classified report: a timeline in the file's own time, top issues, the alert routes that would have fired, and searchable events. Analysis never touches live events or sends alerts.
 - **Classify.** Every event gets a severity, a category and tags. Built-in detection reads level fields and common log formats; an ordered rule engine that you edit in the UI does the rest. Repeats of the same problem are grouped by fingerprint.
 - **Notify.** Routes send matching events to pluggable notifiers: email (SMTP), Slack, Microsoft Teams, Discord, Google Chat, PagerDuty, or any HTTP endpoint through a templated webhook. Per-problem throttling keeps channels quiet.
 - **Optional AI classification.** Events the rules can't categorize can be sent to Claude for a category, severity and one-line summary. Off by default, budgeted per hour, and cached per fingerprint.
@@ -59,6 +60,59 @@ To deploy on Nomad, see [deploy/nomad/README.md](deploy/nomad/README.md).
 
 Parsing is shared by both. Laya finds the message, level and timestamp automatically (`message`/`msg`/`log`/`MESSAGE`…, `level`/`severity`/`PRIORITY`…, `@timestamp`/`timestamp`/`time`/`ts`…, including epoch seconds, milliseconds, microseconds and nanoseconds), unwraps common envelopes (`records`, `logs`, `events`, `data`, `items`, `results`, Elasticsearch `hits.hits[]._source`), and folds indented stack-trace lines into the preceding plain-text line. You can override any of these per source, including a dot-path to the records array (e.g. `data.items`).
 
+### Log files (manual analysis)
+
+Open **Log files**, drop one or more files, and Laya parses and classifies them with your current rules. Each file gets a report:
+
+- lines, events, errors, and the time span the file covers;
+- a timeline in the file's own time;
+- counts by category and by matched rule;
+- the alert routes that would have fired, and roughly how many alerts that would have meant (nothing is actually sent);
+- top issues (patterns), plus an **Uncategorized patterns** list with a **Create rule** shortcut;
+- searchable, filterable events with line numbers.
+
+You can download the report (JSON) and the events (NDJSON), and re-run a file after changing rules.
+
+What it understands:
+
+| | |
+| --- | --- |
+| Formats | Plain text, NDJSON, JSON (arrays, back-to-back objects, and exports that wrap records such as Elasticsearch `hits.hits`, CloudTrail `Records`, or `data`/`events`/`logs`), and CSV with a header row (`.csv`; e.g. Kibana or CloudWatch Insights exports). JSON is streamed one record at a time, so exports of any size work. |
+| Multi-line records | Java/logback stack traces including unindented `Caused by:` and exception headers, Python tracebacks, Go panics. When most lines start with a timestamp, a record runs until the next timestamped line; otherwise, indented lines join the line above. |
+| Timestamps | ISO 8601 / RFC 3339, `2026/10/11 10:15:02` (nginx, Go), syslog `Oct 11 10:15:02` (the year is inferred), Apache `[Mon Oct 11 …]`, access-log `[11/Oct/2026:10:15:02 +0000]`, klog, and RFC 5424, plus JSON/CSV timestamp fields and epoch numbers. Pick a time zone for timestamps that don't carry one. A record without a timestamp inherits the previous record's (marked "≈" in the UI). |
+| Encodings | UTF-8 (with or without BOM), UTF-16 from Windows/PowerShell, gzip. The NUL padding left by logrotate's `copytruncate` is skipped. Archives (zip, tar, xz, …) and binary files are refused with a clear message. |
+
+Choose **Parse as** a source to apply that source's parsing settings and tags. This also makes fingerprints match the source's live events.
+
+**Limits.** Uploads are capped at `LAYA_MAX_IMPORT_BYTES` (100 MB by default; gzip shrinks logs 5–30×), and decompressed content at 512 MB per file. One file is analyzed at a time. Analysis pauses whenever live ingest is backed up, so it never crowds out live logs. A file that hits a limit, the 45-minute time limit, or malformed data part-way through still gets a report covering everything read before the stop. The report says it is partial and why.
+
+**Memory.** Every event is counted in the report, but only a sample is kept to browse: up to 5,000 events or 16 MB per file, preferring the most severe events plus a few examples of every pattern. The last 5 reports are kept in memory, and browsable events across them share `LAYA_IMPORT_MEMORY_MB` (64 MB), oldest freed first. Reports are cleared when Laya restarts. Download anything you want to keep.
+
+Throughput with the default rules is roughly 20–30k lines per second on one core (measured on a mixed Java application log); `laya analyze` uses all cores.
+
+**From a terminal.** The same analysis runs offline with no size limits, using all CPU cores:
+
+```sh
+laya analyze app.log                         # summary: severities, categories, top issues, routes
+laya analyze -tz Europe/Berlin -source api app.log.gz app.log.1
+laya analyze -output json app.log | jq .     # one full report per file
+laya analyze -output ndjson -min-severity error app.log > errors.ndjson
+laya analyze -fail-on critical deploy.log    # exit status 2 if anything critical (CI)
+docker run --rm -i ghcr.io/vipinmohan22/laya analyze - < app.log
+```
+
+Rules come from `-config`, else `$LAYA_CONFIG`, else `$LAYA_DATA_DIR/config.json`, else the built-in defaults. A config exported from **Settings → Backup** works, so you can analyze locally with your team's rules. `laya analyze` uses only rules, sources and route filters. It never builds notifiers or calls the AI API, so it makes no network calls.
+
+**Over HTTP:**
+
+```sh
+curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" -F file=@app.log https://laya.example.com/api/imports
+curl -H "Authorization: Bearer $LAYA_ADMIN_TOKEN" --data-binary @app.log.gz \
+  "https://laya.example.com/api/imports?name=app.log.gz&source=<source id>&tz=UTC&format=auto"
+```
+
+The response is the finished report. `GET /api/imports/{id}/events` (and `?format=ndjson`), `/patterns` and `/events/{eventId}` return the details.
+
 ### Classification
 
 1. **Severity detection.** Laya reads explicit level fields (names, syslog 0–7, pino/bunyan 10–60), klog prefixes (`E1011 …`), `level=` key/values and leading level tokens, then falls back to keywords such as panic/fatal, error/exception/failed, and warn/deprecated.
@@ -109,6 +163,8 @@ Runtime configuration (sources, rules, notifiers, routes, settings) is edited in
 | `LAYA_QUEUE_SIZE` | `10000` | Pipeline queue. When it's full, ingest returns 503 with `Retry-After`. |
 | `LAYA_WORKERS` / `LAYA_AI_WORKERS` / `LAYA_NOTIFY_WORKERS` | `4` / `2` / `4` | Concurrency. |
 | `LAYA_MAX_INGEST_BYTES` | `10485760` | Maximum request body (compressed). Decompressed bodies may be up to 4× this. |
+| `LAYA_MAX_IMPORT_BYTES` | `104857600` | Largest log file upload on the Log files page (as sent, so possibly gzipped). |
+| `LAYA_IMPORT_MEMORY_MB` | `64` | Memory for browsable events across kept log file analyses. |
 | `LAYA_LOG_LEVEL` / `LAYA_LOG_FORMAT` | `info` / `json` | Laya's own logs (`text` for humans). |
 
 Endpoints outside the UI:
@@ -116,6 +172,7 @@ Endpoints outside the UI:
 - `GET /healthz` returns liveness (used by the Nomad check).
 - `GET /metrics` serves Prometheus metrics: events received, processed, dropped and rejected; queue depths; last-hour events by severity; notification outcomes; AI calls; pull-source health.
 - `POST /ingest/{source}` accepts logs.
+- `POST /api/imports` analyzes a log file (admin token required, like the rest of `/api/*`).
 - `/api/*` is the REST API the UI uses. Everything requires `Authorization: Bearer $LAYA_ADMIN_TOKEN`.
 
 ## Operational notes
@@ -136,13 +193,14 @@ make nomad-validate  # nomad fmt -check + job validate
 The layout:
 
 ```
-cmd/laya            entrypoint and env configuration
+cmd/laya            entrypoint, env configuration, `laya analyze`
 internal/config     config model, validation, JSON store, secret masking
-internal/ingest     payload parsing (JSON / NDJSON / text)
+internal/ingest     payload parsing (JSON / NDJSON / text / CSV), streaming file reader
 internal/poller     pull-source polling
 internal/classify   severity heuristics, rule engine, fingerprints
 internal/ai         optional Claude classifier
 internal/pipeline   queue → classify → (AI) → store → dispatch
+internal/importer   log file analysis: reports, retention, timeline
 internal/events     in-memory recent events and stats
 internal/notify     notifier plugins, routing, throttling, retries
 internal/server     REST API, ingest endpoint, metrics, UI hosting

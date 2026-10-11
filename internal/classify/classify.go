@@ -32,6 +32,7 @@ type compiledRule struct {
 type compiledCond struct {
 	config.Condition
 	re    *regexp.Regexp
+	pre   *prefilter // nil: always run re
 	value string
 }
 
@@ -61,6 +62,7 @@ func New(rules []config.Rule) *Engine {
 					break
 				}
 				cc.re = re
+				cc.pre = newPrefilter(pat)
 			}
 			cr.conds = append(cr.conds, cc)
 		}
@@ -79,11 +81,12 @@ func (e *Engine) Classify(ev *model.Event) bool {
 	ev.Category = ""
 	ev.MatchedRules = nil
 
+	ctx := evalCtx{ev: ev}
 	for _, r := range e.rules {
 		if len(r.SourceIDs) > 0 && !slices.Contains(r.SourceIDs, ev.SourceID) {
 			continue
 		}
-		if !r.matches(ev) {
+		if !r.matches(&ctx) {
 			continue
 		}
 		ev.MatchedRules = append(ev.MatchedRules, r.Name)
@@ -117,9 +120,28 @@ func (e *Engine) Classify(ev *model.Event) bool {
 	return true
 }
 
-func (r *compiledRule) matches(ev *model.Event) bool {
+// evalCtx carries per-event state shared by all conditions.
+type evalCtx struct {
+	ev          *model.Event
+	msgFold     string
+	msgFoldDone bool
+}
+
+// folded returns the case-folded form of a field value for prefilters,
+// computing the message's only once per event.
+func (c *evalCtx) folded(field, raw string) string {
+	if field != "message" && field != "msg" {
+		return foldASCII(raw)
+	}
+	if !c.msgFoldDone {
+		c.msgFold, c.msgFoldDone = foldASCII(raw), true
+	}
+	return c.msgFold
+}
+
+func (r *compiledRule) matches(ctx *evalCtx) bool {
 	for _, c := range r.conds {
-		m := c.matches(ev)
+		m := c.matches(ctx)
 		if r.Match == config.MatchAny && m {
 			return true
 		}
@@ -130,17 +152,17 @@ func (r *compiledRule) matches(ev *model.Event) bool {
 	return r.Match != config.MatchAny
 }
 
-func (c *compiledCond) matches(ev *model.Event) bool {
-	raw, present := FieldValue(ev, c.Field)
+func (c *compiledCond) matches(ctx *evalCtx) bool {
+	raw, present := FieldValue(ctx.ev, c.Field)
 	switch c.Op {
 	case config.OpExists:
 		return present
 	case config.OpMissing:
 		return !present
 	case config.OpRegex:
-		return present && c.re.MatchString(raw)
+		return present && c.regexMatch(ctx, raw)
 	case config.OpNotRegex:
-		return !present || !c.re.MatchString(raw)
+		return !present || !c.regexMatch(ctx, raw)
 	case config.OpGreater, config.OpLess:
 		if !present {
 			return false
@@ -174,6 +196,13 @@ func (c *compiledCond) matches(ev *model.Event) bool {
 		return present && strings.HasSuffix(v, c.value)
 	}
 	return false
+}
+
+func (c *compiledCond) regexMatch(ctx *evalCtx, raw string) bool {
+	if c.pre != nil && !c.pre.mayMatch(raw, ctx.folded(c.Field, raw)) {
+		return false
+	}
+	return c.re.MatchString(raw)
 }
 
 // FieldValue returns the string form of a named event field. Names other

@@ -216,11 +216,16 @@ func (n *discord) Send(ctx context.Context, m *Message) error {
 
 type googleChat struct{ url string }
 
+// gchatEscaper neutralises Google Chat markup in log-derived text: <…>
+// would otherwise create mentions (<users/all>) or disguised links.
+var gchatEscaper = strings.NewReplacer("<", "‹", ">", "›")
+
 func (n *googleChat) Send(ctx context.Context, m *Message) error {
+	esc := gchatEscaper.Replace
 	var b strings.Builder
-	fmt.Fprintf(&b, "*%s*\n```%s```\n", m.Title(), strings.ReplaceAll(m.Excerpt(3000), "```", "'''"))
+	fmt.Fprintf(&b, "*%s*\n```%s```\n", esc(m.Title()), esc(strings.ReplaceAll(m.Excerpt(3000), "```", "'''")))
 	for _, f := range m.Facts() {
-		fmt.Fprintf(&b, "*%s:* %s\n", f.Name, f.Value)
+		fmt.Fprintf(&b, "*%s:* %s\n", f.Name, esc(f.Value))
 	}
 	if m.Link != "" {
 		fmt.Fprintf(&b, "<%s|Open in Laya>\n", m.Link)

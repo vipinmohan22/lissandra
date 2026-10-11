@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -23,10 +22,10 @@ const (
 )
 
 var (
-	messageKeys   = []string{"message", "msg", "log", "MESSAGE", "text", "short_message", "textPayload", "body", "line", "event"}
+	messageKeys   = []string{"message", "msg", "log", "MESSAGE", "@message", "text", "short_message", "textPayload", "body", "line", "event"}
 	levelKeys     = []string{"level", "severity", "lvl", "log.level", "levelname", "loglevel", "log_level", "PRIORITY", "priority"}
 	timestampKeys = []string{"@timestamp", "timestamp", "time", "ts", "date", "datetime", "_time", "eventTime", "__REALTIME_TIMESTAMP"}
-	wrapperKeys   = []string{"records", "logs", "events", "entries", "items", "data", "results", "messages", "hits.hits"}
+	wrapperKeys   = []string{"records", "Records", "logs", "events", "entries", "items", "data", "results", "messages", "hits.hits"}
 )
 
 // Parse converts body into events for src. contentType is the request's
@@ -53,18 +52,9 @@ func Parse(body []byte, contentType string, src *config.Source, now time.Time) (
 	}
 	events := make([]model.Event, 0, len(recs))
 	for _, r := range recs {
-		ev := toEvent(r, p, now)
-		if ev.Message == "" {
-			continue
+		if ev, ok := finalize(r, src, now); ok {
+			events = append(events, ev)
 		}
-		ev.ID = model.NewID()
-		ev.SourceID = src.ID
-		ev.SourceName = src.Name
-		ev.ReceivedAt = now
-		for _, t := range src.Tags {
-			ev.AddTag(t)
-		}
-		events = append(events, ev)
 	}
 	return events, nil
 }
@@ -141,56 +131,37 @@ func Records(doc any, recordsPath string) ([]any, error) {
 
 func parseNDJSON(body []byte) []any {
 	var out []any
-	for _, line := range bytes.Split(body, []byte{'\n'}) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		if line[0] == '{' || line[0] == '[' {
-			if v, err := decode(line); err == nil {
-				out = append(out, v)
-				continue
-			}
-		}
-		out = append(out, string(line))
+	sp := lineSplitter{decode: true}
+	collect := func(rec any, _ int) { out = append(out, rec) }
+	for _, line := range strings.Split(string(body), "\n") {
+		sp.push(line, collect)
 	}
+	sp.flush(collect)
 	return out
 }
-
-var continuation = regexp.MustCompile(`^(\s+\S|at\s|Caused by:|\.\.\. \d+ more)`)
 
 // parseText splits plain text into one record per line, folding indented
 // continuation lines (stack traces) into the preceding record.
 func parseText(body []byte) []any {
 	var out []any
+	sp := lineSplitter{fold: true}
+	collect := func(rec any, _ int) { out = append(out, rec) }
 	for _, line := range strings.Split(string(body), "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if len(out) > 0 && continuation.MatchString(line) {
-			prev := out[len(out)-1].(string)
-			if len(prev) < MaxMessageBytes {
-				out[len(out)-1] = prev + "\n" + line
-			}
-			continue
-		}
-		out = append(out, line)
+		sp.push(line, collect)
 	}
+	sp.flush(collect)
 	return out
 }
 
-var leadingTimestamp = regexp.MustCompile(`^\[?(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\]?\s`)
-
-func toEvent(rec any, p config.Parse, now time.Time) model.Event {
-	ev := model.Event{Timestamp: now}
+// toEvent turns a record into an event. hasTime reports whether the
+// record carried a timestamp; otherwise the event's Timestamp is now.
+func toEvent(rec any, p config.Parse, now time.Time, tp timeParser) (ev model.Event, hasTime bool) {
+	ev = model.Event{Timestamp: now}
 	switch r := rec.(type) {
 	case string:
 		ev.Message = r
-		if m := leadingTimestamp.FindStringSubmatch(r); m != nil {
-			if ts, ok := ParseTime(strings.Replace(m[1], ",", ".", 1)); ok {
-				ev.Timestamp = ts
-			}
+		if ts, ok := tp.textTime(r); ok {
+			ev.Timestamp, hasTime = ts, true
 		}
 	case map[string]any:
 		if src, ok := r["_source"].(map[string]any); ok { // Elasticsearch / OpenSearch hits
@@ -211,8 +182,8 @@ func toEvent(rec any, p config.Parse, now time.Time) model.Event {
 			ev.Level = model.ToString(v)
 		}
 		if _, v, ok := pick(r, p.TimestampField, timestampKeys); ok {
-			if ts, ok := toTime(v); ok {
-				ev.Timestamp = ts
+			if ts, ok := tp.valueTime(v); ok {
+				ev.Timestamp, hasTime = ts, true
 			}
 		}
 		ev.Fields = fields
@@ -220,7 +191,7 @@ func toEvent(rec any, p config.Parse, now time.Time) model.Event {
 		ev.Message = model.ToString(r)
 	}
 	ev.Message = model.Truncate(strings.TrimSpace(ev.Message), MaxMessageBytes)
-	return ev
+	return ev, hasTime
 }
 
 // pick finds a field by explicit path, or by the first matching candidate.
@@ -269,8 +240,14 @@ var timeLayouts = []string{
 }
 
 // ParseTime parses common timestamp formats, including epoch numbers in
-// seconds, milliseconds, microseconds or nanoseconds.
+// seconds, milliseconds, microseconds or nanoseconds. Times without a zone
+// are taken as UTC.
 func ParseTime(s string) (time.Time, bool) {
+	return parseTimeIn(s, time.UTC)
+}
+
+// parseTimeIn is ParseTime with times that lack a zone taken in loc.
+func parseTimeIn(s string, loc *time.Location) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}, false
@@ -279,7 +256,7 @@ func ParseTime(s string) (time.Time, bool) {
 		return epoch(f)
 	}
 	for _, l := range timeLayouts {
-		if ts, err := time.Parse(l, s); err == nil {
+		if ts, err := time.ParseInLocation(l, s, loc); err == nil {
 			return sane(ts)
 		}
 	}

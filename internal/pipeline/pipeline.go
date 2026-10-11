@@ -84,6 +84,10 @@ func (p *Pipeline) SubmitWait(ctx context.Context, evs []model.Event) error {
 // QueueDepth reports events waiting for classification.
 func (p *Pipeline) QueueDepth() int { return len(p.in) }
 
+// Busy reports that live ingest is backing up (queue over a quarter full);
+// background work such as file analysis should pause.
+func (p *Pipeline) Busy() bool { return len(p.in) > cap(p.in)/4 }
+
 // Run processes events until ctx is cancelled.
 func (p *Pipeline) Run(ctx context.Context, workers, aiWorkers int) {
 	var wg sync.WaitGroup
@@ -117,6 +121,19 @@ func (p *Pipeline) Run(ctx context.Context, workers, aiWorkers int) {
 		}()
 	}
 	wg.Wait()
+}
+
+// ClassifyOffline classifies ev for file analysis: rules plus any cached AI
+// result, but it never calls the AI API, stores the event or notifies. It
+// returns false when a rule drops the event.
+func (p *Pipeline) ClassifyOffline(engine *classify.Engine, ev *model.Event) bool {
+	if !engine.Classify(ev) {
+		return false
+	}
+	if p.ai != nil && p.ai.Eligible(ev) {
+		p.ai.ApplyCached(ev)
+	}
+	return true
 }
 
 func (p *Pipeline) process(ev model.Event) {

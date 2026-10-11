@@ -395,7 +395,9 @@ function renderDashboard(root, st) {
     patterns);
 }
 
-function timelineChart(points) {
+// timelineChart draws stacked severity bars. labels sets the axis text:
+// {left, mid, right, unit}; the default suits the live 60-minute view.
+function timelineChart(points, labels = { left: '60 min ago', mid: '30 min', right: 'now', unit: 'min' }) {
   const W = 600, H = 160;
   const max = Math.max(1, ...points.map((p) => p.total));
   const bw = W / points.length;
@@ -406,7 +408,7 @@ function timelineChart(points) {
   points.forEach((p, i) => {
     let y = H;
     const g = s('g', null);
-    const lines = [new Date(p.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ` — ${p.total} events`];
+    const lines = [(labels.tip ? labels.tip(p.time) : new Date(p.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) + ` — ${p.total} events`];
     for (const sv of SEVERITIES) {
       const c = (p.by_severity || {})[sv] || 0;
       if (!c) continue;
@@ -420,9 +422,9 @@ function timelineChart(points) {
     svg.append(g);
   });
   return h('div', null,
-    h('div', { class: 'row small muted' }, h('span', null, `max ${max}/min`)),
+    h('div', { class: 'row small muted' }, h('span', null, `max ${max}/${labels.unit}`)),
     svg,
-    h('div', { class: 'row small muted' }, h('span', null, '60 min ago'), h('span', { class: 'spacer' }), h('span', null, '30 min'), h('span', { class: 'spacer' }), h('span', null, 'now')),
+    h('div', { class: 'row small muted' }, h('span', null, labels.left), h('span', { class: 'spacer' }), h('span', null, labels.mid), h('span', { class: 'spacer' }), h('span', null, labels.right)),
     h('div', { class: 'legend' }, SEVERITIES.map((sv) => h('span', null, h('i', { class: sv }), sv))));
 }
 
@@ -488,7 +490,7 @@ pages.events = async (main, arg, params) => {
       clear(tableWrap).append(h('div', { class: 'empty' }, 'No matching events.'));
     }
     for (const ev of list) {
-      tbl.append(h('tr', { class: 'clickable', onclick: () => showEvent(ev.id) },
+      tbl.append(h('tr', { class: 'clickable', onclick: () => showEvent({ id: ev.id }) },
         h('td', null, timeCell(ev.received_at)),
         h('td', null, sevBadge(ev.severity)),
         h('td', { class: 'nowrap' }, ev.category, ev.classifier === 'ai' ? h('span', { class: 'muted small', title: 'Classified by AI' }, ' ✦') : null),
@@ -500,14 +502,22 @@ pages.events = async (main, arg, params) => {
   }
 
   await fetchEvents(false);
-  if (arg) showEvent(arg);
+  if (arg) showEvent({ id: arg });
   return every(5000, async () => { if (live && !document.querySelector('.modal-back')) await fetchEvents(false); });
 };
 
-async function showEvent(id) {
+// showEvent opens the detail dialog for a live event ({id}) or an event
+// from an analyzed file ({importId, id}). Paths are always built here with
+// every segment encoded: ids can come from the URL hash, and a caller-chosen
+// path would let a crafted link send the admin token elsewhere.
+// opts.onFingerprint replaces the default "similar live events" link.
+async function showEvent(target, opts = {}) {
+  const path = target.importId
+    ? `/api/imports/${encodeURIComponent(target.importId)}/events/${encodeURIComponent(target.id)}`
+    : `/api/events/${encodeURIComponent(target.id)}`;
   let data;
   try {
-    data = await GET(`/api/events/${encodeURIComponent(id)}`);
+    data = await GET(path);
   } catch (err) {
     reportError(err);
     return;
@@ -522,13 +532,16 @@ async function showEvent(id) {
   row('Classified by', ev.classifier);
   row('Source', ev.source_name);
   row('Level field', ev.level);
-  row('Log timestamp', fmtTime(ev.timestamp));
-  row('Received', fmtTime(ev.received_at));
+  row('Log timestamp', ev.time_source === 'none' ? '— (no timestamp in this record or before it)' : `${fmtTime(ev.timestamp)}${ev.time_source === 'inferred' ? ' (taken from the previous record)' : ''}`);
+  row(ev.import_id ? 'Analyzed' : 'Received', fmtTime(ev.received_at));
+  row('File', ev.file ? `${ev.file}${ev.line ? `:${ev.line}` : ''}` : '');
   row('Tags', tags(ev.tags));
   row('Matched rules', (ev.matched_rules || []).join(', '));
   row('Alert routes', (data.routes || []).join(', ') || 'none');
   row('AI summary', ev.summary);
-  row('Fingerprint', h('a', { href: `#/events?fingerprint=${encodeURIComponent(ev.fingerprint)}`, onclick: () => modal.close() }, ev.fingerprint));
+  row('Fingerprint', opts.onFingerprint
+    ? h('button', { type: 'button', class: 'link', onclick: () => { modal.close(); opts.onFingerprint(ev.fingerprint); } }, ev.fingerprint)
+    : h('a', { href: `#/events?fingerprint=${encodeURIComponent(ev.fingerprint)}`, onclick: () => modal.close() }, ev.fingerprint));
 
   const body = h('div', null,
     h('div', { class: 'code-box' }, h('pre', null, ev.message)),
@@ -536,7 +549,8 @@ async function showEvent(id) {
     ev.fields && Object.keys(ev.fields).length ? [h('h3', null, 'Fields'), codeBox(JSON.stringify(ev.fields, null, 2))] : null,
     aiOut);
   const actions = [];
-  if (cache.settings.ai && cache.settings.ai.enabled) {
+  // Imported events stay on this server: no AI call for uploaded content.
+  if (cache.settings.ai && cache.settings.ai.enabled && !ev.import_id) {
     actions.push({
       label: 'Classify with AI',
       onClick: async () => {
@@ -590,6 +604,7 @@ function renderSources(root, sources, status) {
         meta),
       h('div', { class: 'actions' },
         src.type === 'push' ? h('button', { type: 'button', class: 'small', onclick: () => showIngest(src) }, 'Setup instructions') : null,
+        h('button', { type: 'button', class: 'small', onclick: () => { location.hash = `#/files?source=${encodeURIComponent(src.id)}`; } }, 'Analyze a file'),
         h('button', { type: 'button', class: 'small', onclick: () => editSource(src) }, 'Edit'),
         h('button', {
           type: 'button', class: 'small danger',
@@ -875,13 +890,27 @@ function ruleTester() {
     out);
 }
 
+// suggestContains picks text from a log message that other occurrences of
+// the same problem will share: the longest run without timestamps, numbers
+// or ids, trimmed of punctuation.
+function suggestContains(message) {
+  const first = String(message || '').split('\n')[0];
+  const parts = first
+    .replace(/^\W*(\d{4}[-/]\d\d[-/]\d\d[T ][\d:.,]+\S*|[A-Z][a-z]{2} [ \d]\d [\d:]{8})\W*/, '')
+    .split(/[0-9a-f]{8,}|\d+/i)
+    .map((s) => s.replace(/^[^\p{L}]+|[^\p{L}\p{N})]+$/gu, ''))
+    .filter((s) => s.length >= 6)
+    .sort((a, b) => b.length - a.length);
+  return (parts[0] || first).slice(0, 80);
+}
+
 function editRule(rule, fromEvent) {
   const isNew = !rule;
   rule = rule ? JSON.parse(JSON.stringify(rule)) : {
     name: '', enabled: true, match: 'all', severity_mode: 'set', tags: [], source_ids: [],
-    conditions: [{ field: 'message', op: 'contains', value: fromEvent ? fromEvent.message.split('\n')[0].slice(0, 80) : '' }],
+    conditions: [{ field: 'message', op: 'contains', value: fromEvent ? suggestContains(fromEvent.message) : '' }],
   };
-  if (fromEvent) rule.name = `Events like "${fromEvent.message.slice(0, 40)}"`;
+  if (fromEvent) rule.name = `Events like "${suggestContains(fromEvent.message).slice(0, 40)}"`;
 
   const name = h('input', { value: rule.name });
   const desc = h('input', { value: rule.description || '' });
@@ -1321,6 +1350,482 @@ pages.settings = async (main) => {
         aiTestOut)));
   await renderStatus();
 };
+
+// ---------- Log files ----------
+
+// Uploads in flight, by import id. They outlive page changes, so the report
+// page can show progress and offer "Re-analyze".
+const uploads = {};
+const uploadQueue = [];
+let uploading = false;
+
+function newImportId() {
+  const b = new Uint8Array(8);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+function queueUpload(file, opts) {
+  const id = newImportId();
+  uploads[id] = { id, file, opts, state: 'queued', loaded: 0, total: file.size };
+  uploadQueue.push(id);
+  pumpUploads();
+  return id;
+}
+
+function pumpUploads() {
+  if (uploading || !uploadQueue.length) return;
+  const up = uploads[uploadQueue.shift()];
+  uploading = true;
+  up.state = 'uploading';
+  const q = new URLSearchParams({ id: up.id, name: up.file.name });
+  for (const k of ['source', 'format', 'tz']) if (up.opts[k]) q.set(k, up.opts[k]);
+  const xhr = new XMLHttpRequest();
+  up.xhr = xhr;
+  xhr.open('POST', `/api/imports?${q}`);
+  xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+  xhr.upload.onprogress = (e) => { up.loaded = e.loaded; up.total = e.total || up.total; };
+  xhr.upload.onload = () => { up.state = 'processing'; };
+  const done = (state, error) => {
+    up.state = state;
+    up.error = error;
+    up.xhr = null;
+    uploading = false;
+    pumpUploads();
+  };
+  xhr.onload = () => {
+    if (xhr.status === 401) { showLogin(); done('error', 'Sign in required'); return; }
+    let data = null;
+    try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+    if (xhr.status >= 400 && (!data || !data.status)) done('error', (data && data.error) || `${xhr.status} ${xhr.statusText}`);
+    else done('done');
+  };
+  xhr.onerror = () => done('error', 'The upload failed (connection lost, or the server is busy with another file).');
+  const fd = new FormData();
+  fd.append('file', up.file, up.file.name);
+  xhr.send(fd);
+}
+
+function fmtBytes(n) {
+  n = Number(n || 0);
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
+  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(1)} KB`;
+  return `${n} B`;
+}
+
+function fmtSpan(ms) {
+  const s = ms / 1000;
+  if (s >= 2 * 86400) return `${(s / 86400).toFixed(1)} days`;
+  if (s >= 3600) return `${(s / 3600).toFixed(1)} hours`;
+  if (s >= 60) return `${Math.round(s / 60)} min`;
+  return `${Math.round(s)} s`;
+}
+
+function stepLabel(sec) {
+  const units = [[86400, 'day'], [3600, 'hour'], [60, 'min']];
+  for (const [n, u] of units) {
+    if (sec % n === 0) {
+      const k = sec / n;
+      return k === 1 ? u : `${k} ${u}${u === 'min' ? '' : 's'}`;
+    }
+  }
+  return `${sec}s`;
+}
+
+function fmtIn(iso, tz, withDate = true) {
+  if (!iso) return '—';
+  const opts = withDate
+    ? { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }
+    : { hour: '2-digit', minute: '2-digit' };
+  try { return new Date(iso).toLocaleString([], { ...opts, timeZone: tz || 'UTC' }); } catch { return fmtTime(iso); }
+}
+
+const STOP_REASONS = {
+  upload_limit: 'The file is larger than the upload limit, so only its first part was analyzed. Gzip it, or run `laya analyze` locally for the whole file.',
+  decompressed_limit: 'The decompressed file is larger than the analysis limit; only the first part was analyzed. Use `laya analyze` for the whole file.',
+  ratio_limit: 'The file decompresses to far more than real logs do, so analysis stopped as a precaution.',
+  deadline: 'The analysis took too long and was stopped. Use `laya analyze` for very large files.',
+  client_aborted: 'The upload was interrupted; results cover the part that arrived.',
+  gzip_truncated: 'The gzip data ended early (truncated file?); results cover the part that decompressed.',
+  syntax_error: 'The file has malformed data part-way through; results cover everything before it.',
+  record_too_large: 'A single JSON record exceeded the per-record limit; convert the file to NDJSON (one object per line).',
+  read_error: 'Reading the file failed part-way through.',
+};
+
+function timeZones() {
+  const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let all = [];
+  try { all = Intl.supportedValuesOf('timeZone'); } catch { /* older browsers */ }
+  return { browser, all };
+}
+
+pages.files = async (main, arg, params) => {
+  await load('info', 'sources', 'settings');
+  if (arg) return renderImport(main, arg);
+  const lim = (cache.info.imports || {});
+  const { browser, all } = timeZones();
+
+  const srcSel = select([['', 'Default parsing'], ...cache.sources.map((s) => [s.id, `As source "${s.name}"`])], params.get('source') || '');
+  const fmtSel = select([['', 'Auto-detect'], ['text', 'Plain text lines'], ['ndjson', 'NDJSON'], ['json', 'JSON (array or export)'], ['csv', 'CSV with header row']], '');
+  const tzIn = h('input', { value: 'UTC', list: 'tz-list', 'aria-label': 'Time zone', placeholder: 'UTC' });
+  const tzList = h('datalist', { id: 'tz-list' }, ['UTC', browser, ...all].filter((v, i, a) => v && a.indexOf(v) === i).map((z) => h('option', { value: z })));
+  const tzBrowser = browser && browser !== 'UTC'
+    ? h('button', { type: 'button', class: 'link small', onclick: () => { tzIn.value = browser; } }, `Use ${browser}`) : null;
+  const picker = h('input', { type: 'file', multiple: true, hidden: true });
+  const msg = h('div');
+
+  const start = (fileList) => {
+    clear(msg);
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const tooBig = files.filter((f) => lim.max_upload_bytes && f.size > lim.max_upload_bytes);
+    if (tooBig.length) {
+      msg.append(h('div', { class: 'callout bad' }, `${tooBig.map((f) => f.name).join(', ')}: larger than the ${fmtBytes(lim.max_upload_bytes)} upload limit. Gzip the file (logs shrink 5–30×) or run \`laya analyze\` locally.`));
+    }
+    const ok = files.filter((f) => !tooBig.includes(f));
+    if (!ok.length) return;
+    const opts = { source: srcSel.value, format: fmtSel.value, tz: tzIn.value.trim() || 'UTC' };
+    const ids = ok.map((f) => queueUpload(f, opts));
+    location.hash = `#/files/${ids[0]}`;
+  };
+  picker.addEventListener('change', () => { start(picker.files); picker.value = ''; });
+
+  const zone = h('div', {
+    class: 'dropzone', tabindex: 0, role: 'button', 'aria-label': 'Choose log files to analyze',
+    onclick: () => picker.click(),
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); } },
+    ondragover: (e) => { e.preventDefault(); zone.classList.add('over'); },
+    ondragleave: () => zone.classList.remove('over'),
+    ondrop: (e) => { e.preventDefault(); zone.classList.remove('over'); start(e.dataTransfer.files); },
+  },
+  h('div', { class: 'dz-title' }, 'Drop log files here, or click to choose'),
+  h('div', { class: 'muted small' }, `Text, JSON, NDJSON or CSV, optionally gzipped · up to ${fmtBytes(lim.max_upload_bytes)} each`));
+
+  const list = h('div', { class: 'card flush mt' });
+  append(main,
+    pageHead('Log files', 'Parse and classify a log file with your current rules. Results stay here: nothing is added to live events and no alerts are sent.'),
+    h('div', { class: 'card' },
+      zone, picker, msg,
+      h('div', { class: 'fields-3 mt' },
+        field('Parse as', srcSel, 'A source applies its parsing settings and tags.'),
+        field('Format', fmtSel),
+        h('div', { class: 'field' }, h('label', null, 'Time zone'), tzIn, tzList, h('div', { class: 'help' }, 'For timestamps without a zone. ', tzBrowser))),
+      h('p', { class: 'small muted' }, 'Very large files are faster with the command line: ', h('code', null, 'laya analyze -config config.json app.log'), '.')),
+    list);
+
+  const refresh = async () => {
+    const reports = await GET('/api/imports');
+    clear(list);
+    list.append(h('div', { class: 'list-item' }, h('div', { class: 'main' }, h('h2', null, 'Recent analyses'),
+      h('div', { class: 'meta' }, `The last ${lim.keep || 5} are kept in memory and cleared when Laya restarts.`))));
+    if (!reports.length) { list.append(h('div', { class: 'empty' }, 'No files analyzed yet.')); return; }
+    const tbl = h('table', null, h('tr', null, h('th', null, 'File'), h('th', null, 'Status'), h('th', null, 'Events'), h('th', null, 'Errors'), h('th', null, 'Lines'), h('th', null, 'Size'), h('th', null, 'Analyzed')));
+    for (const r of reports) {
+      const bad = (r.by_severity.error || 0) + (r.by_severity.critical || 0);
+      tbl.append(h('tr', { class: 'clickable', onclick: () => { location.hash = `#/files/${encodeURIComponent(r.id)}`; } },
+        h('td', { class: 'nowrap' }, r.file_name, h('div', { class: 'muted small' }, r.source_name)),
+        h('td', null, importBadge(r)),
+        h('td', null, num(r.events)),
+        h('td', null, bad ? h('span', { class: 'badge sev sev-error' }, num(bad)) : '0'),
+        h('td', null, num(r.lines)),
+        h('td', null, fmtBytes(r.bytes)),
+        h('td', null, timeCell(r.started_at))));
+    }
+    list.append(tbl);
+  };
+  await refresh();
+  return every(4000, refresh);
+};
+
+function importBadge(r) {
+  if (r.status === 'running') return h('span', { class: 'badge warn' }, 'analyzing…');
+  if (r.status === 'failed') return h('span', { class: 'badge bad' }, 'failed');
+  if (r.truncated) return h('span', { class: 'badge warn' }, 'partial');
+  return h('span', { class: 'badge ok' }, 'done');
+}
+
+async function renderImport(main, id) {
+  const root = h('div');
+  main.append(h('div', { class: 'row small' }, h('a', { href: '#/files' }, '← Log files')), root);
+  const filter = { min_severity: '', category: '', q: '', fingerprint: '' };
+  let rendered = false;
+  let stopped = false;
+
+  const tick = async () => {
+    if (stopped) return;
+    let rep = null;
+    try {
+      rep = await GET(`/api/imports/${encodeURIComponent(id)}`);
+    } catch (err) {
+      if (err instanceof AuthError) return;
+      const up = uploads[id];
+      if (up && (up.state === 'queued' || up.state === 'uploading' || up.state === 'processing')) {
+        renderPending(root, up);
+        return;
+      }
+      clear(root).append(h('div', { class: 'callout bad mt' }, up && up.error ? up.error : err.message));
+      stopped = true;
+      return;
+    }
+    if (rep.status === 'running') {
+      renderProgress(root, rep, uploads[id]);
+      return;
+    }
+    if (!rendered) {
+      rendered = true;
+      stopped = true;
+      renderReport(root, rep, filter);
+    }
+  };
+  await tick();
+  const stop = every(1500, tick);
+  return () => { stopped = true; stop(); };
+}
+
+function progressBar(frac) {
+  const fill = h('div', { class: 'progress-fill' });
+  fill.style.width = `${Math.max(2, Math.min(100, frac * 100))}%`;
+  return h('div', { class: 'progress' }, fill);
+}
+
+function renderPending(root, up) {
+  const frac = up.total ? up.loaded / up.total : 0;
+  clear(root).append(h('div', { class: 'card mt' },
+    h('h2', null, up.file.name),
+    up.state === 'queued' ? h('p', { class: 'muted' }, 'Waiting for the previous file to finish…') : [
+      h('p', { class: 'muted' }, `Uploading ${fmtBytes(up.loaded)} of ${fmtBytes(up.total)}`),
+      progressBar(frac)]));
+}
+
+function renderProgress(root, rep, up) {
+  const parts = [];
+  if (up && up.state === 'uploading' && up.total) {
+    parts.push(h('p', { class: 'muted' }, `Uploaded ${fmtBytes(up.loaded)} of ${fmtBytes(up.total)} · analyzed ${num(rep.lines)} lines, ${num(rep.events)} events so far`));
+    parts.push(progressBar(up.loaded / up.total));
+  } else {
+    parts.push(h('p', { class: 'muted' }, `Analyzing… ${num(rep.lines)} lines, ${num(rep.events)} events, ${fmtBytes(rep.bytes)} read`));
+    parts.push(h('div', { class: 'progress indeterminate' }, h('div', { class: 'progress-fill' })));
+  }
+  if (rep.yielded_ms > 1000) parts.push(h('p', { class: 'small muted' }, `Paused ${fmtSpan(rep.yielded_ms)} so live ingest could keep up.`));
+  clear(root).append(h('div', { class: 'card mt' }, h('h2', null, rep.file_name), parts));
+}
+
+function renderReport(root, rep, filter) {
+  clear(root);
+  const tz = rep.time_zone || 'UTC';
+  const up = uploads[rep.id];
+  const bySev = rep.by_severity || {};
+  const bad = (bySev.error || 0) + (bySev.critical || 0);
+
+  const downloadReport = () => {
+    const blob = new Blob([JSON.stringify(rep, null, 2)], { type: 'application/json' });
+    saveBlob(blob, `laya-${rep.id}-report.json`);
+  };
+  const downloadEvents = async () => {
+    const p = new URLSearchParams({ format: 'ndjson' });
+    for (const [k, v] of Object.entries(filter)) if (v) p.set(k, v);
+    const res = await fetch(`/api/imports/${encodeURIComponent(rep.id)}/events?${p}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { toast('Download failed', 'error'); return; }
+    saveBlob(await res.blob(), `laya-${rep.id}-events.ndjson`);
+  };
+  const actions = [
+    h('button', { type: 'button', onclick: downloadReport }, 'Download report'),
+    rep.retained ? h('button', { type: 'button', onclick: () => downloadEvents().catch(reportError) }, 'Download events') : null,
+    up && up.file ? h('button', { type: 'button', onclick: () => { location.hash = `#/files/${queueUpload(up.file, up.opts)}`; } }, 'Re-analyze with current rules') : null,
+    h('button', {
+      type: 'button', class: 'danger',
+      onclick: async () => {
+        if (!(await confirmDialog(`Delete the analysis of "${rep.file_name}"?`))) return;
+        await api('DELETE', `/api/imports/${encodeURIComponent(rep.id)}`).catch(reportError);
+        location.hash = '#/files';
+      },
+    }, 'Delete'),
+  ];
+  const describe = [rep.parse.mode || '—', rep.compressed ? 'gzip' : null, rep.parse.encoding && rep.parse.encoding !== 'utf-8' ? rep.parse.encoding : null].filter(Boolean).join(', ');
+  append(root, pageHead(rep.file_name, `${rep.source_name} · parsed as ${describe} · ${fmtBytes(rep.bytes)} · analyzed ${fmtTime(rep.started_at)}`, actions));
+
+  if (rep.status === 'failed') root.append(h('div', { class: 'callout bad' }, rep.error || 'The analysis failed.'));
+  else if (rep.truncated) root.append(h('div', { class: 'callout bad' }, STOP_REASONS[rep.stop_reason] || rep.error, rep.error && STOP_REASONS[rep.stop_reason] ? h('div', { class: 'small muted' }, rep.error) : null));
+  if (rep.events_evicted) root.append(h('div', { class: 'callout' }, 'Browsable events for this file were freed to make room for newer analyses; the summary below is complete.'));
+
+  const ts = rep.parse;
+  const kpi = (label, value, sub, alert) => h('div', { class: `card kpi ${alert ? 'alert' : ''}` }, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value), h('div', { class: 'sub' }, sub));
+  root.append(h('div', { class: 'kpis' },
+    kpi('Lines', num(rep.lines), `${num(ts.folded_lines || 0)} folded into multi-line records`),
+    kpi('Events', num(rep.events), `${num(rep.dropped)} dropped by rules`),
+    kpi('Errors + critical', num(bad), `${num(bySev.critical || 0)} critical`, bad > 0),
+    kpi('Time span', rep.first_timestamp ? fmtSpan(new Date(rep.last_timestamp) - new Date(rep.first_timestamp)) : '—',
+      rep.first_timestamp ? `${fmtIn(rep.first_timestamp, tz)} → ${fmtIn(rep.last_timestamp, tz)} (${tz})` : 'no timestamps recognised'),
+    kpi('Patterns', num(rep.distinct_patterns), rep.other_pattern_events ? `+${num(rep.other_pattern_events)} events in rare patterns` : 'distinct messages')));
+
+  const tl = rep.timeline;
+  if (tl && tl.points && tl.points.length) {
+    const outside = (tl.before || 0) + (tl.after || 0);
+    root.append(h('div', { class: 'card' },
+      h('h2', null, 'Events over log time'),
+      timelineChart(tl.points, {
+        left: fmtIn(tl.start, tz), mid: '', right: fmtIn(tl.end, tz),
+        unit: stepLabel(tl.step_seconds), tip: (t) => fmtIn(t, tz),
+      }),
+      outside ? h('p', { class: 'small muted' }, `${num(outside)} events with outlying timestamps are not charted (${num(tl.before || 0)} earlier, ${num(tl.after || 0)} later).`) : null,
+      h('p', { class: 'small muted' }, `${num(ts.timestamps_parsed)} records had a timestamp, ${num(ts.timestamps_inferred)} took the previous record's, ${num(ts.timestamps_missing)} had none. Times without a zone were read as ${tz}.`)));
+  }
+
+  const bars = (title, obj, onPick) => {
+    const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    const max = Math.max(1, ...entries.map((e) => e[1]));
+    const card = h('div', { class: 'card' }, h('h2', null, title));
+    if (!entries.length) card.append(h('div', { class: 'muted' }, 'None.'));
+    for (const [k, v] of entries) {
+      const fill = h('div', { class: 'fill' });
+      fill.style.width = `${(v / max) * 100}%`;
+      card.append(h('div', { class: 'hbar' }, onPick ? h('button', { type: 'button', class: 'link name', onclick: () => onPick(k) }, k) : h('span', { class: 'name' }, k), h('div', { class: 'track' }, fill), h('span', { class: 'n' }, num(v))));
+    }
+    return card;
+  };
+  const routesCard = h('div', { class: 'card' }, h('h2', null, 'Alert routes that would have fired'));
+  if (!rep.routes || !rep.routes.length) {
+    routesCard.append(h('p', { class: 'muted' }, 'None of your alert routes match events in this file.'));
+  } else {
+    const t = h('table', null, h('tr', null, h('th', null, 'Route'), h('th', null, 'Events'), h('th', null, 'Distinct problems')));
+    for (const r of rep.routes) t.append(h('tr', null, h('td', null, r.name), h('td', null, num(r.events)), h('td', null, num(r.patterns))));
+    routesCard.append(t, h('p', { class: 'small muted' }, 'Nothing was sent. With throttling on, a route alerts about once per distinct problem.'));
+  }
+
+  const eventsCard = h('div', { class: 'card flush mt' });
+  const setFilter = (k, v) => { Object.assign(filter, { [k]: v }); loadEvents(eventsCard, rep, filter, setFilter); eventsCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+
+  root.append(h('div', { class: 'grid cols-2 mt' },
+    bars('By category', rep.by_category, (k) => setFilter('category', k)),
+    bars('Rules matched', rep.by_rule)),
+  h('div', { class: 'mt' }, routesCard));
+
+  root.append(patternsCard(rep, setFilter));
+  root.append(eventsCard);
+  loadEvents(eventsCard, rep, filter, setFilter);
+
+  const diag = h('div', { class: 'kv' });
+  const drow = (k, v) => { if (v !== undefined && v !== null && v !== '' && v !== 0) diag.append(h('div', null, k), h('div', null, String(v))); };
+  drow('Mode', ts.mode); drow('Encoding', ts.encoding); drow('Compressed', rep.compressed ? 'gzip' : 'no');
+  drow('Long lines cut', ts.long_lines); drow('Continuation lines dropped', ts.dropped_continuation_lines); drow('Malformed JSON lines', ts.json_line_errors);
+  drow('Kept to browse', `${num(rep.retained)} events (${fmtBytes(rep.retained_bytes)})`);
+  if (rep.yielded_ms) drow('Paused for live ingest', fmtSpan(rep.yielded_ms));
+  root.append(h('div', { class: 'card mt' }, h('h2', null, 'How the file was read'), diag,
+    h('p', { class: 'small muted' }, 'This analysis lives in memory and is cleared when Laya restarts.')));
+}
+
+function saveBlob(blob, name) {
+  const a = h('a', { href: URL.createObjectURL(blob), download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function patternsCard(rep, setFilter) {
+  const card = h('div', { class: 'card flush mt' });
+  const body = h('div');
+  let tab = 'top';
+  const tabs = h('div', { class: 'row' });
+  const renderTabs = () => {
+    clear(tabs).append(
+      h('button', { type: 'button', class: `small ${tab === 'top' ? 'primary' : ''}`, onclick: () => { tab = 'top'; renderTabs(); show(); } }, 'Top issues'),
+      h('button', { type: 'button', class: `small ${tab === 'uncat' ? 'primary' : ''}`, onclick: () => { tab = 'uncat'; renderTabs(); show(); } }, 'Uncategorized patterns'));
+  };
+  const table = (patterns, withRule) => {
+    if (!patterns.length) return h('div', { class: 'empty' }, tab === 'uncat' ? 'Every pattern was categorized by a rule.' : 'No events.');
+    const t = h('table', null, h('tr', null, h('th', null, 'Severity'), h('th', null, 'Count'), h('th', null, 'Pattern'), h('th', null, 'Category'), h('th', null, 'First line'), withRule ? h('th', null, '') : null));
+    for (const p of patterns) {
+      t.append(h('tr', { class: 'clickable', onclick: () => setFilter('fingerprint', p.fingerprint) },
+        h('td', null, sevBadge(p.severity)),
+        h('td', null, num(p.count)),
+        h('td', { class: 'msg', title: p.sample }, p.sample),
+        h('td', { class: 'nowrap' }, p.category),
+        h('td', null, p.first_line || '—'),
+        withRule ? h('td', null, h('button', {
+          type: 'button', class: 'small',
+          onclick: (e) => { e.stopPropagation(); editRule(null, { message: p.sample }); },
+        }, 'Create rule…')) : null));
+    }
+    return t;
+  };
+  const show = async () => {
+    if (tab === 'top') { clear(body).append(table(rep.top_patterns || [], false)); return; }
+    clear(body).append(h('div', { class: 'empty' }, 'Loading…'));
+    const pats = await GET(`/api/imports/${encodeURIComponent(rep.id)}/patterns?category=uncategorized&limit=100`).catch((e) => { reportError(e); return []; });
+    clear(body).append(table(pats, true));
+  };
+  renderTabs();
+  show();
+  card.append(h('div', { class: 'list-item' }, h('div', { class: 'main' }, h('h2', null, 'Patterns'),
+    h('div', { class: 'meta' }, 'Same message shape, numbers and ids ignored. Click one to see its events.')), tabs), body);
+  return card;
+}
+
+async function loadEvents(card, rep, filter, setFilter) {
+  clear(card);
+  const sevSel = select([['', 'Any severity'], ...SEVERITIES.map((x) => [x, `≥ ${x}`])], filter.min_severity);
+  const catSel = select([['', 'Any category'], ...Object.keys(rep.by_category || {}).sort().map((x) => [x, x])], filter.category);
+  const q = h('input', { type: 'search', placeholder: 'Search messages…', value: filter.q });
+  const chips = h('span');
+  if (filter.fingerprint) {
+    chips.append(h('span', { class: 'badge' }, `pattern ${filter.fingerprint} `,
+      h('button', { type: 'button', class: 'link', 'aria-label': 'Clear pattern filter', onclick: () => setFilter('fingerprint', '') }, '×')));
+  }
+  sevSel.addEventListener('change', () => setFilter('min_severity', sevSel.value));
+  catSel.addEventListener('change', () => setFilter('category', catSel.value));
+  let qTimer;
+  q.addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(() => setFilter('q', q.value.trim()), 350); });
+  const tableWrap = h('div');
+  const more = h('button', { type: 'button' }, 'Load more');
+  card.append(
+    h('div', { class: 'list-item' }, h('div', { class: 'main' }, h('h2', null, 'Events'),
+      h('div', { class: 'meta' }, rep.retained < rep.events
+        ? `${num(rep.retained)} of ${num(rep.events)} events were kept to browse: the most severe ones, plus a few examples of every pattern.`
+        : 'All events are available to browse.'))),
+    h('div', { class: 'row pad' }, sevSel, catSel, q, chips),
+    tableWrap,
+    h('div', { class: 'row pad' }, more));
+  if (!rep.retained) {
+    clear(tableWrap).append(h('div', { class: 'empty' }, rep.events_evicted ? 'Events were freed to save memory.' : 'No events to show.'));
+    more.hidden = true;
+    return;
+  }
+  let offset = 0;
+  const tz = rep.time_zone || 'UTC';
+  const tbl = h('table', null, h('tr', null, h('th', null, 'Line'), h('th', null, 'Time'), h('th', null, 'Severity'), h('th', null, 'Category'), h('th', null, 'Message')));
+  const page = async () => {
+    const p = new URLSearchParams({ offset: String(offset), limit: '100' });
+    for (const [k, v] of Object.entries(filter)) if (v) p.set(k, v);
+    const r = await GET(`/api/imports/${encodeURIComponent(rep.id)}/events?${p}`);
+    if (offset === 0) {
+      clear(tableWrap);
+      if (!r.events.length) {
+        const pat = r.pattern;
+        tableWrap.append(h('div', { class: 'empty' }, pat && pat.count
+          ? `This pattern occurred ${num(pat.count)} times but none were kept to browse. First seen at line ${pat.first_line || '?'}: ${pat.sample}`
+          : 'No matching events.'));
+      } else {
+        tableWrap.append(tbl);
+      }
+    }
+    for (const ev of r.events) {
+      const when = ev.time_source === 'none' ? '—' : `${ev.time_source === 'inferred' ? '≈ ' : ''}${fmtIn(ev.timestamp, tz)}`;
+      tbl.append(h('tr', { class: 'clickable', onclick: () => showEvent({ importId: rep.id, id: ev.id }, { onFingerprint: (fp) => setFilter('fingerprint', fp) }) },
+        h('td', { class: 'muted' }, ev.line || ''),
+        h('td', { class: 'nowrap small', title: ev.time_source === 'inferred' ? 'No timestamp on this record; taken from the previous one' : '' }, when),
+        h('td', null, sevBadge(ev.severity)),
+        h('td', { class: 'nowrap' }, ev.category),
+        h('td', { class: 'msg', title: ev.message }, ev.message, ' ', tags(ev.tags))));
+    }
+    offset += r.events.length;
+    more.hidden = offset >= r.total;
+    more.textContent = `Load more (${num(r.total - offset)} left)`;
+  };
+  more.onclick = () => page().catch(reportError);
+  await page().catch(reportError);
+}
 
 // ---------- Boot ----------
 

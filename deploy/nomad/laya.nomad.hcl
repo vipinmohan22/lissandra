@@ -61,15 +61,27 @@ variable "cpu" {
 }
 
 variable "memory" {
-  description = "Memory in MB. Raise with LAYA_EVENT_BUFFER (roughly 2 KB per buffered event)."
+  description = "Memory in MB. Budget ~2 KB per buffered live event, plus import_memory_mb, plus ~100 MB headroom for an analysis in progress."
   type        = number
-  default     = 256
+  default     = 384
 }
 
 variable "event_buffer" {
   description = "How many recent events Laya keeps in memory for the UI."
   type        = number
   default     = 5000
+}
+
+variable "max_import_mb" {
+  description = "Largest log file (as uploaded, so possibly gzipped) the Log files page accepts, in MB."
+  type        = number
+  default     = 100
+}
+
+variable "import_memory_mb" {
+  description = "Memory for browsable events from analyzed log files, across all kept analyses, in MB."
+  type        = number
+  default     = 64
 }
 
 variable "log_level" {
@@ -155,12 +167,16 @@ job "laya" {
       }
 
       env {
-        LAYA_LISTEN       = ":8080"
-        LAYA_DATA_DIR     = "/data"
-        LAYA_PUBLIC_URL   = var.public_url
-        LAYA_EVENT_BUFFER = var.event_buffer
-        LAYA_LOG_LEVEL    = var.log_level
-        LAYA_LOG_FORMAT   = "json"
+        LAYA_LISTEN           = ":8080"
+        LAYA_DATA_DIR         = "/data"
+        LAYA_PUBLIC_URL       = var.public_url
+        LAYA_EVENT_BUFFER     = var.event_buffer
+        LAYA_LOG_LEVEL        = var.log_level
+        LAYA_LOG_FORMAT       = "json"
+        LAYA_MAX_IMPORT_BYTES = var.max_import_mb * 1048576
+        LAYA_IMPORT_MEMORY_MB = var.import_memory_mb
+        # Let the Go runtime collect garbage before the task hits its limit.
+        GOMEMLIMIT = "${floor(var.memory * 0.8)}MiB"
       }
 
       # Secrets come from the Nomad Variable at nomad/jobs/laya, which this

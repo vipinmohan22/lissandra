@@ -61,6 +61,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/config/export", s.exportConfig)
 	mux.HandleFunc("POST /api/config/import", s.importConfig)
+
+	s.importRoutes(mux)
 }
 
 // update runs a config mutation and maps errors to HTTP responses.
@@ -97,6 +99,13 @@ func (s *Server) getInfo(w http.ResponseWriter, r *http.Request) {
 		"severities": model.Severities,
 		"operators":  config.Operators,
 		"categories": c.Settings.Categories,
+		"imports": map[string]any{
+			"max_upload_bytes":       s.opts.MaxImportBytes,
+			"max_decompressed_bytes": s.opts.MaxImportDecompressed,
+			"concurrency":            s.imports.Config().Concurrency,
+			"keep":                   s.imports.Config().Keep,
+			"formats":                ImportFormats,
+		},
 	})
 }
 
@@ -113,6 +122,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 			"dropped": d.Dropped.Load(), "throttled": d.Throttled.Load(),
 		},
 		"ai":             s.ai.Status(),
+		"imports":        map[string]any{"active": s.imports.Active(), "done": s.imports.Succeeded.Load(), "failed": s.imports.Failed.Load()},
 		"sources":        s.pollers.Status(),
 		"uptime_seconds": int(time.Since(s.started).Seconds()),
 	})

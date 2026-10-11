@@ -98,6 +98,8 @@ nomad job run  -var-file=deploy/nomad/laya.vars.hcl deploy/nomad/laya.nomad.hcl
 | `cpu` / `memory` | `300` / `256` | Allow about 2 KB of memory per buffered event. |
 | `event_buffer` | `5000` | Recent events kept in memory. |
 | `log_level` | `info` | |
+| `max_import_mb` | `100` | Largest log file upload on the Log files page. |
+| `import_memory_mb` | `64` | Memory for browsable events from analyzed log files. |
 
 ## 5. Reach the UI and point senders at it
 
@@ -106,6 +108,25 @@ nomad job run  -var-file=deploy/nomad/laya.vars.hcl deploy/nomad/laya.nomad.hcl
 - **Quick look:** `nomad service info laya` shows the address and port.
 
 Senders inside the cluster can discover Laya through service discovery. For example, a Fluent Bit or Vector job can template the address with `{{ range nomadService "laya" }}{{ .Address }}:{{ .Port }}{{ end }}`. Each source's **Setup instructions** dialog shows ready-made curl, Fluent Bit and Vector snippets with its URL and token filled in.
+
+## Analyzing log files through a proxy
+
+Uploads on the **Log files** page are streamed and analyzed while they arrive. A large file can keep one request open for several minutes. Defaults that cut such requests short:
+
+- **Traefik:** `entryPoints.<name>.transport.respondingTimeouts.readTimeout` is 60 s in v3. Raise it, e.g. to `3600s`, on the entrypoint Laya uses.
+- **nginx:** `client_max_body_size 1m` by default. Set it at least to `max_import_mb`. Add `proxy_request_buffering off` (so analysis starts while uploading) and a long `proxy_read_timeout`.
+
+For files bigger than the upload limit, run the analysis where the file is: `docker run --rm -i <image> analyze - < app.log`. To use your team's rules, export them from **Settings → Backup** and pass `-config`.
+
+## Memory sizing
+
+The task needs roughly:
+
+- ~2 KB per buffered live event (`event_buffer`);
+- plus `import_memory_mb` for browsable events from log files;
+- plus about 100 MB of working memory while a file is being analyzed.
+
+The job sets `GOMEMLIMIT` to 80% of `memory`, so Go reclaims memory before Docker's limit is reached. The default of 384 MB covers the defaults with room to spare.
 
 ## Monitoring
 

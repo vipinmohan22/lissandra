@@ -17,6 +17,7 @@ import (
 	"github.com/vipinmohan22/layalogs/internal/ai"
 	"github.com/vipinmohan22/layalogs/internal/config"
 	"github.com/vipinmohan22/layalogs/internal/events"
+	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/notify"
 	"github.com/vipinmohan22/layalogs/internal/pipeline"
 	"github.com/vipinmohan22/layalogs/internal/poller"
@@ -28,7 +29,10 @@ type Options struct {
 	AdminToken     string
 	PublicURL      string // fallback when Settings.PublicURL is empty
 	MaxIngestBytes int64
-	UI             fs.FS // contents served at /
+	MaxImportBytes int64 // upload cap for log file analysis
+
+	MaxImportDecompressed int64 // cap on decompressed input per analysis
+	UI                    fs.FS // contents served at /
 }
 
 // Server wires HTTP handlers to Laya's components.
@@ -41,6 +45,7 @@ type Server struct {
 	dispatcher *notify.Dispatcher
 	ai         *ai.Classifier
 	pollers    *poller.Manager
+	imports    *importer.Registry
 	started    time.Time
 
 	// sources is a cheap snapshot for the hot ingest path.
@@ -49,11 +54,17 @@ type Server struct {
 
 // New builds a Server and subscribes it to config changes.
 func New(opts Options, log *slog.Logger, cfg *config.Store, store *events.Store, p *pipeline.Pipeline,
-	d *notify.Dispatcher, a *ai.Classifier, pm *poller.Manager) *Server {
+	d *notify.Dispatcher, a *ai.Classifier, pm *poller.Manager, imports *importer.Registry) *Server {
 	if opts.MaxIngestBytes <= 0 {
 		opts.MaxIngestBytes = 10 << 20
 	}
-	s := &Server{opts: opts, log: log, cfg: cfg, store: store, pipeline: p, dispatcher: d, ai: a, pollers: pm, started: time.Now()}
+	if opts.MaxImportBytes <= 0 {
+		opts.MaxImportBytes = 100 << 20
+	}
+	if opts.MaxImportDecompressed <= 0 {
+		opts.MaxImportDecompressed = 512 << 20
+	}
+	s := &Server{opts: opts, log: log, cfg: cfg, store: store, pipeline: p, dispatcher: d, ai: a, pollers: pm, imports: imports, started: time.Now()}
 	cfg.Subscribe(func(c *config.Config) {
 		m := make(map[string]config.Source, len(c.Sources))
 		for _, src := range c.Sources {
@@ -127,6 +138,10 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets http.ResponseController reach the underlying writer (used to
+// extend deadlines for long uploads).
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

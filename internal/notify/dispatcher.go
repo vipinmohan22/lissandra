@@ -103,8 +103,16 @@ func (d *Dispatcher) Configure(c *config.Config) {
 		}
 		channels[n.ID] = &channel{n: n, sender: s, err: err}
 	}
-	routes := make([]route, 0, len(c.Routes))
-	for _, r := range c.Routes {
+	routes := compileRoutes(c.Routes)
+	d.mu.Lock()
+	d.channels, d.routes, d.publicURL = channels, routes, c.Settings.PublicURL
+	d.mu.Unlock()
+}
+
+// compileRoutes prepares the enabled routes for matching.
+func compileRoutes(in []config.Route) []route {
+	routes := make([]route, 0, len(in))
+	for _, r := range in {
 		if !r.Enabled {
 			continue
 		}
@@ -118,9 +126,7 @@ func (d *Dispatcher) Configure(c *config.Config) {
 		}
 		routes = append(routes, rt)
 	}
-	d.mu.Lock()
-	d.channels, d.routes, d.publicURL = channels, routes, c.Settings.PublicURL
-	d.mu.Unlock()
+	return routes
 }
 
 func (r *route) matches(ev *model.Event) bool {
@@ -140,6 +146,22 @@ func (r *route) matches(ev *model.Event) bool {
 		return false
 	}
 	return true
+}
+
+// RouteMatcher returns a function reporting which enabled routes in c an
+// event would be sent through. It builds no notifiers and sends nothing,
+// so offline tools can use it safely.
+func RouteMatcher(c *config.Config) func(ev *model.Event) []string {
+	routes := compileRoutes(c.Routes)
+	return func(ev *model.Event) []string {
+		var out []string
+		for i := range routes {
+			if routes[i].matches(ev) {
+				out = append(out, routes[i].Name)
+			}
+		}
+		return out
+	}
 }
 
 // Matches returns the names of routes ev would be sent through (for the

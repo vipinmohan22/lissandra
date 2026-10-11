@@ -15,10 +15,12 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // time zones for log file analysis, even on minimal images
 
 	"github.com/vipinmohan22/layalogs/internal/ai"
 	"github.com/vipinmohan22/layalogs/internal/config"
 	"github.com/vipinmohan22/layalogs/internal/events"
+	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/model"
 	"github.com/vipinmohan22/layalogs/internal/notify"
 	"github.com/vipinmohan22/layalogs/internal/pipeline"
@@ -30,6 +32,9 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "analyze" {
+		os.Exit(runAnalyze(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -111,13 +116,21 @@ func run() error {
 	go func() { dispatcher.Run(ctx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
 	go func() { pipe.Run(ctx, envInt("LAYA_WORKERS", 4), envInt("LAYA_AI_WORKERS", 2)); done <- struct{}{} }()
 
+	importMemory := int64(envInt("LAYA_IMPORT_MEMORY_MB", 64)) << 20
+	imports := importer.NewRegistry(importer.RegistryConfig{
+		Concurrency:   1,
+		Limits:        importer.Limits{Events: importer.DefaultLimits.Events, Bytes: min(importer.DefaultLimits.Bytes, importMemory)},
+		RetainedBytes: importMemory,
+	})
+
 	srv := server.New(server.Options{
 		Version:        version,
 		AdminToken:     token,
 		PublicURL:      publicURL,
 		MaxIngestBytes: int64(envInt("LAYA_MAX_INGEST_BYTES", 10<<20)),
+		MaxImportBytes: int64(envInt("LAYA_MAX_IMPORT_BYTES", 100<<20)),
 		UI:             web.FS(),
-	}, log, cfg, store, pipe, dispatcher, aic, pollers)
+	}, log, cfg, store, pipe, dispatcher, aic, pollers, imports)
 
 	httpSrv := &http.Server{
 		Addr:              listen,

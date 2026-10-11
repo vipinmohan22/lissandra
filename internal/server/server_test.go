@@ -19,6 +19,7 @@ import (
 	"github.com/vipinmohan22/layalogs/internal/ai"
 	"github.com/vipinmohan22/layalogs/internal/config"
 	"github.com/vipinmohan22/layalogs/internal/events"
+	"github.com/vipinmohan22/layalogs/internal/importer"
 	"github.com/vipinmohan22/layalogs/internal/notify"
 	"github.com/vipinmohan22/layalogs/internal/pipeline"
 	"github.com/vipinmohan22/layalogs/internal/poller"
@@ -33,6 +34,13 @@ type env struct {
 }
 
 func newEnv(t *testing.T) *env {
+	t.Helper()
+	return newEnvWith(t, nil)
+}
+
+func newGzip(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
+
+func newEnvWith(t *testing.T, mutate func(*Options)) *env {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg, err := config.Open(filepath.Join(t.TempDir(), "config.json"), "")
@@ -50,7 +58,11 @@ func newEnv(t *testing.T) *env {
 	go d.Run(ctx, 1)
 	go p.Run(ctx, 1, 1)
 	ui := fstest.MapFS{"index.html": {Data: []byte("<html>laya</html>")}}
-	s := New(Options{Version: "test", AdminToken: adminToken, UI: ui}, log, cfg, store, p, d, a, pm)
+	opts := Options{Version: "test", AdminToken: adminToken, UI: ui}
+	if mutate != nil {
+		mutate(&opts)
+	}
+	s := New(opts, log, cfg, store, p, d, a, pm, importer.NewRegistry(importer.RegistryConfig{Keep: 3, Limits: importer.Limits{Events: 1000, Bytes: 8 << 20}}))
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return &env{t: t, srv: srv, cfg: cfg}

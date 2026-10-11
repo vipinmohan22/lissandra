@@ -208,3 +208,13 @@ td.nowrap, .nowrap { white-space: nowrap; }
   .hbar { grid-template-columns: 90px 1fr 44px; }
   td.msg { width: auto; }
 }
+
+.dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 28px 16px; text-align: center; cursor: pointer; background: var(--panel-2); }
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone .dz-title { font-weight: 600; margin-bottom: 4px; }
+.progress { height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; margin: 8px 0; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width .4s ease; }
+.progress.indeterminate .progress-fill { width: 30%; animation: indeterminate 1.4s ease-in-out infinite; }
+@keyframes indeterminate { from { margin-left: -30%; } to { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .progress.indeterminate .progress-fill { animation: none; width: 100%; opacity: .5; } }
+.row.pad { padding: 10px 16px; }
