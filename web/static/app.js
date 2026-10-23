@@ -1312,7 +1312,7 @@ pages.rules = async (main, _arg, params) => {
     h('div', { class: 'grid cols-2 top' }, list, tester));
   const render = () => {
     const count = (k) => (k === 'all' ? cache.rules.length : cache.rules.filter((r) => ruleStatus(r) === k).length);
-    clear(tabs).append(RULE_TABS.map(([k, label]) => h('button', {
+    append(clear(tabs), RULE_TABS.map(([k, label]) => h('button', {
       type: 'button', class: `small ${tab === k ? 'primary' : ''}`, 'aria-pressed': String(tab === k),
       onclick: () => {
         tab = k;
