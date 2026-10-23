@@ -320,9 +320,9 @@ function engineSettings() {
   return (cache.settings && cache.settings.engine) || {};
 }
 
-// ---------- Laya engine helpers ----------
+// ---------- Engine helpers ----------
 
-// Checkpoints laya-serve ships. Anything else is a fine-tune named in the
+// Checkpoints the engine ships. Anything else is a fine-tune named in the
 // engine's LAYA_EXTRA_MODELS.
 const ENGINE_MODELS = [
   ['english', 'english — English logs, calibrated'],
@@ -448,7 +448,7 @@ function engineAnswer(r) {
 
 // unloadedCheckpoint returns the checkpoint a test request for sourceId
 // would use when the engine has said it hasn't loaded it, else ''. Asking
-// anyway would make laya-serve load it (about 2 GB more memory), which
+// anyway would make the engine load it (about 2 GB more memory), which
 // Lissandra itself never does, so the UI doesn't ask.
 async function unloadedCheckpoint(sourceId) {
   const e = (await GET('/api/stats')).engine || {};
@@ -474,7 +474,7 @@ function severityNote(ev) {
   if (!ev.severity_guessed) return '';
   const e = ev.engine;
   if (e && e.severity && e.severity === ev.severity && e.severity_confidence >= engineThreshold(e)) {
-    return `judged by the Laya engine (${pct(e.severity_confidence)} sure): the record states no level`;
+    return `judged by the engine (${pct(e.severity_confidence)} sure): the record states no level`;
   }
   return 'guessed from keywords: the record states no level and no rule set one';
 }
@@ -790,13 +790,13 @@ function renderDashboard(root, st) {
     patterns);
 }
 
-// engineKpi summarizes the Laya engine: flagged when it is not configured,
+// engineKpi summarizes the engine: flagged when it is not configured,
 // paused after errors, failed in the last 10 minutes, or has setup warnings
 // (a checkpoint in use is not loaded or paused, categories it can't tell
 // apart). The tooltip has the details.
 function engineKpi(e, pipeline, kpi) {
   if (!e.configured) {
-    return kpi('Laya engine', 'off', e.config_error || 'not configured: set the URL in Settings', true);
+    return kpi('Engine', 'off', e.config_error || 'not configured: set the URL in Settings', true);
   }
   const paused = e.paused_until && new Date(e.paused_until) > new Date();
   // An error counts until the engine answers again (or for 10 minutes).
@@ -807,7 +807,7 @@ function engineKpi(e, pipeline, kpi) {
   if (warnings.length) parts.unshift(warnings.length === 1 ? '1 warning' : `${warnings.length} warnings`);
   if (paused) parts.unshift(`paused until ${new Date(e.paused_until).toLocaleTimeString()}`);
   else if (recent) parts.unshift(`error ${ago(e.last_error_at)}`);
-  const card = kpi('Laya engine calls', num(e.calls_total), parts.join(' · '), paused || recent || warnings.length > 0);
+  const card = kpi('Engine calls', num(e.calls_total), parts.join(' · '), paused || recent || warnings.length > 0);
   const inUse = e.models_in_use || [e.model];
   const notes = [
     `Checkpoints in use: ${inUse.join(', ')}${e.loaded ? ` · loaded on the engine: ${e.loaded.join(', ') || 'none'}` : ''}`,
@@ -929,7 +929,7 @@ pages.events = async (main, arg, params) => {
       tbl.append(h('tr', { class: 'clickable', onclick: () => showEvent({ id: ev.id }) },
         h('td', null, timeCell(ev.received_at)),
         h('td', null, sevBadge(ev.severity)),
-        h('td', { class: 'nowrap' }, ev.category, ev.classifier === 'laya' ? h('span', { class: 'muted small', title: 'Classified by the Laya engine' }, ' ✦') : null),
+        h('td', { class: 'nowrap' }, ev.category, ev.classifier === 'engine' ? h('span', { class: 'muted small', title: 'Classified by the engine' }, ' ✦') : null),
         h('td', { class: 'nowrap' }, ev.source_name),
         h('td', { class: 'msg', title: ev.message }, ev.message, ' ', tags(ev.tags))));
     }
@@ -966,7 +966,7 @@ async function showEvent(target, opts = {}) {
   const sevNote = severityNote(ev);
   row('Severity', h('div', null, sevBadge(ev.severity), sevNote ? h('span', { class: 'muted small' }, ` ${sevNote}`) : null));
   row('Category', ev.category);
-  row('Classified by', ev.classifier === 'laya' ? 'the Laya engine' : ev.classifier);
+  row('Classified by', ev.classifier === 'engine' ? 'the engine' : ev.classifier);
   row('Source', ev.source_name);
   row('Level field', ev.level);
   row('Log timestamp', ev.time_source === 'none' ? '— (no timestamp in this record or before it)' : `${fmtTime(ev.timestamp)}${ev.time_source === 'inferred' ? ' (taken from the previous record)' : ''}`);
@@ -997,17 +997,17 @@ async function showEvent(target, opts = {}) {
   // Only live events: the API looks up event_id among live events.
   if (engineSettings().enabled && !ev.import_id) {
     actions.push({
-      label: 'Ask the Laya engine',
+      label: 'Ask the engine',
       onClick: async () => {
-        clear(engineOut).append(h('h3', null, 'Laya engine'), h('p', { class: 'muted' }, 'Asking the engine…'));
+        clear(engineOut).append(h('h3', null, 'Engine'), h('p', { class: 'muted' }, 'Asking the engine…'));
         try {
           const missing = await unloadedCheckpoint(ev.source_id);
           if (missing) {
-            clear(engineOut).append(h('h3', null, 'Laya engine'), notLoadedNote(missing));
+            clear(engineOut).append(h('h3', null, 'Engine'), notLoadedNote(missing));
             return false;
           }
           const r = await api('POST', '/api/engine/classify', { event_id: ev.id });
-          clear(engineOut).append(h('h3', null, 'Laya engine (asked now)'),
+          clear(engineOut).append(h('h3', null, 'Engine (asked now)'),
             h('p', { class: 'small muted' }, 'With today\'s settings and rules; nothing is stored.'), engineAnswer(r));
         } catch (err) {
           clear(engineOut);
@@ -1055,7 +1055,7 @@ function renderSources(root, sources, status) {
     root.append(h('div', { class: `list-item ${src.enabled ? '' : 'disabled-item'}` },
       h('div', { class: 'main' },
         h('div', { class: 'title' }, src.name, h('span', { class: 'badge' }, src.type), src.enabled ? null : h('span', { class: 'badge' }, 'disabled'),
-          src.engine_model ? h('span', { class: 'badge', title: 'Laya engine checkpoint for this source' }, `checkpoint: ${src.engine_model}`) : null, tags(src.tags)),
+          src.engine_model ? h('span', { class: 'badge', title: 'Engine checkpoint for this source' }, `checkpoint: ${src.engine_model}`) : null, tags(src.tags)),
         meta,
         h('div', { class: 'meta' }, 'Alerts → ', (src.alert_group_ids || []).length
           ? src.alert_group_ids.map(groupName).join(', ')
@@ -1193,7 +1193,7 @@ function editSource(src, { onSaved } = {}) {
       h('div', { class: 'fields-2' }, field('Format', f.format), field('Records path', f.recordsPath, 'Dot path to the array of log records in a JSON response.')),
       h('div', { class: 'fields-3' }, field('Message field', f.messageField), field('Level field', f.levelField), field('Timestamp field', f.tsField))),
     h('fieldset', null, h('legend', null, 'Classification'),
-      field('Laya engine checkpoint', f.engineModel.el, 'The checkpoint that classifies this source\'s events when no rule does. Pick multilingual for logs that are not in English. The engine must have it loaded (its LAYA_MODELS): Lissandra never asks for one it hasn\'t, and those events keep the rules\' result.')),
+      field('Engine checkpoint', f.engineModel.el, 'The checkpoint that classifies this source\'s events when no rule does. Pick multilingual for logs that are not in English. The engine must have it loaded (its LAYA_MODELS): Lissandra never asks for one it hasn\'t, and those events keep the rules\' result.')),
     h('fieldset', null, h('legend', null, 'Alerts'),
       f.groups.length
         ? h('div', { class: 'field' }, h('label', null, 'Alert groups'), h('div', { class: 'chips' }, f.groups.map((x) => x.box.el)),
@@ -1306,7 +1306,7 @@ pages.rules = async (main, _arg, params) => {
   const list = h('div', { class: 'card flush' });
   const tester = ruleTester();
   append(main,
-    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation. When no rule categorizes an event, the Laya engine does, and Lissandra learns a rule from its answer for you to review.',
+    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation. When no rule categorizes an event, the classification engine does, and Lissandra learns a rule from its answer for you to review.',
       h('button', { type: 'button', class: 'primary', onclick: () => editRule(null) }, 'Add rule')),
     tabs,
     h('div', { class: 'grid cols-2 top' }, list, tester));
@@ -1338,7 +1338,7 @@ async function reviewRules(action, ids, rerender) {
 function learnedNote(r) {
   const l = r.learned;
   if (!l) return null;
-  const parts = [`Learned ${ago(l.at)} from the ${l.model || 'Laya'} checkpoint`, `${pct(l.confidence)} confident in ${l.category}`];
+  const parts = [`Learned ${ago(l.at)} from the ${l.model || 'engine'} checkpoint`, `${pct(l.confidence)} confident in ${l.category}`];
   if (l.severity) parts.push(`severity ${l.severity} (${pct(l.severity_confidence)})`);
   parts.push(`source ${sourceName(l.source_id)}`);
   return h('div', { class: 'learned' },
@@ -1370,8 +1370,8 @@ function renderRules(root, tab = 'all', rerender = () => renderRules(root, tab))
       all: 'No rules. Events will only get heuristic severities.',
       active: 'No active rules.',
       review: engineSettings().learn_rules === false
-        ? 'Nothing to review. Rule learning is off (Settings → Laya engine).'
-        : 'Nothing to review. When the Laya engine categorizes a pattern no rule covers, the rule Lissandra learns from it appears here.',
+        ? 'Nothing to review. Rule learning is off (Settings → Engine).'
+        : 'Nothing to review. When the engine categorizes a pattern no rule covers, the rule Lissandra learns from it appears here.',
       rejected: 'No rejected rules.',
     };
     root.append(h('div', { class: 'empty' }, empty[tab]));
@@ -1407,7 +1407,7 @@ function renderRules(root, tab = 'all', rerender = () => renderRules(root, tab))
         h('div', { class: 'title' }, r.name,
           status === 'review' ? h('span', { class: 'badge warn' }, 'under review') : null,
           status === 'rejected' ? h('span', { class: 'badge bad' }, 'rejected') : null,
-          status === 'active' && r.learned ? h('span', { class: 'badge', title: 'Learned from the Laya engine and approved' }, 'learned') : null,
+          status === 'active' && r.learned ? h('span', { class: 'badge', title: 'Learned from the engine and approved' }, 'learned') : null,
           r.source_ids && r.source_ids.length ? h('span', { class: 'badge' }, `only: ${r.source_ids.map(sourceName).join(', ')}`) : null),
         h('div', { class: 'meta mono' }, conds),
         h('div', { class: 'meta' }, acts),
@@ -1436,7 +1436,7 @@ function ruleActions(r) {
   if (r.drop) acts.push(h('span', { class: 'badge bad' }, 'drop'));
   if (r.category) acts.push(h('span', { class: 'badge' }, `category: ${r.category}`));
   if (r.severity) acts.push(h('span', { class: 'badge' }, `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}`));
-  if (r.skip_engine) acts.push(h('span', { class: 'badge', title: 'Matching events are not sent to the Laya engine' }, 'no engine'));
+  if (r.skip_engine) acts.push(h('span', { class: 'badge', title: 'Matching events are not sent to the engine' }, 'no engine'));
   if (r.stop) acts.push(h('span', { class: 'badge' }, 'stop'));
   acts.push(tags(r.tags));
   return acts;
@@ -1520,7 +1520,7 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
   const tagsIn = h('input', { value: (rule.tags || []).join(', ') });
   const drop = checkbox('Drop matching events (don\'t store or alert)', rule.drop);
   const stop = checkbox('Stop evaluating later rules', rule.stop);
-  const skipEngine = checkbox('Don\'t ask the Laya engine about matching events', rule.skip_engine);
+  const skipEngine = checkbox('Don\'t ask the engine about matching events', rule.skip_engine);
   const srcChecks = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (rule.source_ids || []).includes(x.id)) }));
 
   const testIn = h('textarea', { rows: 3, placeholder: 'Sample log to try this rule on…' }, fromEvent ? fromEvent.message : '');
@@ -1538,8 +1538,8 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
 
   const body = h('div', null, dl, catList,
     rule.learned ? h('div', { class: `callout ${status === 'review' ? 'warn' : ''}` },
-      status === 'review' ? 'Learned from the Laya engine and awaiting review. It already classifies matching events. ' : null,
-      status === 'rejected' ? 'Rejected: it keeps the Laya engine away from its pattern. ' : null,
+      status === 'review' ? 'Learned from the engine and awaiting review. It already classifies matching events. ' : null,
+      status === 'rejected' ? 'Rejected: it keeps the engine away from its pattern. ' : null,
       learnedNote(rule)) : null,
     h('div', { class: 'fields-2' }, field('Name', name), field('Description', desc)),
     enabled.el,
@@ -1959,7 +1959,7 @@ pages.settings = async (main) => {
 
   const e = st.engine || {};
   const f = {
-    enabled: checkbox('Classify events with the Laya engine', e.enabled),
+    enabled: checkbox('Classify events with the engine', e.enabled),
     url: h('input', { placeholder: 'http://127.0.0.1:8000 or ${env:LISSANDRA_ENGINE_URL}', autocomplete: 'off', spellcheck: 'false' }),
     apiKey: secretInput('', { placeholder: '${env:LISSANDRA_ENGINE_API_KEY}' }),
     model: modelPicker(''),
@@ -2169,14 +2169,14 @@ pages.settings = async (main) => {
         setupGuideCard(),
         h('div', { class: 'card mt' },
           h('h2', null, 'Categories'),
-          h('p', { class: 'small muted' }, 'Rules set categories by name, and alert routes and filters use them. For events no rule categorizes, the Laya engine picks one of these names, or "none of the above": those events stay "uncategorized", which is built in. The order is kept: it is the order the engine sees and editors show.'),
+          h('p', { class: 'small muted' }, 'Rules set categories by name, and alert routes and filters use them. For events no rule categorizes, the engine picks one of these names, or "none of the above": those events stay "uncategorized", which is built in. The order is kept: it is the order the engine sees and editors show.'),
           cats.el)),
       h('div', { class: 'card' },
-        h('h2', null, 'Laya engine'),
-        h('p', { class: 'small muted' }, 'Rules run first. The Laya engine (laya-serve) classifies what they leave: it picks one of the category names, or none, and when the record states no level it judges the severity (a stated severity is never replaced). It is asked once per message pattern and repeats reuse the answer. If it is down, slow or unsure, events go on with the rules\' result.'),
+        h('h2', null, 'Engine'),
+        h('p', { class: 'small muted' }, 'Rules run first. The engine (laya-serve, from github.com/NandhaKishorM/laya) classifies what they leave: it picks one of the category names, or none, and when the record states no level it judges the severity (a stated severity is never replaced). It is asked once per message pattern and repeats reuse the answer. If it is down, slow or unsure, events go on with the rules\' result.'),
         f.enabled.el,
         h('div', { class: 'mt' }),
-        field('Engine URL', f.url, 'Base URL of laya-serve. Several URLs, comma-separated, share the load and fail over. ${env:NAME} reads Lissandra\'s environment (or the file NAME_FILE names) and ${file:/path} a file in Lissandra\'s secrets or task directory (or LISSANDRA_FILE_REF_DIRS); both are re-read while Lissandra runs. Credentials in a URL are shown masked: leave them as they are to keep them, also when adding instances or changing a port.'),
+        field('Engine URL', f.url, 'Base URL of the engine. Several URLs, comma-separated, share the load and fail over. ${env:NAME} reads Lissandra\'s environment (or the file NAME_FILE names) and ${file:/path} a file in Lissandra\'s secrets or task directory (or LISSANDRA_FILE_REF_DIRS); both are re-read while Lissandra runs. Credentials in a URL are shown masked: leave them as they are to keep them, also when adding instances or changing a port.'),
         field('API key', f.apiKey, 'The engine\'s LAYA_API_KEY, if it has one. Prefer ${env:LISSANDRA_ENGINE_API_KEY} and keep the key in a Nomad Variable.'),
         field('Checkpoint', f.model.el, 'english reads English logs and is the best calibrated; multilingual handles other languages and is faster on CPU. The engine must have it loaded (its LAYA_MODELS): Lissandra never asks for one it hasn\'t. Sources can pick their own.'),
         h('div', { class: 'fields-2' },
@@ -2184,7 +2184,7 @@ pages.settings = async (main) => {
           field('Minimum severity', f.minSev, 'Less severe events are not sent to the engine.')),
         h('div', { class: 'checks' }, f.onlyUncat.el, f.setSev.el),
         h('div', { class: 'fields-2 mt' },
-          field('Requests per engine instance', f.inFlight, 'At once, to each laya-serve (1–16, default 1). laya-serve computes one answer at a time, so more only wait inside it. For more throughput, run more instances and list every URL.'),
+          field('Requests per engine instance', f.inFlight, 'At once, to each instance (1–16, default 1). The engine computes one answer at a time, so more only wait inside it. For more throughput, run more instances and list every URL.'),
           field('Timeout (seconds)', f.timeout, 'Events wait at most this long (up to 300) for the engine, queueing included, then go on with the rules\' result.')),
         h('h3', null, 'Learning'),
         h('div', { class: 'checks' }, f.learn.el),
@@ -2468,7 +2468,7 @@ function renderHealth(out, r, inUse) {
   }
   out.append(summary);
   const notLoaded = h('span', null, h('span', { class: 'badge warn' }, 'not loaded'),
-    ' Not requested (laya-serve would load it: about 2 GB more memory); add it to the engine\'s LAYA_MODELS.');
+    ' Not requested (the engine would load it: about 2 GB more memory); add it to the engine\'s LAYA_MODELS.');
   for (const ep of r.endpoints) {
     const kv = h('div', { class: 'kv' });
     const row = (k, v) => kv.append(h('div', null, k), h('div', null, v));
@@ -2614,7 +2614,7 @@ pages.files = async (main, arg, params) => {
     ? h('button', { type: 'button', class: 'link small', onclick: () => { tzIn.value = browser; } }, `Use ${browser}`) : null;
   const picker = h('input', { type: 'file', multiple: true, hidden: true });
   const msg = h('div');
-  const useEngine = checkbox('Ask the Laya engine about patterns no rule categorizes', false);
+  const useEngine = checkbox('Ask the engine about patterns no rule categorizes', false);
 
   const start = (fileList) => {
     clear(msg);
@@ -2810,7 +2810,7 @@ function renderReport(root, rep, filter) {
     kpi('Time span', rep.first_timestamp ? fmtSpan(new Date(rep.last_timestamp) - new Date(rep.first_timestamp)) : '—',
       rep.first_timestamp ? `${fmtIn(rep.first_timestamp, tz)} → ${fmtIn(rep.last_timestamp, tz)} (${tz})` : 'no timestamps recognised'),
     kpi('Patterns', num(rep.distinct_patterns), rep.other_pattern_events ? `+${num(rep.other_pattern_events)} events in rare patterns` : 'distinct messages'),
-    rep.engine_events ? kpi('Laya engine', num(rep.engine_events), `events answered · ${num(rep.engine_applied)} applied`) : null));
+    rep.engine_events ? kpi('Engine', num(rep.engine_events), `events answered · ${num(rep.engine_applied)} applied`) : null));
 
   const tl = rep.timeline;
   if (tl && tl.points && tl.points.length) {
@@ -3612,7 +3612,7 @@ async function setupWelcome(ctx) {
     h('p', { class: 'lead' }, 'Lissandra receives your logs, classifies them by severity and category, and alerts the right people when something needs attention.'),
     h('div', { class: 'tile-grid flow' },
       tile('Ingest', 'Senders push logs to an ingest URL, or Lissandra polls an API for them.'),
-      tile('Classify', 'Rules, and the Laya engine if you run it, give each event a severity and a category.'),
+      tile('Classify', 'Rules, and the classification engine if you run it, give each event a severity and a category.'),
       tile('Alert', 'Routes send the events that matter to email, Slack, PagerDuty and other channels.')),
     h('h2', { class: 'mt' }, 'What setup covers'),
     h('ul', { class: 'checklist' }, SETUP_STEPS.map((p) => h('li', null, stepBadge(state, p.id),
@@ -3903,13 +3903,13 @@ async function sendTestEvent(src, out) {
 
 // --- classify ---
 
-// engineLine says in a few words whether the Laya engine classifies what
+// engineLine says in a few words whether the engine classifies what
 // the rules leave.
 function engineLine(e) {
-  if (!e.enabled) return 'Laya engine: off. Rules classify on their own.';
-  if (!e.configured) return 'Laya engine: not configured. Rules classify on their own.';
+  if (!e.enabled) return 'Engine: off. Rules classify on their own.';
+  if (!e.configured) return 'Engine: not configured. Rules classify on their own.';
   const paused = e.paused_until && new Date(e.paused_until) > new Date();
-  return `Laya engine: ${paused ? 'paused after errors' : 'active'} (${e.model || engineSettings().model || 'english'})`;
+  return `Engine: ${paused ? 'paused after errors' : 'active'} (${e.model || engineSettings().model || 'english'})`;
 }
 
 // draftRules is the rules with the page's unsaved toggles applied.
@@ -3969,7 +3969,7 @@ async function setupClassify(ctx) {
   const body = h('div', null,
     h('div', { class: 'card' },
       h('h2', null, 'Categories'),
-      h('p', { class: 'small muted' }, 'Rules set categories by name, and alert routes can pick them. For events no rule categorizes, the Laya engine picks one of these names, or leaves the event "uncategorized".'),
+      h('p', { class: 'small muted' }, 'Rules set categories by name, and alert routes can pick them. For events no rule categorizes, the engine picks one of these names, or leaves the event "uncategorized".'),
       cats.el),
     h('div', { class: 'card mt' },
       h('h2', null, 'Rules'),

@@ -126,11 +126,11 @@ func TestDrainUsesCachedEngineAnswers(t *testing.T) {
 	store := events.NewStore(1000)
 	d := notify.NewDispatcher(log)
 	d.Configure(c)
-	laya := engine.New(log)
-	t.Cleanup(laya.Close)
-	laya.Configure(c)
-	laya.CheckHealth()
-	p := New(1000, store, d, laya)
+	classifier := engine.New(log)
+	t.Cleanup(classifier.Close)
+	classifier.Configure(c)
+	classifier.CheckHealth()
+	p := New(1000, store, d, classifier)
 	p.Configure(c)
 	runCtx, stopRun := context.WithCancel(context.Background())
 	defer stopRun()
@@ -184,8 +184,8 @@ func TestFileAnalysisLeavesEngineToWaitingLiveEvents(t *testing.T) {
 		<-release
 		return inner(state, q)
 	}
-	p, store, laya := run(t, fake.URL, 0) // max_in_flight 1
-	laya.CheckHealth()
+	p, store, classifier := run(t, fake.URL, 0) // max_in_flight 1
+	classifier.CheckHealth()
 	p.Submit([]model.Event{{ID: "l1", SourceID: "s", Message: "ERROR first livefail happened"}})
 	time.Sleep(100 * time.Millisecond) // L1 is with the engine
 	p.Submit([]model.Event{{ID: "l2", SourceID: "s", Message: "ERROR second livefail happened"}})

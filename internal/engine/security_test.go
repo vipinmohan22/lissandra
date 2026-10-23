@@ -95,7 +95,7 @@ func TestEngineURLCredentialsStayHidden(t *testing.T) {
 	cl.syncHealth = true
 	t.Cleanup(cl.Close)
 	c := config.Defaults()
-	c.Settings.Engine.URL = "http://laya:hunter2@127.0.0.1:1, https://tok_9f8e7d@127.0.0.1:2"
+	c.Settings.Engine.URL = "http://user:hunter2@127.0.0.1:1, https://tok_9f8e7d@127.0.0.1:2"
 	c.Settings.Engine.APIKey = ""
 	if err := config.Normalize(c); err != nil {
 		t.Fatal(err)

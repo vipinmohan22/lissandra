@@ -38,7 +38,7 @@ const (
 	configPause = 5 * time.Minute
 
 	// ByEngine is Event.Classifier when an engine answer was applied.
-	ByEngine = "laya"
+	ByEngine = "engine"
 
 	// questions sent to the engine
 	qCategory = "category"
@@ -54,7 +54,7 @@ var ampleTime = 5 * time.Second
 
 // Errors for events that were not sent.
 var (
-	ErrPaused    = errors.New("laya engine calls are paused after errors")
+	ErrPaused    = errors.New("engine calls are paused after errors")
 	ErrNotLoaded = errors.New("checkpoint not loaded on the engine")
 	errNoSlot    = errors.New("no free engine slot before the event's deadline")
 )
@@ -624,7 +624,7 @@ func (c *Classifier) enrich(ctx context.Context, ev *model.Event, live bool) {
 	case coalesced:
 		// The request this event shared has logged its failure.
 	default:
-		c.log.Warn("laya engine classification failed", "err", err)
+		c.log.Warn("engine classification failed", "err", err)
 	}
 }
 
@@ -932,23 +932,23 @@ func parseResult(resp Response, req Request) (Result, error) {
 	if _, ok := req.Questions[qCategory]; ok {
 		a, ok := resp.Answers[qCategory]
 		if !ok {
-			return Result{}, errors.New("laya engine: reply has no category answer")
+			return Result{}, errors.New("engine: reply has no category answer")
 		}
 		// Only what was offered is accepted, and only its probabilities are
 		// kept (they are cached).
 		offered, _ := req.Questions[qCategory].Criteria.(criteria)
 		choice, _ := a.Choice.(string)
 		if !slices.ContainsFunc(offered, func(l label) bool { return l.name == choice }) {
-			return Result{}, fmt.Errorf("laya engine: category answer %q was not offered", model.Truncate(choice, 64))
+			return Result{}, fmt.Errorf("engine: category answer %q was not offered", model.Truncate(choice, 64))
 		}
 		if !(a.AnswerConfidence >= 0 && a.AnswerConfidence <= 1) {
-			return Result{}, fmt.Errorf("laya engine: category confidence %v is not a probability", a.AnswerConfidence)
+			return Result{}, fmt.Errorf("engine: category confidence %v is not a probability", a.AnswerConfidence)
 		}
 		probs := make(map[string]float64, len(offered))
 		for _, l := range offered {
 			if p, ok := a.Probabilities[l.name]; ok {
 				if !(p >= 0 && p <= 1) {
-					return Result{}, fmt.Errorf("laya engine: probability %v for %q is not a probability", p, l.name)
+					return Result{}, fmt.Errorf("engine: probability %v for %q is not a probability", p, l.name)
 				}
 				probs[l.name] = p
 			}
@@ -961,7 +961,7 @@ func parseResult(resp Response, req Request) (Result, error) {
 	if _, ok := req.Questions[qSeverity]; ok {
 		a, ok := resp.Answers[qSeverity]
 		if !ok {
-			return Result{}, errors.New("laya engine: reply has no severity answer")
+			return Result{}, errors.New("engine: reply has no severity answer")
 		}
 		// The score is an expected level; take the most likely level instead.
 		best, bestP := -1, -1.0

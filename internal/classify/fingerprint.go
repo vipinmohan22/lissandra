@@ -39,7 +39,7 @@ func Normalize(s string) string {
 }
 
 // Fingerprint identifies "the same problem from the same source". It drives
-// grouping in the UI, notification throttling and the Laya engine's answer cache.
+// grouping in the UI, notification throttling and the engine's answer cache.
 func Fingerprint(sourceID, msg string) string {
 	sum := sha1.Sum([]byte(sourceID + "\x00" + Pattern(msg)))
 	return hex.EncodeToString(sum[:8])

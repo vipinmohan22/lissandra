@@ -144,7 +144,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 			"queue_depth": d.QueueDepth(), "sent": d.Sent.Load(), "failed": d.Failed.Load(),
 			"dropped": d.Dropped.Load(), "throttled": d.Throttled.Load(),
 		},
-		"engine":         s.laya.Status(),
+		"engine":         s.classifier.Status(),
 		"learning":       s.learningStats(),
 		"imports":        map[string]any{"active": s.imports.Active(), "done": s.imports.Succeeded.Load(), "failed": s.imports.Failed.Load()},
 		"sources":        s.pollers.Status(),
@@ -679,7 +679,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// engineClassify asks the Laya engine about one event (stored, or built
+// engineClassify asks the engine about one event (stored, or built
 // from a message) right now, bypassing the cache. Nothing is changed.
 func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -718,7 +718,7 @@ func (s *Server) engineClassify(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
-	res, err := s.laya.Classify(ctx, &ev)
+	res, err := s.classifier.Classify(ctx, &ev)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -743,12 +743,12 @@ func (s *Server) addSourceTags(ev *model.Event) {
 // question Lissandra sends the engine, so a checkpoint can be fine-tuned on
 // exactly what it will be asked.
 func (s *Server) engineTrainingData(w http.ResponseWriter, r *http.Request) {
-	writeTrainingData(w, s.laya, s.store.All(), "live")
+	writeTrainingData(w, s.classifier, s.store.All(), "live")
 }
 
 // writeTrainingData writes one record per pattern of events whose category
 // came from a rule.
-func writeTrainingData(w http.ResponseWriter, laya *engine.Classifier, evs []model.Event, name string) {
+func writeTrainingData(w http.ResponseWriter, classifier *engine.Classifier, evs []model.Event, name string) {
 	name = strings.Map(func(r rune) rune {
 		if r < 128 && (r == '-' || r == '_' || r == '.' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
 			return r
@@ -770,7 +770,7 @@ func writeTrainingData(w http.ResponseWriter, laya *engine.Classifier, evs []mod
 		if len(ev.MatchedRules) == 0 || ev.Engine != nil && ev.Engine.CategoryApplied || ev.Compacted {
 			continue
 		}
-		rec, ok := laya.TrainingRecord(ev)
+		rec, ok := classifier.TrainingRecord(ev)
 		if !ok {
 			continue
 		}
@@ -786,11 +786,11 @@ func writeTrainingData(w http.ResponseWriter, laya *engine.Classifier, evs []mod
 	}
 }
 
-// engineHealth checks every configured laya-serve instance.
+// engineHealth checks every configured engine instance.
 func (s *Server) engineHealth(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	eps, err := s.laya.Probe(ctx)
+	eps, err := s.classifier.Probe(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error(), "endpoints": []any{}})
 		return
@@ -799,7 +799,7 @@ func (s *Server) engineHealth(w http.ResponseWriter, r *http.Request) {
 	for _, e := range eps {
 		ok = ok && e.OK && e.ModelLoaded
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "model": s.laya.Status().Model, "endpoints": eps})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": ok, "model": s.classifier.Status().Model, "endpoints": eps})
 }
 
 // --- import / export ---

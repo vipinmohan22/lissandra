@@ -1,10 +1,10 @@
-# Copy to laya-engine.vars.hcl and adjust, then:
-#   nomad job run -var-file=deploy/nomad/laya-engine.vars.hcl deploy/nomad/laya-engine.nomad.hcl
+# Copy to lissandra-engine.vars.hcl and adjust, then:
+#   nomad job run -var-file=deploy/nomad/lissandra-engine.vars.hcl deploy/nomad/lissandra-engine.nomad.hcl
 
 datacenters = ["dc1"]
 
 # Built from the upstream Dockerfile and pushed to your registry (see README).
-image = "registry.example.com/laya-engine:0.4.2"
+image = "registry.example.com/lissandra-engine:0.4.2"
 
 # One instance answers about 1-2 new message patterns per second on 4 cores.
 count  = 1

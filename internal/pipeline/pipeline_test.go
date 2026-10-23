@@ -26,10 +26,10 @@ func run(t *testing.T, url string, wait time.Duration) (*Pipeline, *events.Store
 	}
 	store := events.NewStore(100)
 	d := notify.NewDispatcher(log)
-	laya := engine.New(log)
-	t.Cleanup(laya.Close)
-	laya.Configure(c)
-	p := New(100, store, d, laya)
+	classifier := engine.New(log)
+	t.Cleanup(classifier.Close)
+	classifier.Configure(c)
+	p := New(100, store, d, classifier)
 	p.Configure(c)
 	d.Configure(c)
 	if wait > 0 {
@@ -39,7 +39,7 @@ func run(t *testing.T, url string, wait time.Duration) (*Pipeline, *events.Store
 	t.Cleanup(cancel)
 	go d.Run(ctx, 1)
 	go p.Run(ctx, 2, 2)
-	return p, store, laya
+	return p, store, classifier
 }
 
 func waitFor(t *testing.T, store *events.Store, n int) []model.Event {
@@ -93,7 +93,7 @@ func TestEngineDownFallsBackToRules(t *testing.T) {
 	fake := enginetest.New()
 	url := fake.URL
 	fake.Close() // nothing listens
-	p, store, laya := run(t, url, 0)
+	p, store, classifier := run(t, url, 0)
 	p.Submit([]model.Event{{ID: "1", SourceID: "s", Message: "ERROR weird failure one"}})
 	e := waitFor(t, store, 1)[0]
 	if e.Category != model.Uncategorized || e.Severity != model.SeverityError || e.Engine != nil {
@@ -102,8 +102,8 @@ func TestEngineDownFallsBackToRules(t *testing.T) {
 	// Paused now: the next eligible events skip the engine at once.
 	p.Submit([]model.Event{{ID: "2", SourceID: "s", Message: "ERROR weird failure two"}})
 	waitFor(t, store, 2)
-	if laya.Skipped.Load() == 0 || laya.Status().PausedUntil.IsZero() {
-		t.Errorf("status %+v", laya.Status())
+	if classifier.Skipped.Load() == 0 || classifier.Status().PausedUntil.IsZero() {
+		t.Errorf("status %+v", classifier.Status())
 	}
 }
 
@@ -116,7 +116,7 @@ func TestSlowEngineDoesNotHoldEventsBack(t *testing.T) {
 		<-block
 		return enginetest.Answer{Choice: q.Labels[0], Probs: map[string]float64{q.Labels[0]: 1}}
 	}
-	p, store, laya := run(t, fake.URL, 100*time.Millisecond)
+	p, store, classifier := run(t, fake.URL, 100*time.Millisecond)
 	// One request is with the engine (max_in_flight 1); the rest wait for
 	// it, then go on without it, all within the engine wait.
 	var evs []model.Event
@@ -126,8 +126,8 @@ func TestSlowEngineDoesNotHoldEventsBack(t *testing.T) {
 	start := time.Now()
 	p.Submit(evs)
 	waitFor(t, store, 8)
-	if time.Since(start) > 2*time.Second || laya.Skipped.Load() == 0 {
-		t.Errorf("held back %v, skipped %d", time.Since(start), laya.Skipped.Load())
+	if time.Since(start) > 2*time.Second || classifier.Skipped.Load() == 0 {
+		t.Errorf("held back %v, skipped %d", time.Since(start), classifier.Skipped.Load())
 	}
 }
 

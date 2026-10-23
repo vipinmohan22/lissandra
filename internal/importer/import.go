@@ -94,7 +94,7 @@ type Report struct {
 	DistinctPatterns int   `json:"distinct_patterns"`
 	OtherPatterns    int64 `json:"other_pattern_events,omitempty"` // events of patterns evicted from the table
 
-	// Events the Laya engine answered for (from its cache or asked during
+	// Events the engine answered for (from its cache or asked during
 	// the analysis), and those whose category or severity it set.
 	EngineEvents  int64 `json:"engine_events,omitempty"`
 	EngineApplied int64 `json:"engine_applied,omitempty"`

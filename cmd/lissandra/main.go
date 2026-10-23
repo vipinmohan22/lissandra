@@ -125,8 +125,8 @@ func run() error {
 
 	store := events.NewStore(envInt("LISSANDRA_EVENT_BUFFER", 5000))
 	dispatcher := notify.NewDispatcher(log)
-	laya := engine.New(log)
-	pipe := pipeline.New(envInt("LISSANDRA_QUEUE_SIZE", 10000), store, dispatcher, laya)
+	eng := engine.New(log)
+	pipe := pipeline.New(envInt("LISSANDRA_QUEUE_SIZE", 10000), store, dispatcher, eng)
 	learner := learn.New(log, cfg.Update)
 	pipe.Learn = learner.Observe
 	pollers := poller.NewManager(ctx, log, pipe.SubmitWait)
@@ -137,7 +137,7 @@ func run() error {
 		}
 		pipe.Configure(c)
 		dispatcher.Configure(c)
-		laya.Configure(c)
+		eng.Configure(c)
 		learner.Configure(c)
 		pollers.Configure(c)
 		log.Info("configuration applied", "version", c.Version, "sources", len(c.Sources), "rules", len(c.Rules), "notifiers", len(c.Notifiers), "routes", len(c.Routes))
@@ -172,7 +172,7 @@ func run() error {
 		MaxIngestBytes: int64(envInt("LISSANDRA_MAX_INGEST_BYTES", 10<<20)),
 		MaxImportBytes: int64(envInt("LISSANDRA_MAX_IMPORT_BYTES", 100<<20)),
 		UI:             web.FS(),
-	}, log, cfg, store, pipe, dispatcher, laya, learner, pollers, imports)
+	}, log, cfg, store, pipe, dispatcher, eng, learner, pollers, imports)
 
 	httpSrv := &http.Server{
 		Addr:              listen,
@@ -222,7 +222,7 @@ func run() error {
 	cancel()
 	shutdownCtx, cancel := step(2 * time.Second)
 	defer cancel()
-	laya.Close()
+	eng.Close()
 	stopRun()
 	for i := 0; i < 2; i++ {
 		select {

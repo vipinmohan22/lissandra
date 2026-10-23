@@ -83,9 +83,8 @@ type Event struct {
 	Tags            []string      `json:"tags,omitempty"`
 	MatchedRules    []string      `json:"matched_rules,omitempty"`
 	Classifier      string        `json:"classifier"`
-	Engine          *EngineResult `json:"engine,omitempty"` // the Laya engine's answer, when it was asked
-	// NoEngine is set by a matching rule that keeps the event from the
-	// Laya engine.
+	Engine          *EngineResult `json:"engine,omitempty"` // the engine's answer, when it was asked
+	// NoEngine is set by a matching rule that keeps the event from the engine.
 	NoEngine    bool   `json:"-"`
 	Fingerprint string `json:"fingerprint"`
 
@@ -99,7 +98,7 @@ type Event struct {
 	Compacted bool `json:"compacted,omitempty"`
 }
 
-// EngineResult records what the Laya engine answered for an event.
+// EngineResult records what the engine answered for an event.
 type EngineResult struct {
 	Model              string             `json:"model"`                         // checkpoint that answered
 	Category           string             `json:"category"`                      // its choice (Uncategorized: none fits)

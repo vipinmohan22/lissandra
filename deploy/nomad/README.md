@@ -6,9 +6,9 @@
 - **Nomad Variables** for secrets, rendered into the task environment,
 - **service registration** (Nomad native or Consul) with an HTTP health check on `/healthz`,
 - rolling updates gated on health checks, with auto-revert, and a graceful drain on stop,
-- the addresses of the **Laya engine**, found through service discovery and rendered into a file that Lissandra re-reads, so engine changes never restart it.
+- the addresses of the **classification engine**, found through service discovery and rendered into a file that Lissandra re-reads, so engine changes never restart it.
 
-`laya-engine.nomad.hcl` is optional. It runs the Laya engine (`laya-serve` from [github.com/NandhaKishorM/laya](https://github.com/NandhaKishorM/laya)), which classifies what Lissandra's rules leave uncategorized. Without it, Lissandra classifies with its rules alone. See [step 6](#6-run-the-laya-engine-optional).
+`lissandra-engine.nomad.hcl` is optional. It runs the engine (`laya-serve` from [github.com/NandhaKishorM/laya](https://github.com/NandhaKishorM/laya)), which classifies what Lissandra's rules leave uncategorized. Without it, Lissandra classifies with its rules alone. See [step 6](#6-run-the-engine-optional).
 
 Tested with Nomad 2.0.7. Dynamic host volumes need Nomad 1.10 or newer.
 
@@ -65,7 +65,7 @@ nomad var put nomad/jobs/lissandra \
   LISSANDRA_ADMIN_TOKEN="$(openssl rand -hex 24)" \
   SMTP_PASSWORD='…' \
   SLACK_WEBHOOK_URL='https://hooks.slack.com/services/…' \
-  LISSANDRA_ENGINE_API_KEY='…'         # only if you run the Laya engine (step 6)
+  LISSANDRA_ENGINE_API_KEY='…'         # only if you run the engine (step 6)
 ```
 
 In the UI, refer to these as `${env:SMTP_PASSWORD}`, `${env:SLACK_WEBHOOK_URL}`, and so on. Lissandra's config file then holds only the references. `${file:/path}` reads a file instead, for example one another `template` block renders; see [Secrets](../../README.md#notifiers-and-routes) in the main README for when each is read. When you change the variable, Nomad re-renders the template and restarts the task. Note that `put` replaces *all* items in the variable (add `-force` to overwrite an existing one), so include every key each time. To change one key and keep the others, for example to rotate the admin token, merge it into the existing items:
@@ -117,7 +117,7 @@ On a fresh volume Lissandra starts from its defaults, and the first visit to the
 | `log_level` | `info` | |
 | `max_import_mb` | `100` | Largest log file upload on the Log files page. |
 | `import_memory_mb` | `64` | Memory for browsable events from analyzed log files. |
-| `engine_service` | `laya-engine` | Service name of the Laya engine. Every registered instance is used. `""` turns discovery off. |
+| `engine_service` | `lissandra-engine` | Service name of the engine. Every registered instance is used. `""` turns discovery off. |
 | `engine_url` | `""` | Fixed engine URL(s), comma-separated, e.g. a load balancer in front of the engine. Overrides `engine_service`. Either way the addresses go into the task's `local/engine_urls` (see [step 6](#run-it)). |
 
 ## 5. Reach the UI and point senders at it
@@ -130,16 +130,16 @@ Sign in with the admin token from step 3. On a fresh volume the [setup wizard](.
 
 Senders inside the cluster can discover Lissandra through service discovery. For example, a Fluent Bit or Vector job can template the address with `{{ range nomadService "lissandra" }}{{ .Address }}:{{ .Port }}{{ end }}`. Each source's **Setup instructions** dialog shows ready-made curl, Fluent Bit and Vector snippets with its URL and token filled in.
 
-## 6. Run the Laya engine (optional)
+## 6. Run the engine (optional)
 
-The Laya engine is `laya-serve`, a Python/PyTorch decision model served over HTTP. Lissandra asks it about the events its rules leave uncategorized, once per source and message pattern (see [Classification](../../README.md#classification) in the main README). It runs as its own job so it can be sized, scaled and upgraded on its own, and Lissandra keeps classifying with its rules while the engine is down.
+The engine is `laya-serve`, a Python/PyTorch decision model served over HTTP. Lissandra asks it about the events its rules leave uncategorized, once per source and message pattern (see [Classification](../../README.md#classification) in the main README). It runs as its own job so it can be sized, scaled and upgraded on its own, and Lissandra keeps classifying with its rules while the engine is down.
 
 ### Build and push the image
 
 No image is published, so build one from the upstream Dockerfile at a release tag, and push it to a registry your Nomad clients can pull from:
 
 ```sh
-docker buildx build --platform linux/amd64 --push -t registry.example.com/laya-engine:0.4.2 \
+docker buildx build --platform linux/amd64 --push -t registry.example.com/lissandra-engine:0.4.2 \
   https://github.com/NandhaKishorM/laya.git#v0.4.2
 ```
 
@@ -149,7 +149,7 @@ Tag `v0.4.2` is commit `68804629e8ccd9d616d48a40e87de9fabbeae069`. Build from th
 
 | Build argument | Default | |
 | --- | --- | --- |
-| `TORCH_INDEX` | `cpu` | `cu130` installs PyTorch's CUDA 13.0 wheels, for an NVIDIA GPU. Build it as a separate image, e.g. `laya-engine:0.4.2-cu130`. |
+| `TORCH_INDEX` | `cpu` | `cu130` installs PyTorch's CUDA 13.0 wheels, for an NVIDIA GPU. Build it as a separate image, e.g. `lissandra-engine:0.4.2-cu130`. |
 | `MODELSCOPE_MODEL` | empty | Bakes checkpoints into the image, e.g. `english` or `"english multilingual"`. They are downloaded from modelscope.cn, not huggingface.co, which helps when clients can't reach the Hub. See [baked weights](#model-cache-offline-mode-and-pinning). |
 | `MODELSCOPE_REVISION` | `master` | ModelScope revision to bake. |
 
@@ -158,39 +158,39 @@ The image runs as UID/GID 10001, keeps its model cache in `/home/laya/.cache/hug
 ### Create the cache volume and the API key
 
 ```sh
-nomad volume create deploy/nomad/laya-engine-volume.hcl
-nomad var put nomad/jobs/laya-engine LAYA_API_KEY="$(openssl rand -hex 32)"
+nomad volume create deploy/nomad/lissandra-engine-volume.hcl
+nomad var put nomad/jobs/lissandra-engine LAYA_API_KEY="$(openssl rand -hex 32)"
 ```
 
 The volume keeps downloaded checkpoints across restarts and upgrades. It's owned by 10001. For `count > 1`, run `nomad volume create` once per instance: each run places the volume on a node that doesn't have one yet.
 
-The job renders `LAYA_API_KEY` into a file in the task's secrets directory that only the image's user can read, and passes its path as `LAYA_API_KEY_FILE`. Any other item in `nomad/jobs/laya-engine` becomes an environment variable, for example `HF_TOKEN` for a fine-tuned checkpoint in a private Hub repository.
+The job renders `LAYA_API_KEY` into a file in the task's secrets directory that only the image's user can read, and passes its path as `LAYA_API_KEY_FILE`. Any other item in `nomad/jobs/lissandra-engine` becomes an environment variable, for example `HF_TOKEN` for a fine-tuned checkpoint in a private Hub repository.
 
 Lissandra needs the same key as `LISSANDRA_ENGINE_API_KEY` in its own variable. This adds it and keeps the other items:
 
 ```sh
 nomad var get -out=json nomad/jobs/lissandra | nomad var put -in=json - \
-  LISSANDRA_ENGINE_API_KEY="$(nomad var get -item=LAYA_API_KEY nomad/jobs/laya-engine)"
+  LISSANDRA_ENGINE_API_KEY="$(nomad var get -item=LAYA_API_KEY nomad/jobs/lissandra-engine)"
 ```
 
-Lissandra's default engine settings read `${env:LISSANDRA_ENGINE_URL}` (in this job, the address file described below) and `${env:LISSANDRA_ENGINE_API_KEY}`, so there is nothing to set in the UI. To rotate the key, update `nomad/jobs/laya-engine` first, then `nomad/jobs/lissandra`. Each job restarts with its new value. In the other order, Lissandra's calls are refused until the engine has the new key too; Lissandra resumes them at its next health check once the engine accepts the key (within 30 seconds).
+Lissandra's default engine settings read `${env:LISSANDRA_ENGINE_URL}` (in this job, the address file described below) and `${env:LISSANDRA_ENGINE_API_KEY}`, so there is nothing to set in the UI. To rotate the key, update `nomad/jobs/lissandra-engine` first, then `nomad/jobs/lissandra`. Each job restarts with its new value. In the other order, Lissandra's calls are refused until the engine has the new key too; Lissandra resumes them at its next health check once the engine accepts the key (within 30 seconds).
 
 ### Run it
 
 ```sh
-cp deploy/nomad/laya-engine.vars.example.hcl deploy/nomad/laya-engine.vars.hcl
-$EDITOR deploy/nomad/laya-engine.vars.hcl
-nomad job run -var-file=deploy/nomad/laya-engine.vars.hcl deploy/nomad/laya-engine.nomad.hcl
+cp deploy/nomad/lissandra-engine.vars.example.hcl deploy/nomad/lissandra-engine.vars.hcl
+$EDITOR deploy/nomad/lissandra-engine.vars.hcl
+nomad job run -var-file=deploy/nomad/lissandra-engine.vars.hcl deploy/nomad/lissandra-engine.nomad.hcl
 nomad job run -var-file=deploy/nomad/lissandra.vars.hcl deploy/nomad/lissandra.nomad.hcl
 ```
 
 The order doesn't matter. Run both jobs in the same namespace with the same `service_provider`.
 
-Lissandra's job renders the address of every registered `laya-engine` instance, as `http://address:port`, comma-separated, into the file `local/engine_urls` in its task directory, with `change_mode = "noop"`, and sets `LISSANDRA_ENGINE_URL_FILE` to that file. `LISSANDRA_ENGINE_URL` itself is unset, so the default `${env:LISSANDRA_ENGINE_URL}` reads the file, and Lissandra re-reads it every 30 seconds. **Engine instances coming and going therefore never restart Lissandra**, whose recent events and delivery history live in memory. Don't put `LISSANDRA_ENGINE_URL` in `nomad/jobs/lissandra`: a set variable wins over the file. Lissandra spreads requests over the instances and fails over between them. While no instance is registered the file is empty and Lissandra runs on rules alone. Cached answers survive the list changing; they are dropped only when the key, the checkpoints or the categories change, or an instance reports a new checkpoint revision.
+Lissandra's job renders the address of every registered `lissandra-engine` instance, as `http://address:port`, comma-separated, into the file `local/engine_urls` in its task directory, with `change_mode = "noop"`, and sets `LISSANDRA_ENGINE_URL_FILE` to that file. `LISSANDRA_ENGINE_URL` itself is unset, so the default `${env:LISSANDRA_ENGINE_URL}` reads the file, and Lissandra re-reads it every 30 seconds. **Engine instances coming and going therefore never restart Lissandra**, whose recent events and delivery history live in memory. Don't put `LISSANDRA_ENGINE_URL` in `nomad/jobs/lissandra`: a set variable wins over the file. Lissandra spreads requests over the instances and fails over between them. While no instance is registered the file is empty and Lissandra runs on rules alone. Cached answers survive the list changing; they are dropped only when the key, the checkpoints or the categories change, or an instance reports a new checkpoint revision.
 
 Nomad's own service registry lists an instance as soon as it starts, before its check passes; Consul lists only instances whose check passes. Either way, Lissandra checks each instance's `/health` every 30 seconds and sends requests to the instances that answered. While none has, connection errors make it back off, and events keep the rules' result; the next passing check ends the backoff.
 
-To check the connection from Lissandra, use **Settings → Laya engine → Check connection** in the UI, or:
+To check the connection from Lissandra, use **Settings → Engine → Check connection** in the UI, or:
 
 ```sh
 curl -H "Authorization: Bearer $LISSANDRA_ADMIN_TOKEN" https://lissandra.example.com/api/engine/health
@@ -201,8 +201,8 @@ curl -H "Authorization: Bearer $LISSANDRA_ADMIN_TOKEN" https://lissandra.example
 | Variable | Default | |
 | --- | --- | --- |
 | `datacenters` | `["*"]` | |
-| `namespace` | `default` | Use the lissandra job's namespace, so it finds the engine. The key's variable path is `nomad/jobs/laya-engine` in that namespace. |
-| `image` | `laya-engine:0.4.2` | Your build (see above). |
+| `namespace` | `default` | Use the lissandra job's namespace, so it finds the engine. The key's variable path is `nomad/jobs/lissandra-engine` in that namespace. |
+| `image` | `lissandra-engine:0.4.2` | Your build (see above). |
 | `count` | `1` | Instances. Each needs `cores`, `memory` and its own cache volume. |
 | `cores` | `4` | Dedicated CPU cores per instance. Also sets `LAYA_THREADS` and `OMP_NUM_THREADS`. |
 | `memory` / `memory_max` | `3500` / `4500` | MB. `memory_max` applies only when memory oversubscription is enabled in the scheduler configuration. |
@@ -213,7 +213,7 @@ curl -H "Authorization: Bearer $LISSANDRA_ADMIN_TOKEN" https://lissandra.example
 | `extra_models` | `""` | `LAYA_EXTRA_MODELS`: JSON `{"name": source}` registering fine-tuned checkpoints. |
 | `revision` | `7b928d8…` | `LAYA_REVISION`. See [pinning](#model-cache-offline-mode-and-pinning). |
 | `offline` | `false` | `HF_HUB_OFFLINE`: use only the cache. |
-| `cache_volume` | `laya-engine-cache` | Host volume for the model cache. `""` for none. |
+| `cache_volume` | `lissandra-engine-cache` | Host volume for the model cache. `""` for none. |
 | `port` | `0` | `0` gives a dynamic port; set e.g. `8000` to pin a host port. |
 | `service_provider` / `service_tags` | `nomad` / `[]` | As in the lissandra job. |
 | `log_level` | `warning` | `LAYA_LOG_LEVEL`. `info` logs every request. |
@@ -237,7 +237,7 @@ Lissandra calls the engine once per new message pattern, source and checkpoint a
 - **Offline.** Once a start has filled the cache, set `offline = true` and laya-serve never contacts the Hub. A start then fails rather than downloads if something it needs isn't cached, so after changing `revision`, `models` or `extra_models`, start once with `offline = false`.
 - **Pinning.** `revision` is the Hub commit every checkpoint is loaded at. The default, `7b928d828b7b0e022f929d9bd2e44165aa270148`, was `main` of `convaiinnovations/laya` when this job was written. That repository holds english at its root and multilingual and typed-decisions in subfolders, so one commit pins all three. With a pin, an upstream push can't change the model's answers under you. `revision = ""` follows `main`, so each start that can reach the Hub picks up the latest push. The pin applies to every Hub download, including a fine-tuned checkpoint in `extra_models` given as a Hub repository, which doesn't have that commit: leave `revision` empty in that case, or give the checkpoint as a directory.
 - **Baked weights.** An image built with `MODELSCOPE_MODEL` carries its checkpoints in the image's own cache directory, and a volume mounted there hides them. Set `cache_volume = ""`, `offline = true`, and `revision = ""` or the snapshot commit the build printed. The baked snapshot is keyed by the ModelScope commit, so the Hub commit isn't found there. Without a volume and without baked weights, every task start downloads the checkpoint again.
-- **Fine-tuned checkpoints.** Register them with `extra_models`, e.g. `{"logs": "/home/laya/.cache/huggingface/checkpoints/logs"}` for a directory you copied onto the cache volume (readable by 10001), or `{"logs": "your-org/laya-logs"}` for a Hub repository, with `HF_TOKEN` in the engine's variable if it's private. Add the name to `models`, and choose it as the checkpoint in Lissandra's engine settings or on a source.
+- **Fine-tuned checkpoints.** Register them with `extra_models`, e.g. `{"logs": "/home/laya/.cache/huggingface/checkpoints/logs"}` for a directory you copied onto the cache volume (readable by 10001), or `{"logs": "your-org/lissandra-logs"}` for a Hub repository, with `HF_TOKEN` in the engine's variable if it's private. Add the name to `models`, and choose it as the checkpoint in Lissandra's engine settings or on a source.
 
 ### Upgrades
 
@@ -249,12 +249,12 @@ Change `image` or `revision` and re-run the job. Instances are replaced one at a
 
 | Symptom | Check |
 | --- | --- |
-| Allocation stuck pending with `Missing: nomad.var.block(nomad/jobs/laya-engine…)` | Create the variable (see above). |
+| Allocation stuck pending with `Missing: nomad.var.block(nomad/jobs/lissandra-engine…)` | Create the variable (see above). |
 | The task exits at once with `Invalid empty or NUL-containing secret in LAYA_API_KEY_FILE` | The variable has no `LAYA_API_KEY` item. |
 | The check fails for minutes after a start, then the task restarts | The first start downloads the checkpoint: see `nomad alloc logs -stderr <alloc>`. On a slow link raise `startup_minutes`. With `offline = true` and a cache that doesn't hold the checkpoint at `revision`, loading fails: start once online. |
 | `PermissionError` under `/home/laya/.cache/huggingface` | The cache volume must be owned by `10001:10001`. The volume spec does that; a static host volume needs `chown 10001:10001`. |
 | Exit code 137, OOM killed | Raise `memory`, by about 2 GB per extra checkpoint in `models`. |
-| Lissandra's engine health says `the engine did not list its checkpoints: check the API key` | `/health` answers anyone with `{"status":"ok"}` but lists checkpoints only to callers with the key, so the Nomad check passes either way. Make `LISSANDRA_ENGINE_API_KEY` in `nomad/jobs/lissandra` match `LAYA_API_KEY` in `nomad/jobs/laya-engine`. With a wrong key, requests fail with 401 and Lissandra pauses engine calls for 5 minutes. |
+| Lissandra's engine health says `the engine did not list its checkpoints: check the API key` | `/health` answers anyone with `{"status":"ok"}` but lists checkpoints only to callers with the key, so the Nomad check passes either way. Make `LISSANDRA_ENGINE_API_KEY` in `nomad/jobs/lissandra` match `LAYA_API_KEY` in `nomad/jobs/lissandra-engine`. With a wrong key, requests fail with 401 and Lissandra pauses engine calls for 5 minutes. |
 | An endpoint has `missing` checkpoints (health is not ok when the default checkpoint is one of them: `model_loaded` is false); the engine status warns `checkpoint not loaded on the engine: "…" (it has …)` | A checkpoint Lissandra uses (in Settings or on a source) isn't in `models`. Lissandra doesn't ask for it, because laya-serve would load it on the first request: a second model in memory, possibly beyond `memory`, evicting another checkpoint at `max_loaded`, or downloading it. Events that need it keep the rules' result. Add it to `models` and raise `memory` by about 2 GB. |
 | Lissandra's engine status warns `checkpoint "…" is paused` and shows `asked for "…", got "english"` | laya-serve answers a checkpoint name it doesn't know with another checkpoint, without saying so. Lissandra checks the name in every answer and pauses that checkpoint for 5 minutes; other checkpoints carry on. Fix the name in Settings or on the source, or register it with `extra_models`. |
 | `/api/engine/health` reports `"device": "cpu"` with `gpu = true` | laya-serve falls back to CPU silently. The image was built without `TORCH_INDEX=cu130`, or the client lacks the NVIDIA runtime or device plugin. |
@@ -286,7 +286,7 @@ The job sets `GOMEMLIMIT` to 80% of `memory`, so Go reclaims memory before Docke
 
 - `/metrics` is Prometheus format, and the service carries the `metrics` tag. With Prometheus's `nomad_sd_configs` (or `consul_sd_configs`), keep targets whose tags include `metrics` (`__meta_nomad_tags` / `__meta_consul_tags`).
 - The job's health check uses `/healthz`. `update.health_check = "checks"` means a broken release never becomes healthy and is reverted automatically.
-- Lissandra reports the engine as `lissandra_engine_*` metrics: calls, errors, timeouts, cache hits, answers applied, answers below the confidence threshold, events skipped, queue depth, requests completed, request and inference seconds, and whether calls are paused ([list](../../README.md#configuration)). `rate(lissandra_engine_request_seconds_total[5m]) / rate(lissandra_engine_requests_completed_total[5m])` is the average round trip, and the same with `lissandra_engine_inference_seconds_total` the engine's compute time; a growing gap between them means requests wait inside the engine. laya-serve itself has no metrics endpoint; its Nomad check on `/health` covers liveness.
+- Lissandra reports the engine as `lissandra_engine_*` metrics: calls, errors, timeouts, cache hits, answers applied, answers below the confidence threshold, events skipped, queue depth, requests completed, request and inference seconds, and whether calls are paused ([list](../../README.md#configuration)). `rate(lissandra_engine_request_seconds_total[5m]) / rate(lissandra_engine_requests_completed_total[5m])` is the average round trip, and the same with `lissandra_engine_inference_seconds_total` the engine's compute time; a growing gap between them means requests wait inside the engine. The engine itself has no metrics endpoint; its Nomad check on `/health` covers liveness.
 
 ## Upgrades and backups
 
@@ -304,4 +304,4 @@ The job sets `GOMEMLIMIT` to 80% of `memory`, so Go reclaims memory before Docke
 | UI rejects the token | `nomad var get -item=LISSANDRA_ADMIN_TOKEN nomad/jobs/lissandra`. The task restarts after the variable changes. Without the variable, the token is the one set in the UI (`admin-token.json` on the volume) or, if none was, the one Lissandra logged as `admin_token`: `nomad alloc logs <alloc> \| grep admin_token`. |
 | Notifications fail | **Deliveries** in the UI shows the HTTP status or SMTP error from the last attempt, and `nomad alloc logs -stderr <alloc>` has details. |
 | Lissandra restarts by itself now and then | Check `nomad alloc status <alloc>` for `Template with change_mode restart re-rendered`: the variable `nomad/jobs/lissandra` changed. Engine instances coming and going don't restart Lissandra. |
-| Events never show an engine answer | `/api/engine/health` and the `engine` part of `/api/stats` show the URLs Lissandra uses, the last error, warnings and whether calls are paused. The address file is empty while no `laya-engine` instance is registered: `nomad service info laya-engine`, and `nomad alloc fs <alloc> lissandra/local/engine_urls`. Only events at or above `min_severity` that no rule categorized are sent. See also [Engine troubleshooting](#engine-troubleshooting). |
+| Events never show an engine answer | `/api/engine/health` and the `engine` part of `/api/stats` show the URLs Lissandra uses, the last error, warnings and whether calls are paused. The address file is empty while no `lissandra-engine` instance is registered: `nomad service info lissandra-engine`, and `nomad alloc fs <alloc> lissandra/local/engine_urls`. Only events at or above `min_severity` that no rule categorized are sent. See also [Engine troubleshooting](#engine-troubleshooting). |

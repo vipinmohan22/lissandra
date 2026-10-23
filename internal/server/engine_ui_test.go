@@ -14,7 +14,7 @@ import (
 	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
-// The tester and "Ask the Laya engine" see the source's tags, as live
+// The tester and "Ask the engine" see the source's tags, as live
 // events do, so rules on tags give the same result.
 func TestEngineTesterAppliesSourceTags(t *testing.T) {
 	fake := enginetest.New()

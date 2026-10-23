@@ -26,7 +26,7 @@ type Source struct {
 	Pull        *Pull    `json:"pull,omitempty"`
 	Parse       Parse    `json:"parse"`
 	Tags        []string `json:"tags,omitempty"`
-	// EngineModel overrides the Laya engine checkpoint for this source's
+	// EngineModel overrides the engine checkpoint for this source's
 	// events (empty: Settings.Engine.Model).
 	EngineModel string `json:"engine_model,omitempty"`
 	// AlertGroupIDs are the alert groups notified about this source's
@@ -128,7 +128,7 @@ const (
 // Rule review statuses.
 const (
 	RuleActive   = ""         // an ordinary rule
-	RuleReview   = "review"   // learned from the Laya engine: it applies, awaiting review
+	RuleReview   = "review"   // learned from the engine: it applies, awaiting review
 	RuleRejected = "rejected" // a learned rule the operator rejected
 )
 
@@ -149,11 +149,11 @@ type Rule struct {
 	Tags         []string       `json:"tags,omitempty"`
 	Drop         bool           `json:"drop,omitempty"`
 	Stop         bool           `json:"stop,omitempty"`
-	// SkipEngine keeps matching events from the Laya engine, so they keep
+	// SkipEngine keeps matching events from the engine, so they keep
 	// the rules' result. A rejected learned rule sets it, so the engine's
 	// answer isn't applied (or learned) again.
 	SkipEngine bool `json:"skip_engine,omitempty"`
-	// Status is RuleReview for a rule learned from the Laya engine until
+	// Status is RuleReview for a rule learned from the engine until
 	// it is approved (RuleActive) or rejected (RuleRejected).
 	Status  string   `json:"status,omitempty"`
 	Learned *Learned `json:"learned,omitempty"`
@@ -229,7 +229,7 @@ type AlertGroup struct {
 }
 
 // Category is a label events are classified into. Rules set it directly;
-// the Laya engine chooses among categories by their descriptions.
+// the engine chooses among categories by their descriptions.
 type Category struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -253,7 +253,7 @@ func (c *Category) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// EngineSettings configures classification by the Laya engine
+// EngineSettings configures classification by the engine
 // (laya-serve, github.com/NandhaKishorM/laya). Rules run first; the engine
 // classifies what they leave, once per source and message pattern.
 type EngineSettings struct {

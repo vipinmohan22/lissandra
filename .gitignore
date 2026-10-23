@@ -2,5 +2,5 @@
 /data/
 /lissandra
 deploy/nomad/lissandra.vars.hcl
-deploy/nomad/laya-engine.vars.hcl
+deploy/nomad/lissandra-engine.vars.hcl
 /.env

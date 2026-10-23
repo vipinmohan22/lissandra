@@ -1,4 +1,4 @@
-// Package learn turns the Laya engine's answers into classification rules.
+// Package learn turns the engine's answers into classification rules.
 // When the engine categorizes a live event that no rule categorized, Lissandra
 // adds a rule for the event's message pattern and source, marked for
 // review. From then on the rules classify that pattern (and alert on it)
@@ -244,7 +244,7 @@ func (l *Learner) write(batch []config.Rule) {
 	}
 	if added > 0 {
 		l.Learned.Add(uint64(added))
-		l.log.Info("learned rules from the Laya engine, awaiting review", "rules", added)
+		l.log.Info("learned rules from the engine, awaiting review", "rules", added)
 	}
 }
 

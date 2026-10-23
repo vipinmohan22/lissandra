@@ -447,7 +447,7 @@ func TestTimeoutChangeKeepsErrorsAndHealthReportsDeadEngine(t *testing.T) {
 func TestWrongModelErrorHidesCredentials(t *testing.T) {
 	cl, fake, cfg := setup(t, nil)
 	fake.HideLoaded = true
-	cfg.Settings.Engine.URL = strings.Replace(fake.URL, "http://", "http://laya:hunter2@", 1)
+	cfg.Settings.Engine.URL = strings.Replace(fake.URL, "http://", "http://user:hunter2@", 1)
 	cfg.Settings.Engine.Model = "mylogs"
 	cl.Configure(cfg)
 	ev := event("database down")

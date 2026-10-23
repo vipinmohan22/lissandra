@@ -1,6 +1,6 @@
-# Dynamic host volume for the Laya engine's model cache (Nomad 1.10+).
+# Dynamic host volume for the engine's model cache (Nomad 1.10+).
 #
-#   nomad volume create deploy/nomad/laya-engine-volume.hcl
+#   nomad volume create deploy/nomad/lissandra-engine-volume.hcl
 #
 # The built-in "mkdir" plugin creates a directory under the client's
 # host_volumes_dir, owned by the laya-serve image's user (10001). Checkpoints
@@ -11,7 +11,7 @@
 # the command once per instance: each run places the volume on a node that
 # doesn't have one yet (set node_id, node_pool or a constraint to choose).
 
-name      = "laya-engine-cache"
+name      = "lissandra-engine-cache"
 type      = "host"
 plugin_id = "mkdir"
 # node_id = "<node id from nomad node status>"

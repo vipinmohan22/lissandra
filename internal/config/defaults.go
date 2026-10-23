@@ -2,7 +2,7 @@ package config
 
 import "github.com/vipinmohan22/lissandra/internal/model"
 
-// DefaultEngineModel is the Laya engine checkpoint used unless the operator
+// DefaultEngineModel is the engine checkpoint used unless the operator
 // picks another one.
 const DefaultEngineModel = "english"
 

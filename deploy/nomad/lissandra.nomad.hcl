@@ -2,10 +2,10 @@
 #
 #   nomad volume create deploy/nomad/lissandra-volume.hcl       # once
 #   nomad var put nomad/jobs/lissandra LISSANDRA_ADMIN_TOKEN="$(openssl rand -hex 24)" \
-#     LISSANDRA_ENGINE_API_KEY="<the engine's LAYA_API_KEY>"    # if you run laya-engine
+#     LISSANDRA_ENGINE_API_KEY="<the engine's LAYA_API_KEY>"    # if you run lissandra-engine
 #   nomad job run -var-file=deploy/nomad/lissandra.vars.hcl deploy/nomad/lissandra.nomad.hcl
 #
-# Classification by the Laya engine is optional: run laya-engine.nomad.hcl
+# The classification engine is optional: run lissandra-engine.nomad.hcl
 # and this job finds it through service discovery. Without it, Lissandra
 # classifies with its rules alone. See deploy/nomad/README.md for details.
 
@@ -94,9 +94,9 @@ variable "log_level" {
 }
 
 variable "engine_service" {
-  description = "Service name of the Laya engine (laya-engine.nomad.hcl), found through service_provider. Every registered instance is used. Empty turns discovery off."
+  description = "Service name of the engine (lissandra-engine.nomad.hcl), found through service_provider. Every registered instance is used. Empty turns discovery off."
   type        = string
-  default     = "laya-engine"
+  default     = "lissandra-engine"
 }
 
 variable "engine_url" {
@@ -231,7 +231,7 @@ job "lissandra" {
         EOT
       }
 
-      # Where the Laya engine is. The default engine settings read
+      # Where the engine is. The default engine settings read
       # ${env:LISSANDRA_ENGINE_URL}; it is unset here (don't add it to the
       # variable above, it would win), so Lissandra reads the file named by
       # LISSANDRA_ENGINE_URL_FILE instead, and re-reads it every 30 s. Engine

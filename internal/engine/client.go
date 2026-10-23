@@ -1,8 +1,8 @@
-// Package engine classifies log events with the Laya engine: laya-serve
-// from github.com/NandhaKishorM/laya, a decision model served over HTTP
-// (POST /v1/systemone). Rules run first; the engine classifies what they
-// leave, once per message pattern, and the rules' result stands whenever
-// the engine is unavailable or unsure.
+// Package engine classifies log events with the classification engine:
+// laya-serve from github.com/NandhaKishorM/laya, a decision model served
+// over HTTP (POST /v1/systemone). Rules run first; the engine classifies
+// what they leave, once per message pattern, and the rules' result stands
+// whenever the engine is unavailable or unsure.
 package engine
 
 import (
@@ -119,15 +119,15 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	if e.Detail == "" {
-		return fmt.Sprintf("laya engine: HTTP %d", e.Status)
+		return fmt.Sprintf("engine: HTTP %d", e.Status)
 	}
-	return fmt.Sprintf("laya engine: HTTP %d: %s", e.Status, e.Detail)
+	return fmt.Sprintf("engine: HTTP %d: %s", e.Status, e.Detail)
 }
 
 // ErrWrongModel is returned when the engine answered with a checkpoint other
 // than the one requested; laya-serve does this silently for names it does
 // not know.
-var ErrWrongModel = errors.New("laya engine answered with a different checkpoint")
+var ErrWrongModel = errors.New("the engine answered with a different checkpoint")
 
 // Client calls one or more laya-serve instances, round-robin with failover.
 // It is safe for concurrent use.
@@ -335,19 +335,19 @@ func (c *Client) post(ctx context.Context, base string, body []byte) (Response, 
 	}
 	res, err := c.http.Do(hreq)
 	if err != nil {
-		return Response{}, fmt.Errorf("laya engine at %s: %w", redactURL(base), hideCreds(err))
+		return Response{}, fmt.Errorf("engine at %s: %w", redactURL(base), hideCreds(err))
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
 	if err != nil {
-		return Response{}, fmt.Errorf("laya engine at %s: reading reply: %w", redactURL(base), err)
+		return Response{}, fmt.Errorf("engine at %s: reading reply: %w", redactURL(base), err)
 	}
 	if res.StatusCode != http.StatusOK {
 		return Response{}, apiError(res, data)
 	}
 	var out Response
 	if err := json.Unmarshal(data, &out); err != nil {
-		return Response{}, fmt.Errorf("laya engine at %s: invalid reply: %w", redactURL(base), err)
+		return Response{}, fmt.Errorf("engine at %s: invalid reply: %w", redactURL(base), err)
 	}
 	if ms, err := strconv.ParseFloat(res.Header.Get("X-Inference-Time-Ms"), 64); err == nil {
 		out.Inference = time.Duration(ms * float64(time.Millisecond))
@@ -400,7 +400,7 @@ func (c *Client) Health(ctx context.Context, base string) (Health, error) {
 	}
 	res, err := c.http.Do(hreq)
 	if err != nil {
-		return Health{}, fmt.Errorf("laya engine at %s: %w", redactURL(base), hideCreds(err))
+		return Health{}, fmt.Errorf("engine at %s: %w", redactURL(base), hideCreds(err))
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
@@ -412,7 +412,7 @@ func (c *Client) Health(ctx context.Context, base string) (Health, error) {
 	}
 	var h Health
 	if err := json.Unmarshal(data, &h); err != nil {
-		return Health{}, fmt.Errorf("laya engine at %s: invalid health reply: %w", redactURL(base), err)
+		return Health{}, fmt.Errorf("engine at %s: invalid health reply: %w", redactURL(base), err)
 	}
 	return h, nil
 }

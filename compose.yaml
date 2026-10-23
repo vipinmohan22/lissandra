@@ -1,15 +1,16 @@
-# Lissandra with its local model: Lissandra itself and the Laya engine
-# (laya-serve from github.com/NandhaKishorM/laya, the decision model Lissandra
-# asks about what its rules leave uncategorized). Log text never leaves the
-# machine.
+# Lissandra with its local model: Lissandra itself and the classification
+# engine (laya-serve from github.com/NandhaKishorM/laya, the decision model
+# Lissandra asks about what its rules leave uncategorized). Log text never
+# leaves the machine.
 #
 #   make up        # writes .env with fresh tokens on the first run, then starts both
 #   make down
 #
 # The first start builds the engine image (PyTorch, a few minutes) and
-# downloads the english checkpoint (about 0.85 GB) into the laya-model-cache
-# volume; later starts load it from there in seconds. Lissandra classifies
-# with its rules until the engine reports the checkpoint loaded, then uses it.
+# downloads the english checkpoint (about 0.85 GB) into the
+# lissandra-model-cache volume; later starts load it from there in seconds.
+# Lissandra classifies with its rules until the engine reports the checkpoint
+# loaded, then uses it.
 #
 # The engine needs about 3 GB of memory while loading: give Docker Desktop's
 # VM (or Colima's) at least 6 GB.
@@ -28,7 +29,7 @@ services:
     environment:
       LISSANDRA_ADMIN_TOKEN: "${LISSANDRA_ADMIN_TOKEN:?run make up, or set LISSANDRA_ADMIN_TOKEN in .env}"
       # Lissandra's default engine settings read these two, so nothing is set in the UI.
-      LISSANDRA_ENGINE_URL: "http://laya-engine:8000"
+      LISSANDRA_ENGINE_URL: "http://lissandra-engine:8000"
       LISSANDRA_ENGINE_API_KEY: "${LISSANDRA_ENGINE_API_KEY:?run make up, or set LISSANDRA_ENGINE_API_KEY in .env}"
     volumes:
       - lissandra-data:/data
@@ -36,17 +37,17 @@ services:
     # downloads and loads its checkpoint, and checks the engine's health
     # every 5 s until it has reported it.
     depends_on:
-      - laya-engine
+      - lissandra-engine
     restart: unless-stopped
 
-  laya-engine:
+  lissandra-engine:
     build:
       # The upstream Dockerfile; no public image is published. Keep the tag
-      # in step with deploy/nomad/laya-engine.nomad.hcl.
+      # in step with deploy/nomad/lissandra-engine.nomad.hcl.
       context: "https://github.com/NandhaKishorM/laya.git#v0.4.2"
       args:
         TORCH_INDEX: "${LISSANDRA_TORCH_INDEX:-cpu}"
-    image: "${LISSANDRA_ENGINE_IMAGE:-laya-engine:0.4.2}"
+    image: "${LISSANDRA_ENGINE_IMAGE:-lissandra-engine:0.4.2}"
     # The image's default command is a one-shot quickstart, not the server.
     command: ["laya-serve"]
     # On loopback only, for lissandra analyze -engine and make run on the host.
@@ -73,7 +74,7 @@ services:
       HF_HUB_OFFLINE: "${LISSANDRA_ENGINE_OFFLINE:-0}"
       HF_HUB_DISABLE_TELEMETRY: "1"
     volumes:
-      - laya-model-cache:/home/laya/.cache/huggingface
+      - lissandra-model-cache:/home/laya/.cache/huggingface
     # laya-serve listens only once its checkpoints are loaded, so healthy
     # means it can answer.
     healthcheck:
@@ -90,4 +91,4 @@ services:
 
 volumes:
   lissandra-data:
-  laya-model-cache:
+  lissandra-model-cache:

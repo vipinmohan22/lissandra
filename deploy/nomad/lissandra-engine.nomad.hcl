@@ -1,12 +1,12 @@
-# Laya engine: laya-serve (github.com/NandhaKishorM/laya), the decision model
-# Lissandra asks to classify what its rules leave uncategorized.
+# The classification engine: laya-serve (github.com/NandhaKishorM/laya), the
+# decision model Lissandra asks to classify what its rules leave uncategorized.
 #
 #   docker buildx build --platform linux/amd64 --push \
-#     -t registry.example.com/laya-engine:0.4.2 \
-#     https://github.com/NandhaKishorM/laya.git#v0.4.2      # no public image exists
-#   nomad volume create deploy/nomad/laya-engine-volume.hcl # once per node (model cache)
-#   nomad var put nomad/jobs/laya-engine LAYA_API_KEY="$(openssl rand -hex 32)"
-#   nomad job run -var-file=deploy/nomad/laya-engine.vars.hcl deploy/nomad/laya-engine.nomad.hcl
+#     -t registry.example.com/lissandra-engine:0.4.2 \
+#     https://github.com/NandhaKishorM/laya.git#v0.4.2           # no public image exists
+#   nomad volume create deploy/nomad/lissandra-engine-volume.hcl # once per node (model cache)
+#   nomad var put nomad/jobs/lissandra-engine LAYA_API_KEY="$(openssl rand -hex 32)"
+#   nomad job run -var-file=deploy/nomad/lissandra-engine.vars.hcl deploy/nomad/lissandra-engine.nomad.hcl
 #
 # Lissandra's own job (lissandra.nomad.hcl) finds the instances through
 # service discovery. Give it the same key as LISSANDRA_ENGINE_API_KEY in
@@ -27,7 +27,7 @@ variable "namespace" {
 variable "image" {
   description = "laya-serve image built from the upstream Dockerfile (no public image is published). Build it with --build-arg TORCH_INDEX=cu130 when gpu = true."
   type        = string
-  default     = "laya-engine:0.4.2"
+  default     = "lissandra-engine:0.4.2"
 }
 
 variable "count" {
@@ -99,7 +99,7 @@ variable "offline" {
 variable "cache_volume" {
   description = "Host volume for the Hugging Face model cache, mounted at /home/laya/.cache/huggingface. Empty: no volume, so weights baked into the image are used, or the checkpoint is downloaded again whenever the task starts."
   type        = string
-  default     = "laya-engine-cache"
+  default     = "lissandra-engine-cache"
 }
 
 variable "port" {
@@ -136,7 +136,7 @@ locals {
   max_loaded = var.max_loaded > 0 ? var.max_loaded : length(compact(split(",", var.models)))
 }
 
-job "laya-engine" {
+job "lissandra-engine" {
   datacenters = var.datacenters
   namespace   = var.namespace
   type        = "service"
@@ -164,16 +164,16 @@ job "laya-engine" {
     }
 
     service {
-      name     = "laya-engine"
+      name     = "lissandra-engine"
       port     = "http"
       provider = var.service_provider
-      tags     = concat(["laya-engine"], var.service_tags)
+      tags     = concat(["lissandra-engine"], var.service_tags)
 
       # laya-serve starts listening only once its checkpoints are loaded, so
       # a passing check means the engine can answer. Without the API key,
       # /health reports liveness only, which is all this check needs.
       check {
-        name     = "laya-engine-health"
+        name     = "lissandra-engine-health"
         type     = "http"
         path     = "/health"
         interval = "10s"
@@ -215,7 +215,7 @@ job "laya-engine" {
       unlimited      = true
     }
 
-    task "laya-serve" {
+    task "lissandra-engine" {
       driver = "docker"
 
       config {
@@ -248,7 +248,7 @@ job "laya-engine" {
         LAYA_THREADS       = var.cores
         OMP_NUM_THREADS    = var.cores
         LAYA_LOG_LEVEL     = var.log_level
-        LAYA_API_KEY_FILE  = "${NOMAD_SECRETS_DIR}/laya_api_key"
+        LAYA_API_KEY_FILE  = "${NOMAD_SECRETS_DIR}/api_key"
         HF_HUB_OFFLINE     = var.offline ? "1" : "0"
         # torch 2.14 otherwise compiles Triton kernels on the first CUDA
         # inference, which needs a C compiler the image does not have.
@@ -258,17 +258,17 @@ job "laya-engine" {
       }
 
       # The bearer key Lissandra must send, from the Nomad Variable at
-      # nomad/jobs/laya-engine (key LAYA_API_KEY), which this job reads
+      # nomad/jobs/lissandra-engine (key LAYA_API_KEY), which this job reads
       # through its workload identity. The file is readable only by the
       # image's user (10001). Changing the key restarts the engine.
       template {
-        destination = "${NOMAD_SECRETS_DIR}/laya_api_key"
+        destination = "${NOMAD_SECRETS_DIR}/api_key"
         change_mode = "restart"
         uid         = 10001
         gid         = 10001
         perms       = "0400"
         data        = <<-EOT
-          {{- with nomadVar "nomad/jobs/laya-engine" }}{{ .LAYA_API_KEY }}{{ end -}}
+          {{- with nomadVar "nomad/jobs/lissandra-engine" }}{{ .LAYA_API_KEY }}{{ end -}}
         EOT
       }
 
@@ -279,7 +279,7 @@ job "laya-engine" {
         env         = true
         change_mode = "restart"
         data        = <<-EOT
-          {{- with nomadVar "nomad/jobs/laya-engine" -}}
+          {{- with nomadVar "nomad/jobs/lissandra-engine" -}}
           {{- range $k, $v := . }}{{ if ne $k "LAYA_API_KEY" }}
           {{ $k }}={{ $v | toJSON }}
           {{- end }}{{ end }}

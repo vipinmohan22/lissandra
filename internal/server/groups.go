@@ -140,7 +140,7 @@ func (s *Server) deleteAlertGroup(w http.ResponseWriter, r *http.Request) {
 // reviewRules approves or rejects learned rules. An approved rule becomes
 // an ordinary rule (approving a rejected one restores what was learned). A
 // rejected one stays, without a category or
-// severity, and keeps matching events from the Laya engine, so its answer
+// severity, and keeps matching events from the engine, so its answer
 // is neither applied nor learned again; delete it to let Lissandra learn the
 // pattern anew.
 func (s *Server) reviewRules(w http.ResponseWriter, r *http.Request) {

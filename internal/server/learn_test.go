@@ -65,7 +65,7 @@ func TestLearnsRulesFromTheEngine(t *testing.T) {
 	src := sources[0]
 
 	e.ingest(src, `{"level":"error","message":"shipment 4411 stuck in audit queue for 12 minutes"}`)
-	if ev := e.latest(1); ev.Category != "audit" || ev.Classifier != "laya" {
+	if ev := e.latest(1); ev.Category != "audit" || ev.Classifier != "engine" {
 		t.Fatalf("first event: category %q by %q", ev.Category, ev.Classifier)
 	}
 	var learned config.Rule

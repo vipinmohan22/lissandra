@@ -32,7 +32,7 @@ down:
 # The engine alone, on 127.0.0.1:8000, for make run and
 # lissandra analyze -engine.
 engine: .env
-	docker compose up -d --wait laya-engine
+	docker compose up -d --wait lissandra-engine
 
 # The tokens compose.yaml and make run share, written once.
 .env:
@@ -61,4 +61,4 @@ docker-push:
 nomad-validate:
 	nomad fmt -check -recursive deploy/nomad
 	nomad job validate deploy/nomad/lissandra.nomad.hcl
-	nomad job validate deploy/nomad/laya-engine.nomad.hcl
+	nomad job validate deploy/nomad/lissandra-engine.nomad.hcl

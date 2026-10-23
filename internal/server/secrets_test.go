@@ -65,16 +65,16 @@ func TestMaskedURLsSurviveEdits(t *testing.T) {
 	e := newEnv(t)
 	var st config.Settings
 	e.admin("GET", "/api/settings", nil, &st)
-	st.Engine.URL = "http://laya:s3cret@10.0.0.1:8000"
+	st.Engine.URL = "http://user:s3cret@10.0.0.1:8000"
 	e.admin("PUT", "/api/settings", st, &st)
 	if strings.Contains(st.Engine.URL, "s3cret") {
 		t.Fatalf("shown: %q", st.Engine.URL)
 	}
-	st.Engine.URL += ",http://laya:s3cret@10.0.0.2:8000" // an instance added in the UI
+	st.Engine.URL += ",http://user:s3cret@10.0.0.2:8000" // an instance added in the UI
 	if code := e.admin("PUT", "/api/settings", st, nil); code != 200 {
 		t.Fatalf("put %d", code)
 	}
-	if got := e.cfg.Get().Settings.Engine.URL; got != "http://laya:s3cret@10.0.0.1:8000,http://laya:s3cret@10.0.0.2:8000" {
+	if got := e.cfg.Get().Settings.Engine.URL; got != "http://user:s3cret@10.0.0.1:8000,http://user:s3cret@10.0.0.2:8000" {
 		t.Errorf("stored %q", got)
 	}
 

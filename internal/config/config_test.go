@@ -227,15 +227,15 @@ func TestFileRefsOnlyReadAllowedRegularFiles(t *testing.T) {
 }
 
 func TestURLCredentialsMaskAndRestorePerEntry(t *testing.T) {
-	old := "http://laya:s3cret@10.0.0.1:8000"
+	old := "http://user:s3cret@10.0.0.1:8000"
 	masked := MaskURLs(old)
-	if masked != "http://laya:xxxxx@10.0.0.1:8000" {
+	if masked != "http://user:xxxxx@10.0.0.1:8000" {
 		t.Fatalf("masked %q", masked)
 	}
 	for _, tc := range []struct{ sent, want string }{
-		{masked + ",http://laya:other@10.0.0.2:8000", old + ",http://laya:other@10.0.0.2:8000"}, // an instance added
-		{"http://laya:xxxxx@10.0.0.1:9000", "http://laya:s3cret@10.0.0.1:9000"},                 // the port changed
-		{"http://laya:xxxxx@10.0.0.3:8000", "http://laya:s3cret@10.0.0.3:8000"},                 // moved: the only credentials
+		{masked + ",http://user:other@10.0.0.2:8000", old + ",http://user:other@10.0.0.2:8000"}, // an instance added
+		{"http://user:xxxxx@10.0.0.1:9000", "http://user:s3cret@10.0.0.1:9000"},                 // the port changed
+		{"http://user:xxxxx@10.0.0.3:8000", "http://user:s3cret@10.0.0.3:8000"},                 // moved: the only credentials
 	} {
 		if got, err := RestoreURLs(tc.sent, old); got != tc.want || err != nil {
 			t.Errorf("RestoreURLs(%q) = %q, %v; want %q", tc.sent, got, err, tc.want)

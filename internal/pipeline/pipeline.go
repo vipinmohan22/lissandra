@@ -1,5 +1,5 @@
-// Package pipeline moves events from ingest through rule classification
-// and the Laya engine into the event store and notification dispatcher.
+// Package pipeline moves events from ingest through the rules and the
+// classification engine into the event store and notification dispatcher.
 package pipeline
 
 import (
@@ -20,7 +20,7 @@ import (
 // ErrQueueFull is returned when the pipeline cannot accept more events.
 var ErrQueueFull = errors.New("pipeline queue full")
 
-// engineQueueSize bounds events waiting for the Laya engine; when it is
+// engineQueueSize bounds events waiting for the engine; when it is
 // full, events go on with the rules' classification. Events whose answer is
 // already queued or being asked for don't take a place in it: up to
 // maxSharers of them wait for that answer outside the queue (a burst of one
@@ -30,7 +30,7 @@ const (
 	maxSharers      = 4096
 )
 
-// queued is an event waiting for the Laya engine.
+// queued is an event waiting for the engine.
 type queued struct {
 	ev  model.Event
 	at  time.Time
@@ -45,13 +45,13 @@ type Pipeline struct {
 
 	store      *events.Store
 	dispatcher *notify.Dispatcher
-	laya       *engine.Classifier
+	classifier *engine.Classifier
 	// MaxEngineWait, when set, overrides how long an event may wait for the
-	// Laya engine (queue and request) before it goes on without it; by
+	// engine (queue and request) before it goes on without it; by
 	// default it is the engine's configured timeout.
 	MaxEngineWait time.Duration
-	// Learn, when set, is called with every live event the Laya engine
-	// answered, before it is stored (see package learn). Set it before Run.
+	// Learn, when set, is called with every live event the engine answered,
+	// before it is stored (see package learn). Set it before Run.
 	Learn func(ev *model.Event)
 
 	// engineCtx carries engine requests; Drain cancels it.
@@ -68,8 +68,8 @@ type Pipeline struct {
 	Received, Processed, Dropped, Rejected, EngineQueued, EngineShed atomic.Uint64
 }
 
-// New builds a pipeline with a queue of queueSize events. laya may be nil.
-func New(queueSize int, store *events.Store, d *notify.Dispatcher, laya *engine.Classifier) *Pipeline {
+// New builds a pipeline with a queue of queueSize events. classifier may be nil.
+func New(queueSize int, store *events.Store, d *notify.Dispatcher, classifier *engine.Classifier) *Pipeline {
 	p := &Pipeline{
 		in:          make(chan model.Event, queueSize),
 		engineQueue: make(chan queued, engineQueueSize),
@@ -77,7 +77,7 @@ func New(queueSize int, store *events.Store, d *notify.Dispatcher, laya *engine.
 		sharers:     make(chan struct{}, maxSharers),
 		store:       store,
 		dispatcher:  d,
-		laya:        laya,
+		classifier:  classifier,
 	}
 	p.engineCtx, p.engineCancel = context.WithCancel(context.Background())
 	p.engine.Store(classify.New(nil))
@@ -127,11 +127,11 @@ func (p *Pipeline) QueueDepth() int { return len(p.in) }
 // background work such as file analysis should pause.
 func (p *Pipeline) Busy() bool { return len(p.in) > cap(p.in)/4 }
 
-// EngineQueueDepth reports events waiting for the Laya engine.
+// EngineQueueDepth reports events waiting for the engine.
 func (p *Pipeline) EngineQueueDepth() int { return len(p.engineQueue) }
 
 // Run processes events until ctx is cancelled, with engineWorkers
-// goroutines waiting on the Laya engine.
+// goroutines waiting on the engine.
 func (p *Pipeline) Run(ctx context.Context, workers, engineWorkers int) {
 	stop := context.AfterFunc(ctx, p.engineCancel)
 	defer stop()
@@ -192,22 +192,22 @@ func (p *Pipeline) maxEngineWait() time.Duration {
 	if p.MaxEngineWait > 0 {
 		return p.MaxEngineWait
 	}
-	return p.laya.MaxWait()
+	return p.classifier.MaxWait()
 }
 
-// enrich asks the Laya engine about a queued event, then records it. The
+// enrich asks the engine about a queued event, then records it. The
 // time from queueing to the answer is bounded, so a slow or hung engine
 // delays an event (and its alert) by at most the engine wait.
 func (p *Pipeline) enrich(q queued) {
 	deadline := q.at.Add(p.maxEngineWait())
 	if time.Now().After(deadline) || p.draining.Load() {
 		// Out of time: an answer that arrived meanwhile is still used.
-		if !p.laya.ApplyCached(&q.ev) {
-			p.laya.Skipped.Add(1)
+		if !p.classifier.ApplyCached(&q.ev) {
+			p.classifier.Skipped.Add(1)
 		}
 	} else {
 		ctx, cancel := context.WithDeadline(p.engineCtx, deadline)
-		p.laya.Enrich(ctx, &q.ev)
+		p.classifier.Enrich(ctx, &q.ev)
 		cancel()
 	}
 	p.release(q.key)
@@ -245,19 +245,19 @@ func (p *Pipeline) isLive(key string) bool {
 }
 
 // ClassifyOffline classifies ev for file analysis: rules plus any cached
-// Laya engine answer for its pattern, but it never calls the engine, stores
+// engine answer for its pattern, but it never calls the engine, stores
 // the event or notifies. It returns false when a rule drops the event.
 func (p *Pipeline) ClassifyOffline(rules *classify.Engine, ev *model.Event) bool {
 	if !rules.Classify(ev) {
 		return false
 	}
-	if p.laya != nil && p.laya.Eligible(ev) {
-		p.laya.ApplyCachedQuiet(ev)
+	if p.classifier != nil && p.classifier.Eligible(ev) {
+		p.classifier.ApplyCachedQuiet(ev)
 	}
 	return true
 }
 
-// ClassifyFile classifies ev for file analysis: rules, then the Laya engine
+// ClassifyFile classifies ev for file analysis: rules, then the engine
 // for what they leave. A cached answer is used when there is one; otherwise
 // the engine is asked while calls (shared by the analysis) remain and the
 // engine has a slot no live event needs, so file analysis doesn't delay
@@ -267,15 +267,15 @@ func (p *Pipeline) ClassifyFile(ctx context.Context, rules *classify.Engine, ev 
 	if !rules.Classify(ev) {
 		return false
 	}
-	if p.laya == nil || !p.laya.Eligible(ev) || p.laya.ApplyCachedQuiet(ev) {
+	if p.classifier == nil || !p.classifier.Eligible(ev) || p.classifier.ApplyCachedQuiet(ev) {
 		return true
 	}
-	if p.liveAnswers() >= p.laya.Capacity() || !p.laya.Available(ev) || calls.Add(-1) < 0 {
+	if p.liveAnswers() >= p.classifier.Capacity() || !p.classifier.Available(ev) || calls.Add(-1) < 0 {
 		return true
 	}
-	ctx, cancel := context.WithTimeout(ctx, p.laya.MaxWait())
+	ctx, cancel := context.WithTimeout(ctx, p.classifier.MaxWait())
 	defer cancel()
-	p.laya.EnrichFile(ctx, ev)
+	p.classifier.EnrichFile(ctx, ev)
 	return true
 }
 
@@ -285,9 +285,9 @@ func (p *Pipeline) process(ev model.Event) {
 		return
 	}
 	// While draining, cached answers are still used; nothing new is asked.
-	if p.laya != nil && p.laya.Eligible(&ev) && !p.laya.ApplyCached(&ev) {
-		if p.draining.Load() || !p.laya.Available(&ev) {
-			p.laya.Skipped.Add(1)
+	if p.classifier != nil && p.classifier.Eligible(&ev) && !p.classifier.ApplyCached(&ev) {
+		if p.draining.Load() || !p.classifier.Available(&ev) {
+			p.classifier.Skipped.Add(1)
 		} else if p.ask(&ev) {
 			return // finished once answered
 		}
@@ -300,21 +300,21 @@ func (p *Pipeline) process(ev model.Event) {
 // for that answer outside the queue. Others are queued unless they would
 // time out in the queue or it is full; then ev goes on without the engine.
 func (p *Pipeline) ask(ev *model.Event) bool {
-	q := queued{ev: *ev, at: time.Now(), key: p.laya.AnswerKey(ev)}
+	q := queued{ev: *ev, at: time.Now(), key: p.classifier.AnswerKey(ev)}
 	if p.share(q) || p.enqueue(q) {
 		p.EngineQueued.Add(1)
 		return true
 	}
 	// The answer may have arrived since the cache was looked at.
-	if !p.laya.ApplyCached(ev) {
-		p.laya.Skipped.Add(1)
+	if !p.classifier.ApplyCached(ev) {
+		p.classifier.Skipped.Add(1)
 	}
 	return false
 }
 
 // share starts q waiting for an answer already queued or asked for.
 func (p *Pipeline) share(q queued) bool {
-	if !p.isLive(q.key) && !p.laya.Pending(&q.ev) {
+	if !p.isLive(q.key) && !p.classifier.Pending(&q.ev) {
 		return false
 	}
 	select {
@@ -332,7 +332,7 @@ func (p *Pipeline) share(q queued) bool {
 
 // enqueue queues q for the engine workers.
 func (p *Pipeline) enqueue(q queued) bool {
-	if p.laya.WouldWait(len(p.engineQueue)) > p.maxEngineWait() {
+	if p.classifier.WouldWait(len(p.engineQueue)) > p.maxEngineWait() {
 		// It would time out in the queue anyway: don't hold it.
 		p.EngineShed.Add(1)
 		return false

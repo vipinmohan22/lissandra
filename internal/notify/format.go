@@ -44,7 +44,7 @@ func (m *Message) Facts() []Fact {
 		facts = append(facts, Fact{"Rules", strings.Join(ev.MatchedRules, ", ")})
 	}
 	if e := ev.Engine; e != nil && e.Applied {
-		facts = append(facts, Fact{"Classified by", fmt.Sprintf("Laya engine (%s), %.0f%% confident", e.Model, e.Confidence*100)})
+		facts = append(facts, Fact{"Classified by", fmt.Sprintf("the engine (%s), %.0f%% confident", e.Model, e.Confidence*100)})
 	}
 	if m.RouteName != "" {
 		facts = append(facts, Fact{"Route", m.RouteName})

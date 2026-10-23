@@ -40,7 +40,7 @@ const (
 	// name is kept separately (Event.File) because it is user-controlled.
 	uploadSourceName = "file upload"
 
-	// maxImportEngineCalls bounds the Laya engine requests one analysis may
+	// maxImportEngineCalls bounds the engine requests one analysis may
 	// make (one per pattern the rules leave): about a minute or two of
 	// engine time on CPU.
 	maxImportEngineCalls = 100
@@ -209,7 +209,7 @@ type importOptions struct {
 	name, format string
 	loc          *time.Location
 	src          config.Source
-	engine       bool // ask the Laya engine about patterns the rules leave
+	engine       bool // ask the engine about patterns the rules leave
 }
 
 func (s *Server) importOptions(p importParams) (importOptions, error) {
@@ -358,7 +358,7 @@ func (s *Server) importTrainingData(w http.ResponseWriter, r *http.Request) {
 		if len(name) > 60 {
 			name = name[:60]
 		}
-		writeTrainingData(w, s.laya, evs, name+"-"+im.ID())
+		writeTrainingData(w, s.classifier, evs, name+"-"+im.ID())
 	}
 }
 

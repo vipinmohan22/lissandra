@@ -34,11 +34,11 @@ func TestSamePatternBurstIsNotShed(t *testing.T) {
 	}
 	store := events.NewStore(5000)
 	d := notify.NewDispatcher(log)
-	laya := engine.New(log)
-	defer laya.Close()
-	laya.Configure(c)
+	classifier := engine.New(log)
+	defer classifier.Close()
+	classifier.Configure(c)
 	time.Sleep(200 * time.Millisecond) // health
-	p := New(10000, store, d, laya)
+	p := New(10000, store, d, classifier)
 	p.Configure(c)
 	d.Configure(c)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -64,7 +64,7 @@ func TestSamePatternBurstIsNotShed(t *testing.T) {
 			answered++
 		}
 	}
-	st := laya.Status()
+	st := classifier.Status()
 	t.Logf("300 identical events in %v: engine requests=%d answered=%d shed=%d skipped=%d", time.Since(start).Round(time.Millisecond), fake.Calls.Load()-1, answered, p.EngineShed.Load(), st.Skipped)
 	if p.EngineShed.Load() > 0 {
 		t.Errorf("%d events shed although one request (%d made) answered the pattern within a second", p.EngineShed.Load(), fake.Calls.Load()-1)

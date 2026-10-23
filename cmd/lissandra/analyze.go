@@ -36,8 +36,8 @@ server, and print a report. FILE may be "-" for standard input; gzip files are
 detected automatically. Nothing is stored or sent anywhere: no notifications,
 and no network access unless -engine is given.
 
-With -engine URL, the Laya engine (laya-serve) classifies what the rules
-leave, once per message pattern, using the config's categories and engine
+With -engine URL, the engine (laya-serve) classifies what the rules leave,
+once per message pattern, using the config's categories and engine
 settings; only the log text of those patterns is sent to that URL.
 
 Rules come from -config, else $LISSANDRA_CONFIG, else
@@ -66,7 +66,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	output := fs.String("output", "text", "text (summary), json (one report per file) or ndjson (every classified event)")
 	minSev := fs.String("min-severity", "", "with -output ndjson, only print events at or above this severity")
 	failOn := fs.String("fail-on", "", "exit with status 2 if any event is at or above this severity")
-	engineURL := fs.String("engine", "", "laya-serve URL(s), comma-separated: classify what the rules leave with the Laya engine")
+	engineURL := fs.String("engine", "", "engine URL(s), comma-separated: classify what the rules leave with the engine")
 	engineModel := fs.String("engine-model", "", "engine checkpoint (default: the config's, else english)")
 	engineKey := fs.String("engine-key", "", "engine API key (default $LISSANDRA_ENGINE_API_KEY)")
 	files, err := parseInterspersed(fs, args)
@@ -131,7 +131,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return fail("no source %q in the config", *sourceKey)
 		}
 	}
-	// Only rules, route filters and (with -engine) the Laya engine are used;
+	// Only rules, route filters and (with -engine) the engine are used;
 	// notifiers and pollers are never constructed.
 	rules := classify.New(cfg.Rules)
 	routes := notify.RouteMatcher(cfg)
@@ -141,7 +141,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		// In order, so the engine is asked about each pattern's first line
 		// and runs give the same answers (the engine is the bottleneck).
 		workers = 1
-		laya, err := analyzeEngine(cfg, source, *engineURL, *engineModel, *engineKey, stderr)
+		eng, err := analyzeEngine(cfg, source, *engineURL, *engineModel, *engineKey, stderr)
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -149,9 +149,9 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			if !rules.Classify(ev) {
 				return false
 			}
-			if laya.Eligible(ev) {
-				ctx, cancel := context.WithTimeout(context.Background(), laya.MaxWait())
-				laya.Enrich(ctx, ev)
+			if eng.Eligible(ev) {
+				ctx, cancel := context.WithTimeout(context.Background(), eng.MaxWait())
+				eng.Enrich(ctx, ev)
 				cancel()
 			}
 			return true
@@ -188,7 +188,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return code
 }
 
-// analyzeEngine connects to the Laya engine for -engine and checks that the
+// analyzeEngine connects to the engine for -engine and checks that the
 // checkpoint is loaded before any file is read.
 func analyzeEngine(cfg *config.Config, source *config.Source, urls, checkpoint, key string, stderr io.Writer) (*engine.Classifier, error) {
 	e := &cfg.Settings.Engine
@@ -203,12 +203,12 @@ func analyzeEngine(cfg *config.Config, source *config.Source, urls, checkpoint, 
 	if err := config.Normalize(cfg); err != nil {
 		return nil, fmt.Errorf("-engine: %w", err)
 	}
-	laya := engine.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	laya.Configure(cfg)
-	laya.CheckHealth() // know the engine's checkpoints before the first events
+	eng := engine.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	eng.Configure(cfg)
+	eng.CheckHealth() // know the engine's checkpoints before the first events
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	eps, err := laya.Probe(ctx)
+	eps, err := eng.Probe(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("-engine: %w", err)
 	}
@@ -225,8 +225,8 @@ func analyzeEngine(cfg *config.Config, source *config.Source, urls, checkpoint, 
 			fmt.Fprintf(stderr, "engine: %s has not loaded %s, used by some sources; their events keep the rules' result\n", ep.URL, strings.Join(ep.Missing, ", "))
 		}
 	}
-	fmt.Fprintf(stderr, "engine: %s, checkpoint %s, %d categories\n", strings.Join(laya.Status().URLs, ", "), e.Model, len(cfg.Settings.Categories))
-	return laya, nil
+	fmt.Fprintf(stderr, "engine: %s, checkpoint %s, %d categories\n", strings.Join(eng.Status().URLs, ", "), e.Model, len(cfg.Settings.Categories))
+	return eng, nil
 }
 
 // parseInterspersed parses flags that may appear before, between or after
