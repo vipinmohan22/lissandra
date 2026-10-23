@@ -31,10 +31,12 @@ flowchart LR
 LAYA_ADMIN_TOKEN=change-me-to-something-long make run
 # → http://localhost:8080, sign in with the token
 
-# or with Docker
-docker build -t laya .
+# or with Docker (BuildKit's buildx)
+docker buildx build -t laya --load .
 docker run -p 8080:8080 -e LAYA_ADMIN_TOKEN=change-me-to-something-long -v laya-data:/data laya
 ```
+
+The image builds with `docker buildx build` (the legacy `docker build` can't read its Dockerfile), and `docker` needs a running daemon. Docker Desktop has both. On a Mac without it: `brew install colima docker docker-buildx`, add `"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]` to `~/.docker/config.json` so the CLI finds the plugin, then `colima start`. `make docker` builds `ghcr.io/vipinmohan22/laya:<version>` for your machine's platform; `make docker PLATFORM=linux/amd64` builds for x86 servers from an Apple Silicon Mac (Go cross-compiles, so it is as fast as a native build). The container runs as UID 65532: a named volume works as is, a host directory must be writable by that user.
 
 A fresh install has one push source called `default`. Open **Sources → Setup instructions** to copy its ingest URL and token, then send something:
 

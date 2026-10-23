@@ -1,9 +1,9 @@
 # Laya engine: laya-serve (github.com/NandhaKishorM/laya), the decision model
 # Laya asks to classify what its rules leave uncategorized.
 #
-#   docker build -t registry.example.com/laya-engine:0.4.2 \
+#   docker buildx build --platform linux/amd64 --push \
+#     -t registry.example.com/laya-engine:0.4.2 \
 #     https://github.com/NandhaKishorM/laya.git#v0.4.2      # no public image exists
-#   docker push registry.example.com/laya-engine:0.4.2
 #   nomad volume create deploy/nomad/laya-engine-volume.hcl # once per node (model cache)
 #   nomad var put nomad/jobs/laya-engine LAYA_API_KEY="$(openssl rand -hex 32)"
 #   nomad job run -var-file=deploy/nomad/laya-engine.vars.hcl deploy/nomad/laya-engine.nomad.hcl

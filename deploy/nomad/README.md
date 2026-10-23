@@ -14,12 +14,18 @@ Tested with Nomad 2.0.7. Dynamic host volumes need Nomad 1.10 or newer.
 
 ## 1. Build and publish the image
 
-The CI workflow pushes `ghcr.io/<owner>/laya:<version>` and `:latest` when you push a `v*` tag. To build it yourself:
+The CI workflow pushes `ghcr.io/<owner>/laya:<version>` and `:latest`, for linux/amd64 and linux/arm64, when you push a `v*` tag. To build it yourself with `docker buildx`:
 
 ```sh
-make docker IMAGE=registry.example.com/laya VERSION=v0.1.0
+# both platforms under one tag, pushed (Nomad clients pull the one they run)
+make docker-push IMAGE=registry.example.com/laya VERSION=v0.1.0
+
+# or one platform, loaded into the local daemon, then pushed
+make docker IMAGE=registry.example.com/laya VERSION=v0.1.0 PLATFORM=linux/amd64
 docker push registry.example.com/laya:v0.1.0
 ```
+
+Without `PLATFORM`, `make docker` builds for the machine it runs on, so on an Apple Silicon Mac set `PLATFORM=linux/amd64` for x86 clients. A multi-platform push needs a builder that can export several platforms: Docker Desktop's default builder can; otherwise create one once with `docker buildx create --use`.
 
 If the image is private, give Nomad clients registry credentials (`auth` in the task's `config`, or a Docker credential helper on the clients).
 
@@ -123,10 +129,11 @@ The Laya engine is `laya-serve`, a Python/PyTorch decision model served over HTT
 No image is published, so build one from the upstream Dockerfile at a release tag, and push it to a registry your Nomad clients can pull from:
 
 ```sh
-docker build -t registry.example.com/laya-engine:0.4.2 \
+docker buildx build --platform linux/amd64 --push -t registry.example.com/laya-engine:0.4.2 \
   https://github.com/NandhaKishorM/laya.git#v0.4.2
-docker push registry.example.com/laya-engine:0.4.2
 ```
+
+Set `--platform` to what your Nomad clients run. Unlike Laya's image, this one installs Python and PyTorch, so building for another architecture (linux/amd64 on an Apple Silicon Mac) runs under emulation and takes much longer; build on a machine of the clients' architecture when you can.
 
 Tag `v0.4.2` is commit `68804629e8ccd9d616d48a40e87de9fabbeae069`. Build from the commit (`…/laya.git#68804629e8ccd9d616d48a40e87de9fabbeae069`) if you don't want a moved tag to change your image.
 
