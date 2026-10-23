@@ -272,10 +272,14 @@ function reportError(err) {
   toast(err.message || String(err), 'error');
 }
 
-// busy runs fn with btn disabled, reporting a failure.
+// busy runs fn with btn disabled, reporting a failure. Disabling the
+// button dropped its focus: it gets it back unless fn moved it.
 async function busy(btn, fn) {
   btn.disabled = true;
-  try { await fn(); } catch (err) { reportError(err); } finally { btn.disabled = false; }
+  try { await fn(); } catch (err) { reportError(err); } finally {
+    btn.disabled = false;
+    if (!document.activeElement || document.activeElement === document.body) btn.focus();
+  }
 }
 
 // Shared lookups, refreshed when a page needs them.
@@ -516,6 +520,7 @@ function openModal({ title, body, actions, wide, left, onClose }) {
     foot.append(h('button', {
       type: 'button',
       class: a.primary ? 'primary' : a.danger ? 'danger' : '',
+      'data-autofocus': a.autofocus,
       onclick: async (e) => {
         const btn = e.currentTarget;
         btn.disabled = true;
@@ -537,8 +542,12 @@ function openModal({ title, body, actions, wide, left, onClose }) {
   const back = h('div', { class: 'modal-back', onmousedown: (e) => { if (e.target === back) close(); } }, modal);
   document.body.append(back);
   document.addEventListener('keydown', onKey);
+  // Focus goes into the dialog: its first field, else the action marked
+  // autofocus (Cancel, in a confirmation), else Close — never an action
+  // Enter would run by accident — without scrolling a long one to its end.
   const first = modal.querySelector('input, select, textarea');
   if (first) first.focus();
+  else (modal.querySelector('.modal-foot button[data-autofocus]') || modal.querySelector('button.x')).focus({ preventScroll: true });
   return { close };
 }
 
@@ -549,7 +558,7 @@ function confirmDialog(message, label = 'Delete') {
       body: h('p', null, message),
       onClose: () => resolve(false),
       actions: [
-        { label: 'Cancel', onClick: (close) => close() },
+        { label: 'Cancel', autofocus: true, onClick: (close) => close() },
         { label, danger: true, onClick: (close) => { resolve(true); close(); } },
       ],
     });
@@ -2188,6 +2197,10 @@ async function importConfigFile(file, { after } = {}) {
     const cfg = JSON.parse(await file.text());
     if (!(await confirmDialog('Replace the entire configuration with this file? Masked secrets are kept for matching IDs.', 'Import'))) return;
     await api('POST', '/api/config/import', cfg);
+    // The setup wizard's drafts were edits of the configuration replaced.
+    // The access one is kept: an import keeps the admin token, and the user
+    // may have copied the token it holds.
+    clearSetupDrafts('access');
     toast('Configuration imported');
     if (after) await after(); else route();
   } catch (err) { reportError(err); }
@@ -2204,23 +2217,16 @@ function accessCard() {
       parts.push(h('div', { class: 'callout warn' }, 'Laya generated this token at startup and printed it in its log. It changes every time Laya restarts.'),
         h('button', { type: 'button', class: 'primary', onclick: () => tokenModal('Set a permanent admin token', render) }, 'Set a permanent token…'));
     } else if (a.source === 'stored') {
-      parts.push(h('p', null, `Set in Laya on ${fmtDate(a.set_at)}. Stored as a keyed hash in ${a.file}.`),
+      parts.push(h('p', { class: 'wrap-anywhere' }, `Set in Laya on ${fmtDate(a.set_at)}. Stored as a keyed hash in ${a.file}.`),
         h('button', { type: 'button', onclick: () => tokenModal('Rotate the admin token', render) }, 'Rotate token…'),
-        h('p', { class: 'small muted' }, `Lost it? Set LAYA_ADMIN_TOKEN, or delete ${a.file}, and restart Laya.`));
+        h('p', { class: 'small muted wrap-anywhere' }, `Lost it? Set LAYA_ADMIN_TOKEN, or delete ${a.file}, and restart Laya.`));
     } else {
       parts.push(h('p', null, 'Set by LAYA_ADMIN_TOKEN. Change it where it is set (on Nomad: the nomad/jobs/laya Variable), then restart.'));
       if (a.stored_ignored) {
-        parts.push(h('div', { class: 'callout warn' }, `A token set in Laya on ${fmtDate(a.stored_set_at)} is ignored while the variable is set. It becomes active again if the variable is removed.`),
-          h('button', {
-            type: 'button', class: 'danger',
-            onclick: (e) => busy(e.currentTarget, async () => {
-              if (!(await confirmDialog('Delete the admin token stored in Laya? LAYA_ADMIN_TOKEN stays the admin token.'))) return;
-              await api('DELETE', '/api/auth/token');
-              await load('auth');
-              toast('Stored admin token deleted');
-              render();
-            }),
-          }, 'Delete stored token'));
+        const note = a.stored_error
+          ? storedTokenUnusable(a)
+          : h('div', { class: 'callout warn' }, `A token set in Laya${storedOn(a)} is ignored while the variable is set. It becomes active again if the variable is removed.`);
+        parts.push(note, deleteStoredButton(render));
       }
     }
     // A safety net for a token marked saved that wasn't: whoever has this
@@ -2238,6 +2244,33 @@ function accessCard() {
   };
   render();
   return card;
+}
+
+// storedOn is " on <date>" for the date an ignored stored token was set,
+// or "" when it isn't known.
+function storedOn(a) {
+  return a.stored_set_at ? ` on ${fmtDate(a.stored_set_at)}` : '';
+}
+
+// storedTokenUnusable says why admin-token.json can't be used, and what
+// that means while LAYA_ADMIN_TOKEN is set.
+function storedTokenUnusable(a) {
+  return h('div', { class: 'callout warn' }, `${a.file} can't be used (${a.stored_error}). While it is there, Laya won't start without LAYA_ADMIN_TOKEN: delete it.`);
+}
+
+// deleteStoredButton deletes admin-token.json, once confirmed, then runs
+// after.
+function deleteStoredButton(after) {
+  return h('button', {
+    type: 'button', class: 'danger',
+    onclick: (e) => busy(e.currentTarget, async () => {
+      if (!(await confirmDialog('Delete the admin token stored in Laya? LAYA_ADMIN_TOKEN stays the admin token.'))) return;
+      await api('DELETE', '/api/auth/token');
+      await load('auth');
+      toast('Stored admin token deleted');
+      after();
+    }),
+  }, 'Delete stored token');
 }
 
 // tokenModal sets a new admin token from tokenPanel, then runs after.
@@ -2990,9 +3023,10 @@ function tokenPanel({ current = '', source = '', draft = {}, onChange } = {}) {
     clear(errBox);
     for (const el of [own, repeat, ack.input]) el.removeAttribute('aria-invalid');
   };
+  // The tick is for the token as it is: an edit clears it.
   for (const [input, key] of [[own, 'own'], [repeat, 'repeat']]) {
     input.setAttribute('autocomplete', 'new-password');
-    input.addEventListener('input', () => { draft[key] = input.value; clearError(); });
+    input.addEventListener('input', () => { draft[key] = input.value; setAck(false); clearError(); changed(); });
   }
 
   const gen = secretBox(() => draft.generated,
@@ -3167,12 +3201,18 @@ async function settleChange(sent, next) {
 // ---------- Setup wizard ----------
 
 // The wizard's pages, in order. The five tracked steps record an outcome
-// (done, defaults or skipped); welcome and review don't.
+// (done, defaults or skipped); welcome and review don't. summary is a
+// step's line on the welcome page: for access, it depends on the token in
+// use (a, the /api/auth status).
 const SETUP_PAGES = [
   { id: 'welcome', title: 'Welcome to Laya', label: 'Welcome', render: setupWelcome },
   {
     id: 'access', step: true, title: 'Secure access to Laya', label: 'Access', render: setupAccess,
-    summary: 'Replace the token Laya generated at startup with a permanent one.',
+    summary: (a) => {
+      if (a.source === 'generated') return 'Replace the token Laya generated at startup with a permanent one.';
+      if (a.source === 'stored') return 'A permanent token is set in Laya; you can rotate it.';
+      return a.stored_error ? 'Set by LAYA_ADMIN_TOKEN. Delete admin-token.json, which Laya can\'t use.' : 'Set by LAYA_ADMIN_TOKEN; nothing to change here.';
+    },
   },
   {
     id: 'sources', step: true, title: 'Where logs come from', label: 'Sources', render: setupSources,
@@ -3200,8 +3240,9 @@ const setupPage = (id) => SETUP_PAGES.find((p) => p.id === id);
 // recipients and tokens.
 const setupDrafts = {};
 
-function clearSetupDrafts() {
-  for (const k of Object.keys(setupDrafts)) delete setupDrafts[k];
+// clearSetupDrafts drops the drafts, except keep's (a page id).
+function clearSetupDrafts(keep) {
+  for (const k of Object.keys(setupDrafts)) if (k !== keep) delete setupDrafts[k];
 }
 
 const STEP_STATES = {
@@ -3302,7 +3343,11 @@ function changeList(changes) {
 }
 
 pages.setup = async (main, arg) => {
+  // A render the user has moved on from by the time it loads changes
+  // nothing: not the title, not the URL.
+  const gen = routeGen;
   await load('onboarding', 'auth', 'info');
+  if (gen !== routeGen) return null;
   const state = cache.onboarding;
   if (state.status !== 'pending' && state.status !== 'deferred') {
     setupNotRunning(main, state);
@@ -3318,7 +3363,9 @@ pages.setup = async (main, arg) => {
   const ctx = {
     state, page,
     drafts: setupDrafts[page.id] || (setupDrafts[page.id] = {}),
-    go: (id) => goTo(`#/setup/${id}`),
+    // An action that finishes after the user left the page leaves them
+    // where they went.
+    go: (id) => { if (gen === routeGen) goTo(`#/setup/${id}`); },
     mark: (outcome) => markStep(page.id, outcome),
     refresh: () => route(),
   };
@@ -3328,8 +3375,10 @@ pages.setup = async (main, arg) => {
 };
 
 // setupNotRunning is the setup page once setup is over, or was never
-// offered, with a way to run it again.
+// offered, with a way to run it again. Drafts of a run that ended in
+// another session don't carry over into the next one.
 function setupNotRunning(main, state) {
+  clearSetupDrafts();
   let when = 'never offered: this configuration predates it, or came from a seed';
   if (state.status === 'completed') when = `finished on ${fmtDate(state.finished_at)}`;
   else if (state.status === 'dismissed') when = `skipped on ${fmtDate(state.finished_at)}`;
@@ -3550,7 +3599,7 @@ async function setupWelcome(ctx) {
       tile('Alert', 'Routes send the events that matter to email, Slack, PagerDuty and other channels.')),
     h('h2', { class: 'mt' }, 'What setup covers'),
     h('ul', { class: 'checklist' }, SETUP_STEPS.map((p) => h('li', null, stepBadge(state, p.id),
-      h('div', null, h('strong', null, p.label), h('div', { class: 'small muted' }, p.summary))))),
+      h('div', null, h('strong', null, p.label), h('div', { class: 'small muted' }, typeof p.summary === 'function' ? p.summary(cache.auth) : p.summary))))),
     h('p', { class: 'muted' }, 'About 5 minutes. Every step can be skipped, and you can come back later.'),
     configured ? h('div', { class: 'callout' },
       h('div', null, `Already configured: ${[plural(cache.sources.length, 'source'), `${plural(cache.rules.length, 'rule')} (${num(on)} on)`,
@@ -3625,7 +3674,7 @@ async function setupAccess(ctx) {
       panelBox,
       location.protocol === 'http:' && !local ? h('div', { class: 'callout warn' }, 'This page isn\'t using HTTPS: the token crosses the network unencrypted.') : null,
       a.on_nomad ? h('p', { class: 'small muted' }, 'On Nomad, prefer LAYA_ADMIN_TOKEN in the nomad/jobs/laya Variable. A token set here is stored on Laya\'s volume and is lost with it.') : null,
-      h('p', { class: 'small muted' }, `Stored as a keyed hash in ${a.file}. If that directory isn't on a persistent volume, set LAYA_ADMIN_TOKEN instead.`));
+      h('p', { class: 'small muted wrap-anywhere' }, `Stored as a keyed hash in ${a.file}. If that directory isn't on a persistent volume, set LAYA_ADMIN_TOKEN instead.`));
     footer = stepFooter(ctx, {
       dirty: () => panel.dirty(),
       discard,
@@ -3664,7 +3713,10 @@ async function setupAccess(ctx) {
   } else {
     append(body,
       h('div', { class: 'callout ok' }, 'The admin token comes from LAYA_ADMIN_TOKEN in Laya\'s environment. Change it where it is set (on Nomad: the nomad/jobs/laya Variable).'),
-      a.stored_ignored ? h('p', null, `A token set in Laya on ${fmtDate(a.stored_set_at)} is ignored while that variable is set. Delete it in Settings → Access.`) : null);
+      // A file Laya can't use is a startup failure waiting: it can be
+      // deleted from here.
+      a.stored_error ? [storedTokenUnusable(a), deleteStoredButton(ctx.refresh)] : null,
+      a.stored_ignored && !a.stored_error ? h('p', null, `A token set in Laya${storedOn(a)} is ignored while that variable is set. Delete it in Settings → Access.`) : null);
     footer = stepFooter(ctx, { skip: { hidden: true }, defaults: { hidden: true }, saveBtn: { label: 'Continue' }, save: () => true });
   }
   sync();
@@ -3687,15 +3739,15 @@ async function setupSources(ctx) {
   const hasEnabled = () => cache.sources.some((x) => x.enabled);
   const blocked = () => (hasEnabled() ? '' : 'Add a source, or use the default one');
 
-  // Arrival is checked against the newest event when the page opened, not
-  // the browser's clock, which can be off from Laya's.
-  let watched = null; // {src, baseline, received}
+  // Arrival is checked against the newest event seen, not the browser's
+  // clock, which can be off from Laya's.
+  let watched = null; // {src, baseline}
   const waiting = h('div', { class: 'listening' });
   const arrived = h('div', { class: 'arrived', role: 'status' });
   const sendOut = h('div', { class: 'small', role: 'status' });
   const newest = async (id) => (await GET(`/api/events?source=${encodeURIComponent(id)}&limit=1`))[0] || null;
   const watch = async (src) => {
-    const w = { src, baseline: null, received: false };
+    const w = { src, baseline: null };
     watched = w;
     clear(arrived);
     clear(sendOut);
@@ -3706,11 +3758,13 @@ async function setupSources(ctx) {
   };
   const poll = async () => {
     const w = watched;
-    if (!w || w.received || w.baseline === null) return;
+    if (!w || w.baseline === null) return;
     const ev = await newest(w.src.id);
     if (w !== watched || !ev || ev.id === w.baseline) return;
-    w.received = true; // announced once
+    // Every new event is announced, and answers a test event's "Sent".
+    w.baseline = ev.id;
     waiting.hidden = true;
+    clear(sendOut);
     clear(arrived).append('Received ', timeCell(ev.received_at), ': ', sevBadge(ev.severity), ` ${ev.category} · ${String(ev.message).split('\n')[0].slice(0, 200)}`);
   };
 
@@ -3775,7 +3829,7 @@ async function setupSources(ctx) {
   footer = stepFooter(ctx, {
     changes: dry.changes,
     dirty,
-    defaults: { help: 'Default: adds the push source "default" when no source is enabled.' },
+    defaults: { help: 'Default: adds a push source when no source is enabled, named "default" (or "default-2" and so on, if that name is taken).' },
     saveBtn: { blocked: blocked() },
     save: async () => {
       if (!dirty()) return true;
@@ -4067,8 +4121,11 @@ function notifyCard(n, routes, draft, onRouteSaved) {
     errBox);
 
   const want = () => ({ enabled: v('on'), min_severity: v('sev'), categories: v('cats'), throttle_seconds: v('throttle') });
+  const showError = (text) => fieldError(errBox, recips.length ? recips[0].input : sev, text);
   return {
     el,
+    id: n.id,
+    showError,
     dirty: () => ['recipients', 'on', 'sev', 'cats', 'throttle'].some((k) => k in draft),
     save: async () => {
       clear(errBox);
@@ -4090,17 +4147,18 @@ function notifyCard(n, routes, draft, onRouteSaved) {
             Object.assign(own, await api('PUT', `/api/routes/${own.id}`, { ...own, ...w }));
             saved = true;
           }
-        } else if (w.enabled) {
+        } else if (w.enabled || draft.createdId) {
           const route = { name: `${n.name}: ${w.min_severity} and above`, ...w, notifier_ids: [n.id] };
-          // A retry updates the route the first attempt created.
+          // A retry updates the route the first attempt created, also to
+          // switch it off.
           if (draft.createdId) await api('PUT', `/api/routes/${draft.createdId}`, { ...route, id: draft.createdId });
           else draft.createdId = (await api('POST', '/api/routes', route)).id;
           saved = true;
         }
       } catch (err) {
         if (err instanceof AuthError) throw err;
-        fieldError(errBox, recips.length ? recips[0].input : sev, `Not saved: ${err.message}`);
-        throw new InputError(err.message);
+        showError(`Not saved: ${err.message}`);
+        throw new InputError(`Not saved: ${err.message}`);
       }
       return saved;
     },
@@ -4127,6 +4185,7 @@ async function setupNotify(ctx) {
   const cardsBox = h('div');
   let cards = [];
   let footer = null;
+  let stale = false; // a save failed, and the cards weren't painted again since
   const paint = () => {
     cards = enabled().map((n) => notifyCard(n, cache.routes, drafts.cards[n.id] || (drafts.cards[n.id] = {}), refresh));
     append(clear(cardsBox), cards.map((c) => c.el));
@@ -4134,6 +4193,7 @@ async function setupNotify(ctx) {
   const refresh = async () => {
     const [d] = await Promise.all([markStep('notify', 'defaults', { dryRun: true }), load('routes', 'notifiers')]);
     paint();
+    stale = false;
     footer.setChanges(d.changes);
   };
   paint();
@@ -4147,8 +4207,25 @@ async function setupNotify(ctx) {
     defaultsName: 'Use suggested routes',
     defaults: { help: 'Default: a route for each channel no route reaches, for error and above (critical for PagerDuty), any category, repeats throttled for 15 minutes.' },
     save: async () => {
+      // A request that failed may still have been applied, only its answer
+      // lost. So after a failure the cards are painted again, from Laya's
+      // routes and their drafts: a route a lost create made is then its
+      // card's own, and a retry edits it instead of making another. When
+      // that reload fails too, the retry reloads first.
+      if (stale) await refresh();
       let saved = false;
-      for (const c of cards) saved = (await c.save()) || saved;
+      for (const c of cards) {
+        try {
+          saved = (await c.save()) || saved;
+        } catch (err) {
+          if (!(err instanceof InputError)) throw err;
+          stale = true;
+          await refresh().catch(() => {}); // else the card keeps its error
+          const again = cards.find((x) => x.id === c.id);
+          if (again && again !== c) again.showError(err.message);
+          throw err;
+        }
+      }
       if (saved) toast('Recipients and routes saved');
       return true;
     },

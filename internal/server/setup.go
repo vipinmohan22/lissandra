@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -69,6 +71,8 @@ func (s *Server) putAuthToken(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "weak_token", err.Error())
 	case errors.Is(err, auth.ErrSameToken):
 		writeErrorCode(w, http.StatusBadRequest, "same_token", err.Error())
+	case errors.Is(err, auth.ErrLoggedToken):
+		writeErrorCode(w, http.StatusBadRequest, "logged_token", err.Error())
 	case errors.Is(err, auth.ErrStale):
 		writeErrorCode(w, http.StatusUnauthorized, "stale_token", err.Error())
 	case errors.Is(err, auth.ErrEnvManaged):
@@ -135,12 +139,13 @@ func (s *Server) onboardingView(c *config.Config) onboardingView {
 		if slices.Contains(v.NotNeeded, step) {
 			continue
 		}
+		// A permanent token leaves nothing to do on the access step.
+		needed := step != config.StepAccess || v.Auth.Source == auth.SourceGenerated
 		rec, ok := v.Steps[step]
-		if !ok && v.Resume == "" {
+		if !ok && needed && v.Resume == "" {
 			v.Resume = step
 		}
-		// A permanent token leaves nothing to do on the access step.
-		if (!ok || rec.Outcome == config.OutcomeSkipped) && (step != config.StepAccess || v.Auth.Source == auth.SourceGenerated) {
+		if (!ok || rec.Outcome == config.OutcomeSkipped) && needed {
 			v.Remaining = append(v.Remaining, step)
 		}
 	}
@@ -294,8 +299,13 @@ func (s *Server) onboardingDefaults(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		DryRun bool `json:"dry_run"`
 	}
-	if r.ContentLength != 0 && !readStrictJSON(w, r, &body) {
-		return
+	// A chunked request has no length (-1), so look at the body itself.
+	br := bufio.NewReader(r.Body)
+	if _, err := br.Peek(1); err == nil {
+		r.Body = io.NopCloser(br)
+		if !readStrictJSON(w, r, &body) {
+			return
+		}
 	}
 	now := setupNow()
 	if body.DryRun {

@@ -443,11 +443,18 @@ The UI and the API share one admin bearer token. Laya picks it at startup:
 | unset | yes | The token set in Laya. Nothing is logged. |
 | unset | no | A random token for this run, logged as `admin_token`. |
 
-A token set in the UI (the setup wizard's Access step, or **Settings → Access**) is generated in the browser and shown, and is saved only once you confirm you have kept it. Laya stores it in `$LAYA_DATA_DIR/admin-token.json` (mode 0600) as an HMAC-SHA256 digest under a random key, never in plain text and never in `config.json`, so exports, imports and seeds don't carry it. A change applies at once: the tab that made it stays signed in, other tabs and API scripts need the new token, and the old one, a logged one included, stops working. If `admin-token.json` can't be read or parsed, Laya refuses to start rather than fall back to a logged token; fix or delete the file, or set `LAYA_ADMIN_TOKEN`. Releases before the setup wizard ignore the file, so after a downgrade sign in with `LAYA_ADMIN_TOKEN` or the logged token.
+A token set in the UI (the setup wizard's Access step, or **Settings → Access**) is generated in the browser and shown, and is saved only once you confirm you have kept it. Laya stores it in `$LAYA_DATA_DIR/admin-token.json` (mode 0600) as an HMAC-SHA256 digest under a random key, never in plain text and never in `config.json`, so exports, imports and seeds don't carry it. A change applies at once: the tab that made it stays signed in, other tabs and API scripts need the new token, and the old one, a logged one included, stops working. The logged token is also refused as a new one for the rest of that run. If `admin-token.json` can't be read or parsed, Laya refuses to start rather than fall back to a logged token; fix or delete the file, or set `LAYA_ADMIN_TOKEN`. Releases before the setup wizard ignore the file, so after a downgrade sign in with `LAYA_ADMIN_TOKEN` or the logged token.
 
 The token is an API key, not a password: use the generated one, a password manager's generator or `openssl rand -hex 24`, never a password you use elsewhere. A token set in Laya must be 32 to 256 printable ASCII characters without spaces, with at least 10 different characters and none making up more than a quarter of it. These rules catch mistakes; the strength comes from the token being random. `LAYA_ADMIN_TOKEN` isn't checked against them.
 
-**Lost the admin token?** Set `LAYA_ADMIN_TOKEN` (on Nomad, `nomad var put nomad/jobs/laya LAYA_ADMIN_TOKEN=…`) and restart: it takes precedence. Or delete `admin-token.json` from the data directory and restart, and Laya logs a new token for the run.
+**Lost the admin token?** Set `LAYA_ADMIN_TOKEN` and restart: it takes precedence. On Nomad, add it to the Variable; this keeps the variable's other keys, and the task restarts with the new value:
+
+```sh
+nomad var get -out=json nomad/jobs/laya | nomad var put -in=json - LAYA_ADMIN_TOKEN="$(openssl rand -hex 24)"
+nomad var get -item=LAYA_ADMIN_TOKEN nomad/jobs/laya   # the token to sign in with
+```
+
+Or delete `admin-token.json` from the data directory and restart, and Laya logs a new token for the run.
 
 ## Operational notes
 

@@ -55,7 +55,7 @@ func TestOpenPrecedence(t *testing.T) {
 		t.Fatal(gen, err)
 	}
 	st := s.Status()
-	if st.Source != SourceEnv || !st.StoredIgnored || st.StoredSetAt == nil || st.SetAt != nil {
+	if st.Source != SourceEnv || !st.StoredIgnored || st.StoredSetAt == nil || st.SetAt != nil || st.StoredError != "" {
 		t.Errorf("env and a file: %+v", st)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -168,6 +168,10 @@ func TestRotate(t *testing.T) {
 	if _, err := s.Rotate(newToken, newToken); !errors.Is(err, ErrSameToken) {
 		t.Errorf("the same token: %v", err)
 	}
+	// The logged token is refused for the rest of the run, not only while in use.
+	if _, err := s.Rotate(newToken, gen); !errors.Is(err, ErrLoggedToken) || s.Check(gen) || !s.Check(newToken) {
+		t.Errorf("the logged token after a rotation: %v", err)
+	}
 	if _, err := s.Rotate(newToken, "short"); !errors.Is(err, ErrWeakToken) {
 		t.Errorf("a weak token: %v", err)
 	}
@@ -263,6 +267,18 @@ func TestOpenBadFile(t *testing.T) {
 		if !strings.Contains(buf.String(), "level=WARN") {
 			t.Errorf("%s with env: no warning: %s", name, buf)
 		}
+		// The UI says why the file can't be used, without what it holds.
+		st, _ := json.Marshal(s.Status())
+		var shown struct {
+			StoredError string `json:"stored_error"`
+		}
+		json.Unmarshal(st, &shown)
+		if shown.StoredError == "" || strings.Contains(shown.StoredError, f["key"].(string)) || strings.Contains(shown.StoredError, f["digest"].(string)) {
+			t.Errorf("%s with env: status %s", name, st)
+		}
+		if err := s.DeleteStored(); err != nil || s.Status().StoredIgnored || s.Status().StoredError != "" {
+			t.Errorf("%s with env: delete: %v, %+v", name, err, s.Status())
+		}
 	}
 }
 
@@ -308,5 +324,25 @@ func TestDeleteStored(t *testing.T) {
 	}
 	if err := Static(envToken).DeleteStored(); !errors.Is(err, ErrNoStored) {
 		t.Errorf("Static: %v", err)
+	}
+
+	// A file removed by hand leaves nothing to delete, but a stale status
+	// to clear.
+	path = stored(t)
+	s, _, err = Open(path, envToken, discard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteStored(); err != nil {
+		t.Errorf("after a manual removal: %v", err)
+	}
+	if st := s.Status(); st.StoredIgnored || st.StoredSetAt != nil {
+		t.Errorf("after a manual removal: status = %+v", st)
+	}
+	if err := s.DeleteStored(); !errors.Is(err, ErrNoStored) {
+		t.Errorf("after a manual removal, a second call: %v", err)
 	}
 }

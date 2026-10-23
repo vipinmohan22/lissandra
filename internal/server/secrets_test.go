@@ -159,7 +159,10 @@ func TestSaveFailureIsAServerError(t *testing.T) {
 	os.RemoveAll(dir)
 	os.WriteFile(dir, []byte("x"), 0o600) // the data dir is now a file: saving fails
 	code, body := e.do("PUT", "/api/settings", map[string]any{"public_url": "https://x.example"}, authHeaders(nil))
-	if code != 500 || strings.Contains(string(body), dir) {
+	if code != 500 || strings.Contains(string(body), dir) || !strings.Contains(string(body), `"code":"save_failed"`) {
 		t.Errorf("%d %s", code, body)
+	}
+	if code, c := e.apiErr(adminToken, "POST", "/api/onboarding/steps/sources", map[string]string{"outcome": "done"}); code != 500 || c != "save_failed" {
+		t.Errorf("a setup step: %d %s", code, c)
 	}
 }

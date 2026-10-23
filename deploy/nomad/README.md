@@ -68,7 +68,11 @@ nomad var put nomad/jobs/laya \
   LAYA_ENGINE_API_KEY='…'              # only if you run the Laya engine (step 6)
 ```
 
-In the UI, refer to these as `${env:SMTP_PASSWORD}`, `${env:SLACK_WEBHOOK_URL}`, and so on. Laya's config file then holds only the references. `${file:/path}` reads a file instead, for example one another `template` block renders; see [Secrets](../../README.md#notifiers-and-routes) in the main README for when each is read. When you change the variable, Nomad re-renders the template and restarts the task, so rotating the admin token is a single `nomad var put`. Note that `put` replaces *all* items in the variable (add `-force` to overwrite an existing one), so include every key each time.
+In the UI, refer to these as `${env:SMTP_PASSWORD}`, `${env:SLACK_WEBHOOK_URL}`, and so on. Laya's config file then holds only the references. `${file:/path}` reads a file instead, for example one another `template` block renders; see [Secrets](../../README.md#notifiers-and-routes) in the main README for when each is read. When you change the variable, Nomad re-renders the template and restarts the task. Note that `put` replaces *all* items in the variable (add `-force` to overwrite an existing one), so include every key each time. To change one key and keep the others, for example to rotate the admin token, merge it into the existing items:
+
+```sh
+nomad var get -out=json nomad/jobs/laya | nomad var put -in=json - LAYA_ADMIN_TOKEN="$(openssl rand -hex 24)"
+```
 
 To read your admin token back:
 

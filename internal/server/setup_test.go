@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -166,6 +167,9 @@ func TestAdminTokenChange(t *testing.T) {
 	}
 	if code, _ := e.as(permanentToken, "GET", "/api/info", nil, nil); code != 200 {
 		t.Errorf("the new token doesn't work: %d", code)
+	}
+	if code, c := e.apiErr(permanentToken, "PUT", "/api/auth/token", map[string]string{"token": e.token}); code != 400 || c != "logged_token" {
+		t.Errorf("the logged token after a change: %d %s", code, c)
 	}
 
 	// Nothing shows the token or what the file keeps of it.
@@ -471,6 +475,32 @@ func TestOnboardingDefaultsForEverything(t *testing.T) {
 	}
 }
 
+// The body of POST /api/onboarding/defaults is optional, chunked too, where
+// its length is unknown.
+func TestOnboardingDefaultsChunkedBody(t *testing.T) {
+	e := newEnv(t)
+	for _, tc := range []struct {
+		body string
+		want int
+	}{{`{"x":1}`, 400}, {" ", 400}, {`{"dry_run":true}`, 200}, {"", 200}} {
+		req, _ := http.NewRequest("POST", e.srv.URL+"/api/onboarding/defaults", strings.NewReader(tc.body))
+		req.ContentLength, req.TransferEncoding = -1, []string{"chunked"}
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Errorf("%q: %d %s", tc.body, resp.StatusCode, data)
+		}
+	}
+	if st := e.cfg.Get().Onboarding.Steps; st["sources"].Outcome != "defaults" {
+		t.Errorf("an empty body didn't apply the defaults: %+v", st)
+	}
+}
+
 func TestInfoCarriesSetupSummary(t *testing.T) {
 	e := withAuth(t, "")
 	var info struct {
@@ -494,6 +524,18 @@ func TestInfoCarriesSetupSummary(t *testing.T) {
 	e.as(e.token, "GET", "/api/info", nil, &info)
 	if o := info.Onboarding; o.Resume != "access" || o.Remaining != 3 {
 		t.Errorf("after a step: %+v", o)
+	}
+
+	// A permanent token leaves access out of resume, as out of remaining.
+	env := newEnv(t)
+	for _, step := range []string{"sources", "classify", "channels"} {
+		if code, _ := env.step(step, map[string]string{"outcome": "done"}); code != 200 {
+			t.Fatalf("%s: %d", step, code)
+		}
+	}
+	env.admin("GET", "/api/info", nil, &info)
+	if o := info.Onboarding; o.Resume != pageReview || o.Remaining != 0 || o.Total != 4 {
+		t.Errorf("with LAYA_ADMIN_TOKEN: %+v", o)
 	}
 }
 

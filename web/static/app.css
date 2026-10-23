@@ -193,7 +193,7 @@ a.kpi-link:hover .card { border-color: var(--accent); }
 .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 14px; font-size: 13px; }
 .kv > div { min-width: 0; overflow-wrap: anywhere; }
 .kv > div:nth-child(odd) { color: var(--muted); }
-.callout { border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--panel-2); padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+.callout { border: 1px solid var(--border); border-left: 3px solid var(--accent); background: var(--panel-2); padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; overflow-wrap: anywhere; }
 .callout.bad { border-left-color: var(--danger); }
 .callout.warn { border-left-color: var(--warn); }
 .callout.ok { border-left-color: var(--ok); }
@@ -287,6 +287,7 @@ div.tile { display: flex; border: 1px solid var(--border); border-radius: var(--
 @keyframes pulse { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .listening::before { animation: none; } }
 .arrived { overflow-wrap: anywhere; }
+.wrap-anywhere { overflow-wrap: anywhere; }
 .try-it { margin-top: 12px; }
 .try-it summary { cursor: pointer; font-weight: 600; }
 .try-it > .card { position: static; box-shadow: none; border: none; padding: 12px 0 0; }

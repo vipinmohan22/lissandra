@@ -85,7 +85,7 @@ func (s *Server) update(w http.ResponseWriter, fn func(c *config.Config) error) 
 		writeError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, config.ErrSave):
 		s.log.Error("saving the configuration failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "saving the configuration failed; see Laya's log")
+		writeErrorCode(w, http.StatusInternalServerError, "save_failed", "saving the configuration failed; see Laya's log")
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}

@@ -36,12 +36,13 @@ const (
 
 // Errors from Rotate and DeleteStored.
 var (
-	ErrEnvManaged = errors.New("the admin token is set by LAYA_ADMIN_TOKEN; change it there")
-	ErrWeakToken  = errors.New("the admin token is too weak") // wrapped with the rule that failed
-	ErrSameToken  = errors.New("the new admin token is the one in use")
-	ErrStale      = errors.New("the admin token was changed by another request")
-	ErrNotEnv     = errors.New("a stored token can only be deleted while LAYA_ADMIN_TOKEN is set")
-	ErrNoStored   = errors.New("no admin token is stored in Laya")
+	ErrEnvManaged  = errors.New("the admin token is set by LAYA_ADMIN_TOKEN; change it there")
+	ErrWeakToken   = errors.New("the admin token is too weak") // wrapped with the rule that failed
+	ErrSameToken   = errors.New("the new admin token is the one in use")
+	ErrLoggedToken = errors.New("that is the token Laya printed in its log; use a new one")
+	ErrStale       = errors.New("the admin token was changed by another request")
+	ErrNotEnv      = errors.New("a stored token can only be deleted while LAYA_ADMIN_TOKEN is set")
+	ErrNoStored    = errors.New("no admin token is stored in Laya")
 )
 
 // Status describes the active admin token, never the token itself.
@@ -52,7 +53,8 @@ type Status struct {
 	SetAt         *time.Time `json:"set_at"`         // stored only
 	StoredIgnored bool       `json:"stored_ignored"` // env set and a file exists
 	StoredSetAt   *time.Time `json:"stored_set_at"`
-	File          string     `json:"file"` // path of admin-token.json ("" for Static)
+	StoredError   string     `json:"stored_error,omitempty"` // why the ignored file can't be used
+	File          string     `json:"file"`                   // path of admin-token.json ("" for Static)
 }
 
 const (
@@ -107,6 +109,7 @@ type state struct {
 	setAt         *time.Time
 	storedIgnored bool
 	storedSetAt   *time.Time
+	storedError   string
 }
 
 // Store is the active admin credential. Check is lock-free; Rotate and
@@ -116,6 +119,7 @@ type Store struct {
 	maxLen int
 	mu     sync.Mutex
 	cur    atomic.Pointer[state]
+	logged *verifier // the generated token, refused by Rotate for the whole run
 }
 
 // Open picks the credential: LAYA_ADMIN_TOKEN (envToken) if set, else the
@@ -131,7 +135,7 @@ func Open(path, envToken string, log *slog.Logger) (s *Store, generated string, 
 		switch {
 		case err != nil:
 			log.Warn("admin-token.json can't be used; it is ignored while LAYA_ADMIN_TOKEN is set", "file", path, "err", err)
-			st.storedIgnored = true
+			st.storedIgnored, st.storedError = true, err.Error()
 		case stored != nil:
 			st.storedIgnored, st.storedSetAt = true, &stored.SetAt
 		}
@@ -154,7 +158,9 @@ func Open(path, envToken string, log *slog.Logger) (s *Store, generated string, 
 		return s, "", nil
 	}
 	generated = model.NewToken()
-	s.cur.Store(&state{v: newVerifier(generated), source: SourceGenerated})
+	v := newVerifier(generated)
+	s.logged = &v
+	s.cur.Store(&state{v: v, source: SourceGenerated})
 	return s, generated, nil
 }
 
@@ -211,6 +217,7 @@ func (s *Store) Status() Status {
 		SetAt:         copyTime(st.setAt),
 		StoredIgnored: st.storedIgnored,
 		StoredSetAt:   copyTime(st.storedSetAt),
+		StoredError:   st.storedError,
 		File:          s.path,
 	}
 }
@@ -244,6 +251,10 @@ func (s *Store) Rotate(presented, next string) (Status, error) {
 	if cur.v.match(next) {
 		return Status{}, ErrSameToken
 	}
+	// Anyone who reads the log has the generated token, after a rotation too.
+	if s.logged != nil && s.logged.match(next) {
+		return Status{}, ErrLoggedToken
+	}
 	v := newVerifier(next)
 	now := time.Now().UTC().Truncate(time.Second)
 	data, err := json.MarshalIndent(file{Version: fileVersion, Scheme: scheme, Key: v.key, Digest: v.digest[:], SetAt: now}, "", "  ")
@@ -270,12 +281,15 @@ func (s *Store) DeleteStored() error {
 		return ErrNoStored
 	}
 	if err := os.Remove(s.path); errors.Is(err, os.ErrNotExist) {
-		return ErrNoStored
+		// Removed by hand after startup: the status is stale, so clear it.
+		if !cur.storedIgnored {
+			return ErrNoStored
+		}
 	} else if err != nil {
 		return err
 	}
 	next := *cur
-	next.storedIgnored, next.storedSetAt = false, nil
+	next.storedIgnored, next.storedSetAt, next.storedError = false, nil, ""
 	s.cur.Store(&next)
 	return nil
 }
