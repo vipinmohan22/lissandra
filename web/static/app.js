@@ -1210,7 +1210,8 @@ function editSource(src, { onSaved } = {}) {
       enabled: f.enabled.input.checked,
       type: f.type.value,
       engine_model: f.engineModel.value(),
-      alert_group_ids: f.groups.filter((x) => x.box.input.checked).map((x) => x.id),
+      // Without the groups loaded there are no boxes: keep what is assigned.
+      alert_group_ids: cache.groups ? f.groups.filter((x) => x.box.input.checked).map((x) => x.id) : src.alert_group_ids,
       parse: {
         format: f.format.value, records_path: f.recordsPath.value.trim(), message_field: f.messageField.value.trim(),
         level_field: f.levelField.value.trim(), timestamp_field: f.tsField.value.trim(),
@@ -1826,20 +1827,22 @@ pages.groups = async (main) => {
   }
 };
 
-function notifierName(id) {
-  return (cache.notifiers.find((n) => n.id === id) || {}).name;
-}
-
 // groupItem shows an alert group in a list, with the given action buttons.
 function groupItem(g, ...actions) {
-  const channels = g.notifier_ids.map(notifierName).filter(Boolean);
+  const chans = g.notifier_ids.map((id) => cache.notifiers.find((n) => n.id === id)).filter(Boolean);
   const when = [`severity ≥ ${g.min_severity}`];
   if (g.categories && g.categories.length) when.push(`category in [${g.categories.join(', ')}]`);
   const throttle = THROTTLES.find((t) => t[0] === g.throttle_seconds);
+  // Only enabled channels deliver, and members are emailed only through an
+  // enabled email notifier: anything else is shown as a warning.
   const reach = [];
-  if (channels.length) reach.push(channels.join(', '));
+  if (chans.some((n) => n.enabled)) reach.push(chans.filter((n) => n.enabled).map((n) => n.name).join(', '));
+  for (const n of chans.filter((x) => !x.enabled)) reach.push(h('span', { class: 'badge warn' }, `${n.name} is off`));
   if ((g.emails || []).length) {
-    reach.push(g.email_notifier_id ? `${plural(g.emails.length, 'member')} by email (${notifierName(g.email_notifier_id)})` : h('span', { class: 'badge warn' }, `${plural(g.emails.length, 'member')}, no email notifier`));
+    const via = cache.notifiers.find((n) => n.id === g.email_notifier_id);
+    const members = plural(g.emails.length, 'member');
+    if (via && via.enabled) reach.push(`${members} by email (${via.name})`);
+    else reach.push(h('span', { class: 'badge warn' }, !g.email_notifier_id ? `${members}, no email notifier` : `${members}, email notifier ${via ? 'off' : 'missing'}`));
   }
   return h('div', { class: `list-item ${g.enabled ? '' : 'disabled-item'}` },
     h('div', { class: 'main' },
@@ -1847,7 +1850,7 @@ function groupItem(g, ...actions) {
       g.description ? h('div', { class: 'meta' }, g.description) : null,
       h('div', { class: 'meta' }, 'Sources: ', g.source_ids.length ? g.source_ids.map(sourceName).join(', ') : h('span', { class: 'badge warn' }, 'none: the group gets no alerts')),
       h('div', { class: 'meta' }, 'When ', when.join(' and ')),
-      h('div', { class: 'meta' }, '→ ', reach.length ? reach.map((x, i) => [i ? ' · ' : '', x]) : h('span', { class: 'badge warn' }, 'no channels or members'),
+      h('div', { class: 'meta' }, '→ ', reach.some((x) => typeof x === 'string') ? reach.map((x, i) => [i ? ' · ' : '', x]) : [h('span', { class: 'badge warn' }, 'no channels or members that get alerts'), reach.map((x) => [' · ', x])],
         ' · ', g.throttle_seconds ? `throttle ${throttle ? throttle[1] : `${g.throttle_seconds}s`}` : 'no throttling')),
     h('div', { class: 'actions' }, actions));
 }
@@ -3742,7 +3745,7 @@ async function setupAccess(ctx) {
 
 async function setupSources(ctx) {
   const { drafts } = ctx;
-  const [dry] = await Promise.all([markStep('sources', 'defaults', { dryRun: true }), load('sources', 'info', 'settings', 'routes')]);
+  const [dry] = await Promise.all([markStep('sources', 'defaults', { dryRun: true }), load('sources', 'info', 'settings', 'routes', 'groups')]);
   const saved = () => cache.settings.public_url || '';
   const urlErr = h('div');
   const url = h('input', {
@@ -4099,12 +4102,15 @@ function notifyCard(n, routes, draft, onRouteSaved) {
     }),
   }));
   const on = checkbox(own ? 'Enabled' : 'Create a route for this channel', v('on'), (x) => { draft.on = x; });
-  const sev = select(SEVERITIES, v('sev'), { onchange: (e) => { draft.sev = e.target.value; } });
+  // Editing the route keeps its on/off as shown, so a repaint (after an
+  // alert group is added, say) can't switch it off underneath the edit.
+  const edit = (k, x) => { if (!('on' in draft)) draft.on = v('on'); draft[k] = x; };
+  const sev = select(SEVERITIES, v('sev'), { onchange: (e) => edit('sev', e.target.value) });
   const catBoxes = [...new Set([...categories(), 'uncategorized', ...v('cats')])].map((c) => ({
-    c, box: checkbox(c, v('cats').includes(c), () => { draft.cats = catBoxes.filter((x) => x.box.input.checked).map((x) => x.c); }),
+    c, box: checkbox(c, v('cats').includes(c), () => edit('cats', catBoxes.filter((x) => x.box.input.checked).map((x) => x.c))),
   }));
   const throttleOpts = THROTTLES.some((t) => t[0] === v('throttle')) ? THROTTLES : [...THROTTLES, [v('throttle'), `${v('throttle')} seconds`]];
-  const throttle = select(throttleOpts.map(([x, l]) => [String(x), l]), String(v('throttle')), { onchange: (e) => { draft.throttle = Number(e.target.value); } });
+  const throttle = select(throttleOpts.map(([x, l]) => [String(x), l]), String(v('throttle')), { onchange: (e) => edit('throttle', Number(e.target.value)) });
   const extra = own ? [
     own.source_ids && own.source_ids.length ? `sources ${own.source_ids.map(sourceName).join(', ')}` : '',
     own.tags && own.tags.length ? `tags ${own.tags.join(', ')}` : '',
@@ -4212,7 +4218,13 @@ async function setupNotify(ctx) {
     clear(teamsBox);
     if (!cache.groups.length) teamsBox.append(h('div', { class: 'empty' }, 'No alert groups yet.'));
     for (const g of cache.groups) {
-      teamsBox.append(groupItem(g, h('button', { type: 'button', class: 'small', onclick: () => editGroup(g, { onSaved: refresh }) }, 'Edit')));
+      // The list is rebuilt on save: focus goes back to the new Edit button.
+      const onSaved = async () => {
+        await refresh();
+        const b = teamsBox.querySelector(`[data-group-id="${CSS.escape(g.id)}"]`);
+        if (b) b.focus();
+      };
+      teamsBox.append(groupItem(g, h('button', { type: 'button', class: 'small', 'data-group-id': g.id, onclick: () => editGroup(g, { onSaved }) }, 'Edit')));
     }
   };
   const refresh = async () => {
