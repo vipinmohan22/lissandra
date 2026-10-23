@@ -6,6 +6,14 @@ import "github.com/vipinmohan22/layalogs/internal/model"
 // picks another one.
 const DefaultEngineModel = "english"
 
+// DefaultLearnMinConfidence is the confidence an engine answer needs to
+// become a learned rule unless the operator sets another.
+const DefaultLearnMinConfidence = 0.8
+
+// MaxReviewRules bounds the learned rules awaiting review: past it, Laya
+// learns nothing new until some are approved or rejected.
+const MaxReviewRules = 500
+
 // DefaultCategories seeds the category list shown in the UI. They have no
 // descriptions: the engine tells plain names apart better than descriptions
 // it can only read about 16 tokens of. Add a description only to settle a
@@ -131,21 +139,24 @@ func Defaults() *Config {
 				Category:   "deployment",
 			},
 		},
-		Notifiers: []Notifier{},
-		Routes:    []Route{},
+		Notifiers:   []Notifier{},
+		Routes:      []Route{},
+		AlertGroups: []AlertGroup{},
 		Settings: Settings{
 			Categories: append([]Category{}, DefaultCategories...),
 			Engine: EngineSettings{
-				Enabled:           true, // idle until a URL is set (LAYA_ENGINE_URL in the Nomad job)
-				URL:               "${env:LAYA_ENGINE_URL}",
-				APIKey:            "${env:LAYA_ENGINE_API_KEY}",
-				Model:             DefaultEngineModel,
-				OnlyUncategorized: true,
-				MinSeverity:       model.SeverityWarning,
-				MinConfidence:     0.6,
-				SetSeverity:       false, // doubles engine time; rarely changes a keyword guess
-				MaxInFlight:       1,
-				TimeoutSeconds:    30,
+				Enabled:            true, // idle until a URL is set (LAYA_ENGINE_URL in the Nomad job)
+				URL:                "${env:LAYA_ENGINE_URL}",
+				APIKey:             "${env:LAYA_ENGINE_API_KEY}",
+				Model:              DefaultEngineModel,
+				OnlyUncategorized:  true,
+				MinSeverity:        model.SeverityWarning,
+				MinConfidence:      0.6,
+				SetSeverity:        false, // doubles engine time; rarely changes a keyword guess
+				MaxInFlight:        1,
+				TimeoutSeconds:     30,
+				LearnRules:         true,
+				LearnMinConfidence: DefaultLearnMinConfidence,
 			},
 		},
 	}

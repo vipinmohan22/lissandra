@@ -84,7 +84,10 @@ type Event struct {
 	MatchedRules    []string      `json:"matched_rules,omitempty"`
 	Classifier      string        `json:"classifier"`
 	Engine          *EngineResult `json:"engine,omitempty"` // the Laya engine's answer, when it was asked
-	Fingerprint     string        `json:"fingerprint"`
+	// NoEngine is set by a matching rule that keeps the event from the
+	// Laya engine.
+	NoEngine    bool   `json:"-"`
+	Fingerprint string `json:"fingerprint"`
 
 	// Set on events read from an uploaded log file rather than a live source.
 	ImportID   string `json:"import_id,omitempty"`

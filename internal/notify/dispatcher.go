@@ -3,8 +3,10 @@ package notify
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -180,11 +182,59 @@ func (d *Dispatcher) Configure(c *config.Config) {
 		}
 		channels[n.ID] = &channel{n: n, sender: s, err: err}
 	}
-	routes := compileRoutes(c.Routes)
+	groupRoutes, groupChannels := alertGroups(c)
+	for id, n := range groupChannels {
+		s, err := Build(n)
+		if err != nil {
+			d.log.Warn("alert group email misconfigured", "notifier", n.Name, "err", err)
+		}
+		channels[id] = &channel{n: n, sender: s, err: err}
+	}
+	routes := compileRoutes(append(slices.Clone(c.Routes), groupRoutes...))
 	d.mu.Lock()
 	d.channels, d.routes, d.publicURL = channels, routes, c.Settings.PublicURL
 	d.mu.Unlock()
 }
+
+// alertGroups returns a route for every enabled alert group with sources
+// assigned: the group's filters, limited to those sources, to its channels
+// and, when it has members, to an email channel addressed to them (an
+// email notifier's settings with the members as recipients, keyed by
+// groupEmailID).
+func alertGroups(c *config.Config) ([]config.Route, map[string]config.Notifier) {
+	sources := map[string][]string{}
+	for _, src := range c.Sources {
+		for _, gid := range src.AlertGroupIDs {
+			sources[gid] = append(sources[gid], src.ID)
+		}
+	}
+	var routes []config.Route
+	channels := map[string]config.Notifier{}
+	for _, g := range c.AlertGroups {
+		// A group without sources must not match every source.
+		if !g.Enabled || len(sources[g.ID]) == 0 {
+			continue
+		}
+		rt := config.Route{
+			ID: "group:" + g.ID, Name: "Alert group: " + g.Name, Enabled: true,
+			MinSeverity: g.MinSeverity, Categories: g.Categories, SourceIDs: sources[g.ID],
+			NotifierIDs: slices.Clone(g.NotifierIDs), ThrottleSeconds: g.ThrottleSeconds,
+		}
+		if i := slices.IndexFunc(c.Notifiers, func(n config.Notifier) bool { return n.ID == g.EmailNotifierID }); i >= 0 && len(g.Emails) > 0 && c.Notifiers[i].Enabled {
+			n := c.Notifiers[i]
+			n.ID, n.Name = groupEmailID(g.ID), n.Name+" → "+g.Name
+			n.Settings = maps.Clone(n.Settings)
+			n.Settings["to"] = strings.Join(g.Emails, ", ")
+			channels[n.ID] = n
+			rt.NotifierIDs = append(rt.NotifierIDs, n.ID)
+		}
+		routes = append(routes, rt)
+	}
+	return routes, channels
+}
+
+// groupEmailID is the channel that emails an alert group's members.
+func groupEmailID(groupID string) string { return "group:" + groupID + ":email" }
 
 // compileRoutes prepares the enabled routes for matching.
 func compileRoutes(in []config.Route) []route {
@@ -225,11 +275,12 @@ func (r *route) matches(ev *model.Event) bool {
 	return true
 }
 
-// RouteMatcher returns a function reporting which enabled routes in c an
-// event would be sent through. It builds no notifiers and sends nothing,
-// so offline tools can use it safely.
+// RouteMatcher returns a function reporting which enabled routes and alert
+// groups in c an event would be sent through. It builds no notifiers and
+// sends nothing, so offline tools can use it safely.
 func RouteMatcher(c *config.Config) func(ev *model.Event) []string {
-	routes := compileRoutes(c.Routes)
+	groupRoutes, _ := alertGroups(c)
+	routes := compileRoutes(append(slices.Clone(c.Routes), groupRoutes...))
 	return func(ev *model.Event) []string {
 		var out []string
 		for i := range routes {

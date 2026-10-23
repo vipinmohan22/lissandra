@@ -28,9 +28,12 @@ type Source struct {
 	Tags        []string `json:"tags,omitempty"`
 	// EngineModel overrides the Laya engine checkpoint for this source's
 	// events (empty: Settings.Engine.Model).
-	EngineModel string    `json:"engine_model,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	EngineModel string `json:"engine_model,omitempty"`
+	// AlertGroupIDs are the alert groups notified about this source's
+	// events, besides any alert routes that match them.
+	AlertGroupIDs []string  `json:"alert_group_ids,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // Pull describes how to fetch logs from a remote HTTP endpoint.
@@ -122,6 +125,13 @@ const (
 	SeverityAtLeast = "at_least" // only raise it
 )
 
+// Rule review statuses.
+const (
+	RuleActive   = ""         // an ordinary rule
+	RuleReview   = "review"   // learned from the Laya engine: it applies, awaiting review
+	RuleRejected = "rejected" // a learned rule the operator rejected
+)
+
 // Rule is a classification rule. Rules are evaluated in order; every
 // matching rule contributes tags and severity changes, the first matching
 // rule with a category decides the category, and Stop ends evaluation.
@@ -139,6 +149,27 @@ type Rule struct {
 	Tags         []string       `json:"tags,omitempty"`
 	Drop         bool           `json:"drop,omitempty"`
 	Stop         bool           `json:"stop,omitempty"`
+	// SkipEngine keeps matching events from the Laya engine, so they keep
+	// the rules' result. A rejected learned rule sets it, so the engine's
+	// answer isn't applied (or learned) again.
+	SkipEngine bool `json:"skip_engine,omitempty"`
+	// Status is RuleReview for a rule learned from the Laya engine until
+	// it is approved (RuleActive) or rejected (RuleRejected).
+	Status  string   `json:"status,omitempty"`
+	Learned *Learned `json:"learned,omitempty"`
+}
+
+// Learned records the engine answer a learned rule was made from.
+type Learned struct {
+	At                 time.Time      `json:"at"`
+	Model              string         `json:"model"`
+	Category           string         `json:"category"`
+	Confidence         float64        `json:"confidence"`
+	Severity           model.Severity `json:"severity,omitempty"`
+	SeverityConfidence float64        `json:"severity_confidence,omitempty"`
+	SourceID           string         `json:"source_id"`
+	EventID            string         `json:"event_id,omitempty"`
+	Example            string         `json:"example"` // the message it was learned from, clipped
 }
 
 // Condition tests one field of an event. Field is one of message, level,
@@ -173,6 +204,27 @@ type Route struct {
 	Tags            []string       `json:"tags,omitempty"`
 	MessageRegex    string         `json:"message_regex,omitempty"`
 	NotifierIDs     []string       `json:"notifier_ids"`
+	ThrottleSeconds int            `json:"throttle_seconds"`
+}
+
+// AlertGroup is a team, or a set of people, alerted about the events of
+// the sources assigned to it (Source.AlertGroupIDs): through its channels
+// (notifiers), and by email to its members through an email notifier's
+// server.
+type AlertGroup struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	// NotifierIDs are the group's channels: Slack, Teams, PagerDuty, …
+	NotifierIDs []string `json:"notifier_ids"`
+	// Emails are the group's members. They are emailed through
+	// EmailNotifierID, an email notifier whose server settings are used
+	// with these recipients instead of its own.
+	Emails          []string       `json:"emails,omitempty"`
+	EmailNotifierID string         `json:"email_notifier_id,omitempty"`
+	MinSeverity     model.Severity `json:"min_severity"`
+	Categories      []string       `json:"categories,omitempty"` // empty: any category
 	ThrottleSeconds int            `json:"throttle_seconds"`
 }
 
@@ -232,6 +284,13 @@ type EngineSettings struct {
 	// queueing included; then it goes on with the rules' result, so a slow
 	// engine never holds alerts back longer than this.
 	TimeoutSeconds int `json:"timeout_seconds"`
+	// LearnRules turns an applied category answer for a live event into a
+	// rule for its message pattern and source, marked for review, so the
+	// pattern is classified by the rules from then on.
+	LearnRules bool `json:"learn_rules"`
+	// LearnMinConfidence is the confidence an answer needs to become a
+	// rule; it is never below MinConfidence.
+	LearnMinConfidence float64 `json:"learn_min_confidence"`
 }
 
 // Settings holds global options.
@@ -243,12 +302,60 @@ type Settings struct {
 	Engine     EngineSettings `json:"engine"`
 }
 
+// Setup wizard statuses.
+const (
+	OnboardingPending   = "pending"   // offered: the UI opens it, the dashboard shows a banner
+	OnboardingDeferred  = "deferred"  // "Finish later": the banner only
+	OnboardingCompleted = "completed" // finished
+	OnboardingDismissed = "dismissed" // skipped as a whole
+)
+
+// Setup wizard steps, in the order the wizard shows them.
+const (
+	StepAccess   = "access"
+	StepSources  = "sources"
+	StepClassify = "classify"
+	StepChannels = "channels"
+	StepNotify   = "notify"
+)
+
+// OnboardingSteps lists the setup steps in order.
+var OnboardingSteps = []string{StepAccess, StepSources, StepClassify, StepChannels, StepNotify}
+
+// Outcomes of a setup step.
+const (
+	OutcomeDone     = "done"     // saved what the user chose
+	OutcomeDefaults = "defaults" // applied Laya's defaults
+	OutcomeSkipped  = "skipped"  // changed nothing; the step still counts as left to do
+)
+
+// Onboarding is the setup wizard's progress on this instance. nil (a config
+// written before the wizard, or a seed that doesn't ask for it) means it is
+// never offered on its own; Settings can still start it. Export leaves it
+// out and import keeps the current one.
+type Onboarding struct {
+	Status     string                    `json:"status"`
+	Steps      map[string]OnboardingStep `json:"steps,omitempty"`
+	StartedAt  *time.Time                `json:"started_at,omitempty"`
+	FinishedAt *time.Time                `json:"finished_at,omitempty"`
+}
+
+// OnboardingStep records how a setup step ended.
+type OnboardingStep struct {
+	Outcome string    `json:"outcome"`
+	At      time.Time `json:"at"`
+}
+
 // Config is the complete persisted configuration.
 type Config struct {
-	Version   int        `json:"version"`
-	Sources   []Source   `json:"sources"`
-	Rules     []Rule     `json:"rules"`
-	Notifiers []Notifier `json:"notifiers"`
-	Routes    []Route    `json:"routes"`
-	Settings  Settings   `json:"settings"`
+	Version     int          `json:"version"`
+	Sources     []Source     `json:"sources"`
+	Rules       []Rule       `json:"rules"`
+	Notifiers   []Notifier   `json:"notifiers"`
+	Routes      []Route      `json:"routes"`
+	AlertGroups []AlertGroup `json:"alert_groups"`
+	Settings    Settings     `json:"settings"`
+	// Onboarding is top level, not in Settings, so a stale Settings page
+	// saving its copy can't roll setup progress back.
+	Onboarding *Onboarding `json:"onboarding,omitempty"`
 }

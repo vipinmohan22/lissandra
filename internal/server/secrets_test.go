@@ -153,13 +153,16 @@ func TestSaveFailureIsAServerError(t *testing.T) {
 	p := pipeline.New(100, store, d, a)
 	pm := poller.NewManager(ctx, log, p.SubmitWait)
 	reg := importer.NewRegistry(importer.RegistryConfig{Keep: 3, Limits: importer.Limits{Events: 1000, Bytes: 8 << 20}})
-	srv := httptest.NewServer(New(Options{Version: "test", AdminToken: adminToken, UI: fstest.MapFS{}}, log, cfg, store, p, d, a, pm, reg).Handler())
+	srv := httptest.NewServer(New(Options{Version: "test", AdminToken: adminToken, UI: fstest.MapFS{}}, log, cfg, store, p, d, a, nil, pm, reg).Handler())
 	defer srv.Close()
 	e := &env{t: t, srv: srv, cfg: cfg, imports: reg}
 	os.RemoveAll(dir)
 	os.WriteFile(dir, []byte("x"), 0o600) // the data dir is now a file: saving fails
 	code, body := e.do("PUT", "/api/settings", map[string]any{"public_url": "https://x.example"}, authHeaders(nil))
-	if code != 500 || strings.Contains(string(body), dir) {
+	if code != 500 || strings.Contains(string(body), dir) || !strings.Contains(string(body), `"code":"save_failed"`) {
 		t.Errorf("%d %s", code, body)
+	}
+	if code, c := e.apiErr(adminToken, "POST", "/api/onboarding/steps/sources", map[string]string{"outcome": "done"}); code != 500 || c != "save_failed" {
+		t.Errorf("a setup step: %d %s", code, c)
 	}
 }

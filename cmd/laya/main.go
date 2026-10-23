@@ -17,11 +17,12 @@ import (
 	"time"
 	_ "time/tzdata" // time zones for log file analysis, even on minimal images
 
+	"github.com/vipinmohan22/layalogs/internal/auth"
 	"github.com/vipinmohan22/layalogs/internal/config"
 	"github.com/vipinmohan22/layalogs/internal/engine"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/importer"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/layalogs/internal/learn"
 	"github.com/vipinmohan22/layalogs/internal/notify"
 	"github.com/vipinmohan22/layalogs/internal/pipeline"
 	"github.com/vipinmohan22/layalogs/internal/poller"
@@ -73,18 +74,42 @@ func newLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, opts))
 }
 
+// openAdmin picks the admin token (LAYA_ADMIN_TOKEN, else one set in Laya,
+// else one generated for this run) and logs where it comes from. Only a
+// generated token is logged, for the operator to sign in with.
+func openAdmin(log *slog.Logger, path, envToken string) (*auth.Store, error) {
+	admin, generated, err := auth.Open(path, envToken, log)
+	if err != nil {
+		return nil, err
+	}
+	switch st := admin.Status(); st.Source {
+	case auth.SourceGenerated:
+		log.Warn("LAYA_ADMIN_TOKEN is not set and no admin token was set in Laya; generated a token for this run only. "+
+			"Sign in with it to run the setup wizard, which sets a permanent one, or set LAYA_ADMIN_TOKEN.", "admin_token", generated)
+	case auth.SourceStored:
+		log.Info("admin token: set in Laya", "set_at", *st.SetAt, "file", path)
+	default:
+		if len(envToken) < 16 {
+			log.Warn("LAYA_ADMIN_TOKEN is shorter than 16 characters; use a long random value")
+		}
+		if st.StoredIgnored {
+			log.Warn("a token set in Laya is ignored while LAYA_ADMIN_TOKEN is set; delete it in Settings → Access", "file", path)
+		} else {
+			log.Info("admin token: set by LAYA_ADMIN_TOKEN")
+		}
+	}
+	return admin, nil
+}
+
 func run() error {
 	log := newLogger()
 	listen := env("LAYA_LISTEN", ":8080")
 	dataDir := env("LAYA_DATA_DIR", "./data")
 	publicURL := env("LAYA_PUBLIC_URL", "")
 
-	token := env("LAYA_ADMIN_TOKEN", "")
-	if token == "" {
-		token = model.NewToken()
-		log.Warn("LAYA_ADMIN_TOKEN is not set; generated a token for this run only. Set LAYA_ADMIN_TOKEN (e.g. from a Nomad Variable) to keep it stable.", "admin_token", token)
-	} else if len(token) < 16 {
-		log.Warn("LAYA_ADMIN_TOKEN is shorter than 16 characters; use a long random value")
+	admin, err := openAdmin(log, filepath.Join(dataDir, "admin-token.json"), env("LAYA_ADMIN_TOKEN", ""))
+	if err != nil {
+		return err
 	}
 
 	cfg, err := config.Open(filepath.Join(dataDir, "config.json"), env("LAYA_CONFIG_SEED", ""))
@@ -102,6 +127,8 @@ func run() error {
 	dispatcher := notify.NewDispatcher(log)
 	laya := engine.New(log)
 	pipe := pipeline.New(envInt("LAYA_QUEUE_SIZE", 10000), store, dispatcher, laya)
+	learner := learn.New(log, cfg.Update)
+	pipe.Learn = learner.Observe
 	pollers := poller.NewManager(ctx, log, pipe.SubmitWait)
 
 	cfg.Subscribe(func(c *config.Config) {
@@ -111,6 +138,7 @@ func run() error {
 		pipe.Configure(c)
 		dispatcher.Configure(c)
 		laya.Configure(c)
+		learner.Configure(c)
 		pollers.Configure(c)
 		log.Info("configuration applied", "version", c.Version, "sources", len(c.Sources), "rules", len(c.Rules), "notifiers", len(c.Notifiers), "routes", len(c.Routes))
 	})
@@ -121,6 +149,9 @@ func run() error {
 	defer stopRun()
 	done := make(chan struct{}, 2)
 	go func() { dispatcher.Run(runCtx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
+	// Learned rules are written until the signal: rules proposed during the
+	// drain are learned again when the engine next answers their pattern.
+	go learner.Run(ctx)
 	go func() {
 		pipe.Run(runCtx, envInt("LAYA_WORKERS", 4), envInt("LAYA_ENGINE_WORKERS", 16))
 		done <- struct{}{}
@@ -135,12 +166,13 @@ func run() error {
 
 	srv := server.New(server.Options{
 		Version:        version,
-		AdminToken:     token,
+		Auth:           admin,
+		OnNomad:        os.Getenv("NOMAD_ALLOC_ID") != "",
 		PublicURL:      publicURL,
 		MaxIngestBytes: int64(envInt("LAYA_MAX_INGEST_BYTES", 10<<20)),
 		MaxImportBytes: int64(envInt("LAYA_MAX_IMPORT_BYTES", 100<<20)),
 		UI:             web.FS(),
-	}, log, cfg, store, pipe, dispatcher, laya, pollers, imports)
+	}, log, cfg, store, pipe, dispatcher, laya, learner, pollers, imports)
 
 	httpSrv := &http.Server{
 		Addr:              listen,

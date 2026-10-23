@@ -52,6 +52,12 @@ function fmtTime(iso) {
   return isNaN(d) ? '—' : d.toLocaleString();
 }
 
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return isNaN(d) ? '—' : d.toLocaleDateString();
+}
+
 function ago(iso) {
   if (!iso) return 'never';
   const sec = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
@@ -100,8 +106,42 @@ function codeBox(text) {
     h('pre', null, text));
 }
 
+// field labels a form control. A single input, select or textarea is tied
+// to its label and help; composite controls are passed as they are.
+let fieldSeq = 0;
 function field(label, input, help) {
-  return h('div', { class: 'field' }, h('label', null, label), input, help ? h('div', { class: 'help' }, help) : null);
+  const lab = h('label', null, label);
+  const hint = help ? h('div', { class: 'help' }, help) : null;
+  if (input instanceof HTMLInputElement || input instanceof HTMLSelectElement || input instanceof HTMLTextAreaElement) {
+    if (!input.id) input.id = `f-${++fieldSeq}`;
+    lab.htmlFor = input.id;
+    if (hint) {
+      hint.id = `${input.id}-help`;
+      addDescribedBy(input, hint.id);
+    }
+  }
+  return h('div', { class: 'field' }, lab, input, hint);
+}
+
+function addDescribedBy(el, id) {
+  const ids = (el.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+  if (!ids.includes(id)) el.setAttribute('aria-describedby', [...ids, id].join(' '));
+}
+
+// fieldError shows text next to input (in box), marks the input invalid
+// and focuses it.
+function fieldError(box, input, text) {
+  const id = `${input.id || `f-${++fieldSeq}`}-err`;
+  clear(box).append(h('div', { class: 'callout bad', role: 'alert', id }, text));
+  input.setAttribute('aria-invalid', 'true');
+  addDescribedBy(input, id);
+  input.focus();
+}
+
+function randomHex(bytes) {
+  const b = new Uint8Array(bytes);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 }
 
 function checkbox(label, checked, onchange) {
@@ -146,28 +186,59 @@ function textToHeaders(text) {
 
 // ---------- API ----------
 
-let token = sessionStorage.getItem('laya.token') || '';
+// The admin token is kept for the tab. Storage can be blocked (private
+// windows, site data policies): the session then lasts while the page is
+// open.
+let token = '';
+try { token = sessionStorage.getItem('laya.token') || ''; } catch { /* storage blocked */ }
+
+function setToken(t) {
+  token = t;
+  try {
+    if (t) sessionStorage.setItem('laya.token', t); else sessionStorage.removeItem('laya.token');
+  } catch { /* storage blocked: kept in memory only */ }
+}
+
+// tokenChange is set while this tab changes the admin token. It always
+// resolves: a request refused meanwhile waits for it, then retries with
+// the new token, so this tab stays signed in.
+let tokenChange = null;
+
+const TOKEN_REJECTED = 'That token is no longer accepted. Laya may have restarted with a new generated token, or the admin token was changed. Sign in again.';
+const TOKEN_CHANGED_ELSEWHERE = 'The admin token was changed in another session. Sign in with the new one.';
 
 class AuthError extends Error {}
 // InputError is a form value that can't be saved: shown, but not logged.
 class InputError extends Error {}
+// SetupStopped is a setup request refused because setup was finished or
+// skipped in another session. It has been reported.
+class SetupStopped extends Error {}
 
-async function api(method, path, body) {
-  const opts = { method, headers: { Authorization: `Bearer ${token}` } };
+// unauthorized handles a 401 to a request sent with the token sent. A 401
+// comes from the token check before any handler runs, so retrying once with
+// a token this tab changed to meanwhile is safe even for a POST.
+async function unauthorized(sent, retried, retry) {
+  if (tokenChange) await tokenChange;
+  if (!retried && token !== sent) return retry();
+  showLogin(sent ? TOKEN_REJECTED : undefined);
+  throw new AuthError('Sign in required');
+}
+
+async function api(method, path, body, retried = false) {
+  const sent = token;
+  const opts = { method, headers: { Authorization: `Bearer ${sent}` } };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(path, opts);
-  if (res.status === 401) {
-    showLogin();
-    throw new AuthError('Sign in required');
-  }
+  if (res.status === 401) return unauthorized(sent, retried, () => api(method, path, body, true));
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const err = new Error((data && data.error) || `${res.status} ${res.statusText}`);
     err.status = res.status;
+    err.code = (data && data.code) || '';
     throw err;
   }
   return data;
@@ -178,12 +249,10 @@ const GET = (p) => api('GET', p);
 // download fetches path with the admin token and saves the response under
 // the name the server gives it (else fallbackName). With emptyNote, an
 // empty response is not saved: the note is shown instead.
-async function download(path, fallbackName, emptyNote) {
-  const res = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 401) {
-    showLogin();
-    throw new AuthError('Sign in required');
-  }
+async function download(path, fallbackName, emptyNote, retried = false) {
+  const sent = token;
+  const res = await fetch(path, { headers: { Authorization: `Bearer ${sent}` } });
+  if (res.status === 401) return unauthorized(sent, retried, () => download(path, fallbackName, emptyNote, true));
   if (!res.ok) {
     const data = await res.json().catch(() => null);
     throw new Error(`Download failed: ${(data && data.error) || `${res.status} ${res.statusText}`}`);
@@ -198,9 +267,19 @@ async function download(path, fallbackName, emptyNote) {
 }
 
 function reportError(err) {
-  if (err instanceof AuthError) return;
+  if (err instanceof AuthError || err instanceof SetupStopped) return;
   if (!(err instanceof InputError)) console.error(err);
   toast(err.message || String(err), 'error');
+}
+
+// busy runs fn with btn disabled, reporting a failure. Disabling the
+// button dropped its focus: it gets it back unless fn moved it.
+async function busy(btn, fn) {
+  btn.disabled = true;
+  try { await fn(); } catch (err) { reportError(err); } finally {
+    btn.disabled = false;
+    if (!document.activeElement || document.activeElement === document.body) btn.focus();
+  }
 }
 
 // Shared lookups, refreshed when a page needs them.
@@ -208,7 +287,8 @@ const cache = {};
 async function load(...keys) {
   const paths = {
     info: '/api/info', sources: '/api/sources', notifiers: '/api/notifiers', settings: '/api/settings',
-    types: '/api/notifier-types', rules: '/api/rules', routes: '/api/routes',
+    types: '/api/notifier-types', rules: '/api/rules', routes: '/api/routes', groups: '/api/alert-groups',
+    auth: '/api/auth', onboarding: '/api/onboarding',
   };
   await Promise.all(keys.map(async (k) => { cache[k] = await GET(paths[k]); }));
 }
@@ -216,6 +296,11 @@ async function load(...keys) {
 function sourceName(id) {
   const src = (cache.sources || []).find((x) => x.id === id);
   return src ? src.name : id;
+}
+
+function groupName(id) {
+  const g = (cache.groups || []).find((x) => x.id === id);
+  return g ? g.name : id;
 }
 
 // categoryList returns the configured categories as {name, description}, in
@@ -435,6 +520,7 @@ function openModal({ title, body, actions, wide, left, onClose }) {
     foot.append(h('button', {
       type: 'button',
       class: a.primary ? 'primary' : a.danger ? 'danger' : '',
+      'data-autofocus': a.autofocus,
       onclick: async (e) => {
         const btn = e.currentTarget;
         btn.disabled = true;
@@ -456,8 +542,12 @@ function openModal({ title, body, actions, wide, left, onClose }) {
   const back = h('div', { class: 'modal-back', onmousedown: (e) => { if (e.target === back) close(); } }, modal);
   document.body.append(back);
   document.addEventListener('keydown', onKey);
+  // Focus goes into the dialog: its first field, else the action marked
+  // autofocus (Cancel, in a confirmation), else Close — never an action
+  // Enter would run by accident — without scrolling a long one to its end.
   const first = modal.querySelector('input, select, textarea');
   if (first) first.focus();
+  else (modal.querySelector('.modal-foot button[data-autofocus]') || modal.querySelector('button.x')).focus({ preventScroll: true });
   return { close };
 }
 
@@ -468,7 +558,7 @@ function confirmDialog(message, label = 'Delete') {
       body: h('p', null, message),
       onClose: () => resolve(false),
       actions: [
-        { label: 'Cancel', onClick: (close) => close() },
+        { label: 'Cancel', autofocus: true, onClick: (close) => close() },
         { label, danger: true, onClick: (close) => { resolve(true); close(); } },
       ],
     });
@@ -477,17 +567,20 @@ function confirmDialog(message, label = 'Delete') {
 
 // ---------- Login ----------
 
-function showLogin() {
+// showLogin asks for the admin token. message says why a session ended.
+// The help needs no request: nothing is asked of Laya before sign-in.
+function showLogin(message) {
   if (document.querySelector('.login-back')) return;
-  const input = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'LAYA_ADMIN_TOKEN' });
-  const err = h('div', { class: 'help' });
+  const input = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Admin token' });
+  const err = h('div', { class: 'help', role: 'alert' });
   const form = h('form', {
     onsubmit: async (e) => {
       e.preventDefault();
-      token = input.value.trim();
+      const t = input.value.trim();
+      token = t;
       try {
         await GET('/api/info');
-        sessionStorage.setItem('laya.token', token);
+        setToken(t);
         back.remove();
         boot();
       } catch (ex) {
@@ -495,19 +588,39 @@ function showLogin() {
       }
     },
   },
-  h('div', { class: 'brand' }, h('img', { src: 'favicon.svg', alt: '', width: 26, height: 26 }), h('span', null, 'Laya')),
-  field('Admin token', input, 'Set with the LAYA_ADMIN_TOKEN environment variable (in Nomad, via the nomad/jobs/laya variable).'),
+  brandMark(),
+  message ? h('div', { class: 'callout warn', role: 'alert' }, message) : null,
+  field('Admin token', input, 'LAYA_ADMIN_TOKEN (in Nomad, from the nomad/jobs/laya variable), or the permanent token set in Laya.'),
   err,
-  h('button', { type: 'submit', class: 'primary' }, 'Sign in'));
+  h('button', { type: 'submit', class: 'primary' }, 'Sign in'),
+  h('div', { class: 'login-help small muted' },
+    h('p', null, 'First start without LAYA_ADMIN_TOKEN? Laya printed a token for this run in its log: look for ', h('code', null, 'admin_token'),
+      ' (for example ', h('code', null, 'docker logs <container> 2>&1 | grep admin_token'), ').'),
+    h('p', null, 'Lost the token? Set LAYA_ADMIN_TOKEN, or delete admin-token.json in Laya\'s data directory, then restart Laya.')));
   const back = h('div', { class: 'login-back' }, h('div', { class: 'card login' }, form));
   document.body.append(back);
   input.focus();
+}
+
+function brandMark() {
+  return h('div', { class: 'brand' }, h('img', { src: 'favicon.svg', alt: '', width: 26, height: 26 }), h('span', null, 'Laya'));
+}
+
+// signOut forgets the token, and the setup wizard's unsaved edits (they
+// can hold recipients and tokens).
+function signOut() {
+  setToken('');
+  clearSetupDrafts();
+  showLogin();
 }
 
 // ---------- Router ----------
 
 const pages = {};
 let cleanup = null;
+// routeGen numbers renders: one that finishes after the user moved on is
+// dropped, with its poll.
+let routeGen = 0;
 
 function parseHash() {
   const raw = location.hash.replace(/^#\/?/, '') || 'dashboard';
@@ -518,13 +631,26 @@ function parseHash() {
 
 async function route() {
   if (cleanup) { cleanup(); cleanup = null; }
+  const gen = ++routeGen;
   const { page, arg, params } = parseHash();
   const render = pages[page] || pages.dashboard;
+  // The setup wizard is a full page. The class stays on while it moves
+  // between its steps.
+  document.body.classList.toggle('setup-mode', page === 'setup');
+  document.title = 'Laya';
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
-  const main = clear(document.getElementById('main'));
+  // Each render gets its own element, so a slow page that finishes late
+  // never adds to the next one.
+  const view = h('div');
+  clear(document.getElementById('main')).append(view);
   try {
-    cleanup = (await render(main, arg, params)) || null;
+    const c = (await render(view, arg, params)) || null;
+    if (gen !== routeGen) { if (c) c(); return; }
+    cleanup = c;
   } catch (err) {
+    if (gen !== routeGen) return;
+    // A page that failed leaves the sidebar as the way out.
+    document.body.classList.remove('setup-mode');
     reportError(err);
   }
 }
@@ -543,9 +669,9 @@ function pageHead(title, subtitle, ...actions) {
 // ---------- Dashboard ----------
 
 pages.dashboard = async (main) => {
-  await load('sources', 'settings');
+  await load('sources', 'settings', 'info');
   const body = h('div');
-  append(main, pageHead('Dashboard', 'Last 60 minutes of classified log activity.'), body);
+  append(main, pageHead('Dashboard', 'Last 60 minutes of classified log activity.'), setupBanner(cache.info), tokenWarning(cache.info), body);
   const refresh = async () => {
     const st = await GET('/api/stats');
     renderDashboard(body, st);
@@ -553,6 +679,52 @@ pages.dashboard = async (main) => {
   await refresh();
   return every(10000, refresh);
 };
+
+// setupBanner offers to finish setup while it is pending or deferred.
+function setupBanner(info) {
+  const ob = info.onboarding;
+  if (!ob || (ob.status !== 'pending' && ob.status !== 'deferred')) return null;
+  const next = SETUP_PAGES.find((p) => p.id === ob.resume);
+  const left = ob.remaining ? `${plural(ob.remaining, 'step')} left` : 'every step is done';
+  const el = h('div', { class: 'callout banner' },
+    h('span', null, `Finish setting up Laya: ${left}.${next && next.id !== 'welcome' ? ` Next: ${next.label}.` : ''}`),
+    h('span', { class: 'row' },
+      h('button', {
+        type: 'button', class: 'small primary',
+        onclick: (e) => busy(e.currentTarget, async () => {
+          const st = await api('POST', '/api/onboarding/start');
+          location.hash = `#/setup/${st.resume}`;
+        }),
+      }, 'Resume setup'),
+      h('button', {
+        type: 'button', class: 'small',
+        onclick: (e) => busy(e.currentTarget, async () => {
+          if (!(await confirmDialog('Dismiss setup? Laya keeps its current configuration. You can run it again from Settings.', 'Dismiss'))) return;
+          await setupApi('POST', '/api/onboarding/dismiss');
+          el.remove();
+        }),
+      }, 'Dismiss')));
+  return el;
+}
+
+// tokenWarning flags a per-run admin token whatever the setup status, so
+// existing and seeded installs see it without being sent through setup.
+function tokenWarning(info) {
+  if (!info.auth || info.auth.source !== 'generated') return null;
+  try {
+    if (sessionStorage.getItem('laya.tokenWarnDismissed')) return null;
+  } catch { /* storage blocked */ }
+  const el = h('div', { class: 'callout warn banner' },
+    h('span', null, 'Your admin token changes every time Laya restarts. ', h('a', { href: '#/settings' }, 'Set a permanent token'), ', or set LAYA_ADMIN_TOKEN.'),
+    h('button', {
+      type: 'button', class: 'small', 'aria-label': 'Dismiss this warning for this tab',
+      onclick: () => {
+        try { sessionStorage.setItem('laya.tokenWarnDismissed', '1'); } catch { /* not remembered */ }
+        el.remove();
+      },
+    }, 'Dismiss'));
+  return el;
+}
 
 function renderDashboard(root, st) {
   const ev = st.events;
@@ -572,7 +744,9 @@ function renderDashboard(root, st) {
     kpi('Pull sources', pulls.length ? `${healthy}/${pulls.length}` : '—', pulls.length ? 'healthy' : 'none configured', healthy < pulls.length),
     st.engine && st.engine.enabled
       ? engineKpi(st.engine, st.pipeline, kpi)
-      : kpi('Pipeline queue', num(st.pipeline.queue_depth), `${num(st.pipeline.dropped)} dropped by rules`));
+      : kpi('Pipeline queue', num(st.pipeline.queue_depth), `${num(st.pipeline.dropped)} dropped by rules`),
+    st.learning && st.learning.enabled ? learningKpi(st.learning, kpi) : null);
+  updateReviewBadge(st.learning ? st.learning.review : 0);
 
   const timeline = h('div', { class: 'card' }, h('h2', null, 'Events per minute'), timelineChart(ev.timeline));
 
@@ -645,6 +819,16 @@ function engineKpi(e, pipeline, kpi) {
   for (const w of warnings) notes.push(`Warning: ${w}`);
   card.title = notes.join('\n');
   return card;
+}
+
+// learningKpi links to the learned rules awaiting review.
+function learningKpi(l, kpi) {
+  const full = l.review >= l.max_review;
+  const card = kpi('Rules to review', num(l.review),
+    full ? `limit reached: nothing new is learned until some are reviewed` : `${num(l.learned)} learned since start`, full);
+  const link = h('a', { class: 'kpi-link', href: '#/rules?status=review' }, card);
+  link.title = `Rules Laya learned from the engine's answers (at ${pct(l.min_confidence)} confidence or more). They classify and alert already; approve, edit or reject them.`;
+  return link;
 }
 
 // timelineChart draws stacked severity bars. labels sets the axis text:
@@ -841,7 +1025,7 @@ async function showEvent(target, opts = {}) {
 // ---------- Sources ----------
 
 pages.sources = async (main) => {
-  await load('sources', 'info', 'settings');
+  await load('sources', 'info', 'settings', 'groups');
   const list = h('div', { class: 'card flush' });
   append(main, pageHead('Sources', 'Where logs come from: Laya can receive them on an ingest endpoint (push) or poll an API (pull).',
     h('button', { type: 'button', class: 'primary', onclick: () => editSource(null) }, 'Add source')), list);
@@ -872,7 +1056,10 @@ function renderSources(root, sources, status) {
       h('div', { class: 'main' },
         h('div', { class: 'title' }, src.name, h('span', { class: 'badge' }, src.type), src.enabled ? null : h('span', { class: 'badge' }, 'disabled'),
           src.engine_model ? h('span', { class: 'badge', title: 'Laya engine checkpoint for this source' }, `checkpoint: ${src.engine_model}`) : null, tags(src.tags)),
-        meta),
+        meta,
+        h('div', { class: 'meta' }, 'Alerts → ', (src.alert_group_ids || []).length
+          ? src.alert_group_ids.map(groupName).join(', ')
+          : h('span', { class: 'muted' }, 'no alert group (alert routes only)'))),
       h('div', { class: 'actions' },
         src.type === 'push' ? h('button', { type: 'button', class: 'small', onclick: () => showIngest(src) }, 'Setup instructions') : null,
         h('button', { type: 'button', class: 'small', onclick: () => { location.hash = `#/files?source=${encodeURIComponent(src.id)}`; } }, 'Analyze a file'),
@@ -888,7 +1075,10 @@ function renderSources(root, sources, status) {
   }
 }
 
-function showIngest(src) {
+// showIngest shows how to send logs to a push source. onRotated, when
+// given, is called with the source after a token rotation instead of
+// re-rendering the page.
+function showIngest(src, { onRotated } = {}) {
   const base = cache.info.public_url;
   const url = `${base}/ingest/${src.id}`;
   let host = 'laya.service.consul', port = '8080', tls = 'Off';
@@ -913,7 +1103,10 @@ function showIngest(src) {
           onclick: async () => {
             if (!(await confirmDialog('Rotate the token? Existing senders will be rejected until they use the new one.', 'Rotate'))) return;
             const upd = await api('POST', `/api/sources/${src.id}/rotate-token`).catch(reportError);
-            if (upd) { modal.close(); showIngest(upd); route(); }
+            if (!upd) return;
+            modal.close();
+            showIngest(upd, { onRotated });
+            if (onRotated) onRotated(upd); else route();
           },
         }, 'Rotate'))),
     h('p', { class: 'small muted' }, 'The token can be sent as "Authorization: Bearer <token>", an "X-Laya-Token" header, or a ?token= query parameter.'),
@@ -926,7 +1119,9 @@ function showIngest(src) {
   modal = openModal({ title: `Send logs to "${src.name}"`, body, wide: true, actions: [{ label: 'Done', primary: true, onClick: (c) => c() }] });
 }
 
-function editSource(src) {
+// editSource opens the source editor. onSaved, when given, is called with
+// the saved source instead of re-rendering the page.
+function editSource(src, { onSaved } = {}) {
   const isNew = !src;
   src = src ? JSON.parse(JSON.stringify(src)) : { name: '', type: 'push', enabled: true, parse: { format: 'auto' }, tags: [] };
   const pull = src.pull || { url: '', method: 'GET', interval_seconds: 60, timeout_seconds: 15, auth: { type: 'none' }, dedupe: true, headers: {} };
@@ -958,6 +1153,7 @@ function editSource(src) {
     levelField: h('input', { value: src.parse.level_field || '', placeholder: 'auto: level, severity…' }),
     tsField: h('input', { value: src.parse.timestamp_field || '', placeholder: 'auto: @timestamp, timestamp, time…' }),
     engineModel: modelPicker(src.engine_model || '', ['', `Default (${engineSettings().model || 'english'})`]),
+    groups: (cache.groups || []).map((g) => ({ id: g.id, box: checkbox(g.name, (src.alert_group_ids || []).includes(g.id)) })),
   };
 
   const authFields = h('div');
@@ -998,6 +1194,11 @@ function editSource(src) {
       h('div', { class: 'fields-3' }, field('Message field', f.messageField), field('Level field', f.levelField), field('Timestamp field', f.tsField))),
     h('fieldset', null, h('legend', null, 'Classification'),
       field('Laya engine checkpoint', f.engineModel.el, 'The checkpoint that classifies this source\'s events when no rule does. Pick multilingual for logs that are not in English. The engine must have it loaded (its LAYA_MODELS): Laya never asks for one it hasn\'t, and those events keep the rules\' result.')),
+    h('fieldset', null, h('legend', null, 'Alerts'),
+      f.groups.length
+        ? h('div', { class: 'field' }, h('label', null, 'Alert groups'), h('div', { class: 'chips' }, f.groups.map((x) => x.box.el)),
+          h('div', { class: 'help' }, 'The teams and people alerted about this source\'s events, each with its own channels and minimum severity. Alert routes apply as well.'))
+        : h('p', { class: 'muted small' }, 'No alert groups yet. ', h('a', { href: '#/groups' }, 'Create one'), ' to send this source\'s alerts to a team\'s channels and people.')),
     preview);
 
   const collect = () => {
@@ -1009,6 +1210,7 @@ function editSource(src) {
       enabled: f.enabled.input.checked,
       type: f.type.value,
       engine_model: f.engineModel.value(),
+      alert_group_ids: f.groups.filter((x) => x.box.input.checked).map((x) => x.id),
       parse: {
         format: f.format.value, records_path: f.recordsPath.value.trim(), message_field: f.messageField.value.trim(),
         level_field: f.levelField.value.trim(), timestamp_field: f.tsField.value.trim(),
@@ -1051,8 +1253,8 @@ function editSource(src) {
       const saved = isNew ? await api('POST', '/api/sources', draft) : await api('PUT', `/api/sources/${src.id}`, draft);
       close();
       toast('Source saved');
-      await route();
-      if (isNew && saved.type === 'push') showIngest(saved);
+      if (onSaved) await onSaved(saved); else await route();
+      if (isNew && saved.type === 'push') showIngest(saved, { onRotated: onSaved });
     },
   });
   openModal({ title: isNew ? 'Add source' : `Edit source "${src.name}"`, body, actions, wide: true, left: h('button', { type: 'button', onclick: () => testBtn.onClick().catch(reportError) }, 'Test fetch') });
@@ -1075,89 +1277,188 @@ function previewTable(items) {
 
 // ---------- Rules ----------
 
-const FIELD_SUGGESTIONS = ['message', 'level', 'severity', 'source', 'category', 'tags', 'status', 'status_code', 'http.status_code', 'service', 'host', 'logger', 'kubernetes.namespace_name'];
+const FIELD_SUGGESTIONS = ['message', 'pattern', 'level', 'severity', 'source', 'category', 'tags', 'status', 'status_code', 'http.status_code', 'service', 'host', 'logger', 'kubernetes.namespace_name'];
 const OP_LABELS = {
   contains: 'contains', not_contains: 'does not contain', equals: 'equals', not_equals: 'does not equal',
   regex: 'matches regex', not_regex: 'does not match regex', starts_with: 'starts with', ends_with: 'ends with',
   exists: 'exists', missing: 'is missing', gt: '>', lt: '<',
 };
 
-pages.rules = async (main) => {
+// Rule tabs: learned rules await review until approved or rejected.
+const RULE_TABS = [['all', 'All'], ['active', 'Active'], ['review', 'Under review'], ['rejected', 'Rejected']];
+const ruleStatus = (r) => r.status || 'active';
+
+// updateReviewBadge shows how many learned rules await review next to
+// "Classification rules" in the sidebar.
+function updateReviewBadge(n) {
+  const el = document.getElementById('review-badge');
+  if (!el) return;
+  el.textContent = n > 0 ? String(n) : '';
+  el.hidden = !(n > 0);
+  el.title = n > 0 ? `${plural(n, 'learned rule')} awaiting review` : '';
+}
+
+pages.rules = async (main, _arg, params) => {
   await load('rules', 'sources', 'settings', 'routes');
+  let tab = RULE_TABS.some(([k]) => k === params.get('status')) ? params.get('status') : 'all';
+  const tabs = h('div', { class: 'row tabs' });
   const list = h('div', { class: 'card flush' });
   const tester = ruleTester();
   append(main,
-    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation.',
+    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation. When no rule categorizes an event, the Laya engine does, and Laya learns a rule from its answer for you to review.',
       h('button', { type: 'button', class: 'primary', onclick: () => editRule(null) }, 'Add rule')),
+    tabs,
     h('div', { class: 'grid cols-2 top' }, list, tester));
-  renderRules(list);
+  const render = () => {
+    const count = (k) => (k === 'all' ? cache.rules.length : cache.rules.filter((r) => ruleStatus(r) === k).length);
+    clear(tabs).append(RULE_TABS.map(([k, label]) => h('button', {
+      type: 'button', class: `small ${tab === k ? 'primary' : ''}`, 'aria-pressed': String(tab === k),
+      onclick: () => {
+        tab = k;
+        history.replaceState(null, '', k === 'all' ? '#/rules' : `#/rules?status=${k}`);
+        render();
+      },
+    }, label, h('span', { class: 'count' }, num(count(k))))));
+    updateReviewBadge(count('review'));
+    renderRules(list, tab, render);
+  };
+  render();
 };
 
-function renderRules(root) {
+// review approves or rejects learned rules, then re-renders.
+async function reviewRules(action, ids, rerender) {
+  try {
+    cache.rules = await api('POST', '/api/rules/review', { action, ids });
+    toast(`${plural(ids.length, 'rule')} ${action === 'approve' ? 'approved' : 'rejected'}`);
+  } catch (err) { reportError(err); }
+  rerender();
+}
+
+function learnedNote(r) {
+  const l = r.learned;
+  if (!l) return null;
+  const parts = [`Learned ${ago(l.at)} from the ${l.model || 'Laya'} checkpoint`, `${pct(l.confidence)} confident in ${l.category}`];
+  if (l.severity) parts.push(`severity ${l.severity} (${pct(l.severity_confidence)})`);
+  parts.push(`source ${sourceName(l.source_id)}`);
+  return h('div', { class: 'learned' },
+    h('div', { class: 'meta' }, parts.join(' · '), l.event_id ? [' · ', h('a', { href: `#/events/${l.event_id}` }, 'event')] : null),
+    l.example ? h('div', { class: 'meta mono example', title: l.example }, l.example) : null);
+}
+
+function renderRules(root, tab = 'all', rerender = () => renderRules(root, tab)) {
   clear(root);
-  const rules = cache.rules;
-  if (!rules.length) root.append(h('div', { class: 'empty' }, 'No rules. Events will only get heuristic severities.'));
-  const move = async (i, d) => {
+  const all = cache.rules;
+  const rules = tab === 'all' ? all : all.filter((r) => ruleStatus(r) === tab);
+  if (tab === 'review' && rules.length) {
     const ids = rules.map((r) => r.id);
+    root.append(h('div', { class: 'list-item review-bar' },
+      h('div', { class: 'main' }, h('div', { class: 'meta' },
+        'Laya learned these from the engine\'s answers. They already classify and alert. Approve the ones that are right, edit the ones that are close, and reject the rest: a rejected rule keeps the engine away from its pattern.')),
+      h('div', { class: 'actions' },
+        h('button', { type: 'button', class: 'small', onclick: () => reviewRules('approve', ids, rerender) }, `Approve all ${num(ids.length)}`),
+        h('button', {
+          type: 'button', class: 'small danger',
+          onclick: async () => {
+            if (!(await confirmDialog(`Reject all ${plural(ids.length, 'learned rule')}? Their patterns stay uncategorized and aren't sent to the engine again.`, 'Reject all'))) return;
+            reviewRules('reject', ids, rerender);
+          },
+        }, 'Reject all'))));
+  }
+  if (!rules.length) {
+    const empty = {
+      all: 'No rules. Events will only get heuristic severities.',
+      active: 'No active rules.',
+      review: engineSettings().learn_rules === false
+        ? 'Nothing to review. Rule learning is off (Settings → Laya engine).'
+        : 'Nothing to review. When the Laya engine categorizes a pattern no rule covers, the rule Laya learns from it appears here.',
+      rejected: 'No rejected rules.',
+    };
+    root.append(h('div', { class: 'empty' }, empty[tab]));
+  }
+  const move = async (i, d) => {
+    const ids = all.map((r) => r.id);
     [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
     cache.rules = await api('POST', '/api/rules/reorder', { ids }).catch(reportError) || cache.rules;
-    renderRules(root);
+    rerender();
   };
-  rules.forEach((r, i) => {
+  rules.forEach((r) => {
+    const i = all.indexOf(r);
     const conds = r.conditions.map((c) => `${c.field} ${OP_LABELS[c.op] || c.op}${['exists', 'missing'].includes(c.op) ? '' : ` "${c.value}"`}`).join(r.match === 'any' ? '  OR  ' : '  AND  ');
-    const acts = [];
-    if (r.drop) acts.push(h('span', { class: 'badge bad' }, 'drop'));
-    if (r.category) acts.push(h('span', { class: 'badge' }, `category: ${r.category}`));
-    if (r.severity) acts.push(h('span', { class: 'badge' }, `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}`));
-    if (r.stop) acts.push(h('span', { class: 'badge' }, 'stop'));
-    acts.push(tags(r.tags));
+    const acts = ruleActions(r);
+    const status = ruleStatus(r);
     const toggle = h('input', {
       type: 'checkbox', checked: r.enabled, title: 'Enabled',
       onchange: async (e) => {
         try {
           await api('PUT', `/api/rules/${r.id}`, { ...r, enabled: e.target.checked });
           r.enabled = e.target.checked;
-          renderRules(root);
+          rerender();
         } catch (err) { e.target.checked = !e.target.checked; reportError(err); }
       },
     });
     root.append(h('div', { class: `list-item ${r.enabled ? '' : 'disabled-item'}` },
-      h('div', { class: 'order-btns' },
+      // Order only makes sense against every rule.
+      tab === 'all' ? h('div', { class: 'order-btns' },
         h('button', { type: 'button', disabled: i === 0, 'aria-label': 'Move up', onclick: () => move(i, -1) }, '▲'),
-        h('button', { type: 'button', disabled: i === rules.length - 1, 'aria-label': 'Move down', onclick: () => move(i, 1) }, '▼')),
+        h('button', { type: 'button', disabled: i === all.length - 1, 'aria-label': 'Move down', onclick: () => move(i, 1) }, '▼')) : null,
       toggle,
       h('div', { class: 'main' },
-        h('div', { class: 'title' }, r.name, r.source_ids && r.source_ids.length ? h('span', { class: 'badge' }, `only: ${r.source_ids.map(sourceName).join(', ')}`) : null),
+        h('div', { class: 'title' }, r.name,
+          status === 'review' ? h('span', { class: 'badge warn' }, 'under review') : null,
+          status === 'rejected' ? h('span', { class: 'badge bad' }, 'rejected') : null,
+          status === 'active' && r.learned ? h('span', { class: 'badge', title: 'Learned from the Laya engine and approved' }, 'learned') : null,
+          r.source_ids && r.source_ids.length ? h('span', { class: 'badge' }, `only: ${r.source_ids.map(sourceName).join(', ')}`) : null),
         h('div', { class: 'meta mono' }, conds),
-        h('div', { class: 'meta' }, acts)),
+        h('div', { class: 'meta' }, acts),
+        status !== 'active' ? learnedNote(r) : null),
       h('div', { class: 'actions' },
+        status === 'review' ? h('button', { type: 'button', class: 'small primary', onclick: () => reviewRules('approve', [r.id], rerender) }, 'Approve') : null,
+        status === 'rejected' && r.learned ? h('button', { type: 'button', class: 'small', title: 'Apply what was learned again', onclick: () => reviewRules('approve', [r.id], rerender) }, 'Restore') : null,
         h('button', { type: 'button', class: 'small', onclick: () => editRule(r) }, 'Edit'),
+        status === 'review' ? h('button', { type: 'button', class: 'small danger', onclick: () => reviewRules('reject', [r.id], rerender) }, 'Reject') : null,
         h('button', {
           type: 'button', class: 'small danger',
           onclick: async () => {
-            if (!(await confirmDialog(`Delete rule "${r.name}"?`))) return;
+            const relearn = r.learned ? ' Laya may learn its pattern again when the engine next answers it; reject it instead to keep the engine away.' : '';
+            if (!(await confirmDialog(`Delete rule "${r.name}"?${relearn}`))) return;
             await api('DELETE', `/api/rules/${r.id}`).catch(reportError);
             await load('rules');
-            renderRules(root);
+            rerender();
           },
         }, 'Delete'))));
   });
 }
 
-function ruleTester() {
-  const sample = h('textarea', { rows: 7, placeholder: 'Paste log lines, a JSON object or NDJSON…' },
+// ruleActions are a rule's effects as badges.
+function ruleActions(r) {
+  const acts = [];
+  if (r.drop) acts.push(h('span', { class: 'badge bad' }, 'drop'));
+  if (r.category) acts.push(h('span', { class: 'badge' }, `category: ${r.category}`));
+  if (r.severity) acts.push(h('span', { class: 'badge' }, `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}`));
+  if (r.skip_engine) acts.push(h('span', { class: 'badge', title: 'Matching events are not sent to the Laya engine' }, 'no engine'));
+  if (r.stop) acts.push(h('span', { class: 'badge' }, 'stop'));
+  acts.push(tags(r.tags));
+  return acts;
+}
+
+// ruleTester runs a sample through the saved rules, or through rules()
+// when given (unsaved choices).
+function ruleTester({ rules } = {}) {
+  const sample = h('textarea', { rows: 7, placeholder: 'Paste log lines, a JSON object or NDJSON…', 'aria-label': 'Sample logs' },
     '2026-10-11T10:15:02Z ERROR payment failed: connection refused to db:5432\n{"level":"warn","msg":"login failed for user admin from 10.0.0.7"}\nGET /healthz 200 1ms');
-  const srcSel = select([['', 'Default parsing'], ...cache.sources.map((x) => [x.id, x.name])], '');
+  const srcSel = select([['', 'Default parsing'], ...cache.sources.map((x) => [x.id, x.name])], '', { 'aria-label': 'Parse as source' });
   const out = h('div');
   return h('div', { class: 'card sticky' },
     h('h2', null, 'Rule tester'),
-    h('p', { class: 'muted small' }, 'Runs the saved rules against a sample without storing anything or sending notifications.'),
+    h('p', { class: 'muted small' }, rules
+      ? 'Runs the rules as set on this page, saved or not, against a sample without storing anything or sending notifications.'
+      : 'Runs the saved rules against a sample without storing anything or sending notifications.'),
     sample,
     h('div', { class: 'row mt' }, srcSel, h('span', { class: 'spacer' }), h('button', {
       type: 'button', class: 'primary',
       onclick: async () => {
         try {
-          const r = await api('POST', '/api/rules/test', { sample: sample.value, source_id: srcSel.value });
+          const r = await api('POST', '/api/rules/test', { sample: sample.value, source_id: srcSel.value, ...(rules ? { rules: rules() } : {}) });
           clear(out).append(previewTable(r.events));
         } catch (err) { clear(out).append(h('div', { class: 'callout bad' }, err.message)); }
       },
@@ -1179,7 +1480,10 @@ function suggestContains(message) {
   return (parts[0] || first).slice(0, 80);
 }
 
-function editRule(rule, fromEvent) {
+// editRule opens the rule editor, for a new rule (from an event's message
+// when fromEvent is given) or an existing one. onSaved, when given, is
+// called with the saved rule instead of going to the Rules page.
+function editRule(rule, fromEvent, { onSaved } = {}) {
   const isNew = !rule;
   rule = rule ? JSON.parse(JSON.stringify(rule)) : {
     name: '', enabled: true, match: 'all', severity_mode: 'set', tags: [], source_ids: [],
@@ -1215,6 +1519,7 @@ function editRule(rule, fromEvent) {
   const tagsIn = h('input', { value: (rule.tags || []).join(', ') });
   const drop = checkbox('Drop matching events (don\'t store or alert)', rule.drop);
   const stop = checkbox('Stop evaluating later rules', rule.stop);
+  const skipEngine = checkbox('Don\'t ask the Laya engine about matching events', rule.skip_engine);
   const srcChecks = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (rule.source_ids || []).includes(x.id)) }));
 
   const testIn = h('textarea', { rows: 3, placeholder: 'Sample log to try this rule on…' }, fromEvent ? fromEvent.message : '');
@@ -1225,10 +1530,16 @@ function editRule(rule, fromEvent) {
     name: name.value.trim(), description: desc.value.trim(), enabled: enabled.input.checked, match: match.value,
     conditions: conds.map((c) => ({ field: c.field.trim(), op: c.op, value: c.value || '', case_sensitive: Boolean(c.case_sensitive) })),
     category: catIn.value.trim(), severity: sev.value, severity_mode: sevMode.value, tags: splitList(tagsIn.value),
-    drop: drop.input.checked, stop: stop.input.checked, source_ids: srcChecks.filter((x) => x.box.input.checked).map((x) => x.id),
+    drop: drop.input.checked, stop: stop.input.checked, skip_engine: skipEngine.input.checked,
+    source_ids: srcChecks.filter((x) => x.box.input.checked).map((x) => x.id),
   });
+  const status = ruleStatus(rule);
 
   const body = h('div', null, dl, catList,
+    rule.learned ? h('div', { class: `callout ${status === 'review' ? 'warn' : ''}` },
+      status === 'review' ? 'Learned from the Laya engine and awaiting review. It already classifies matching events. ' : null,
+      status === 'rejected' ? 'Rejected: it keeps the Laya engine away from its pattern. ' : null,
+      learnedNote(rule)) : null,
     h('div', { class: 'fields-2' }, field('Name', name), field('Description', desc)),
     enabled.el,
     h('fieldset', { class: 'mt' }, h('legend', null, 'When'),
@@ -1239,7 +1550,7 @@ function editRule(rule, fromEvent) {
     h('fieldset', null, h('legend', null, 'Then'),
       h('div', { class: 'fields-3' }, field('Category', catIn), field('Severity', sev), field('Severity mode', sevMode)),
       field('Add tags', tagsIn, 'Comma-separated.'),
-      h('div', { class: 'row' }, drop.el, stop.el)),
+      h('div', { class: 'row' }, drop.el, stop.el, skipEngine.el)),
     h('fieldset', null, h('legend', null, 'Try it'),
       testIn,
       h('div', { class: 'row mt' }, h('button', {
@@ -1253,21 +1564,23 @@ function editRule(rule, fromEvent) {
       }, 'Test this rule alone')),
       testOut));
 
+  // A rule under review can be saved as it is, or saved and approved.
+  const save = (approve) => async (close) => {
+    const r = collect();
+    if (approve) r.status = '';
+    const saved = isNew ? await api('POST', '/api/rules', r) : await api('PUT', `/api/rules/${rule.id}`, r);
+    close();
+    toast(approve ? 'Rule saved and approved' : 'Rule saved');
+    if (onSaved) await onSaved(saved);
+    else if (parseHash().page === 'rules') route();
+    else location.hash = '#/rules';
+  };
+  const cancel = { label: 'Cancel', onClick: (c) => c() };
   openModal({
     title: isNew ? 'Add rule' : `Edit rule "${rule.name}"`, body, wide: true,
-    actions: [
-      { label: 'Cancel', onClick: (c) => c() },
-      {
-        label: isNew ? 'Create rule' : 'Save', primary: true,
-        onClick: async (close) => {
-          const r = collect();
-          if (isNew) await api('POST', '/api/rules', r); else await api('PUT', `/api/rules/${rule.id}`, r);
-          close();
-          toast('Rule saved');
-          if (parseHash().page === 'rules') route(); else location.hash = '#/rules';
-        },
-      },
-    ],
+    actions: status === 'review'
+      ? [cancel, { label: 'Save', onClick: save(false) }, { label: 'Save & approve', primary: true, onClick: save(true) }]
+      : [cancel, { label: isNew ? 'Create rule' : 'Save', primary: true, onClick: save(false) }],
   });
 }
 
@@ -1296,7 +1609,7 @@ pages.notifiers = async (main) => {
         h('button', {
           type: 'button', class: 'small danger',
           onclick: async () => {
-            if (!(await confirmDialog(`Delete notifier "${n.name}"? It will be removed from all routes.`))) return;
+            if (!(await confirmDialog(`Delete notifier "${n.name}"? It will be removed from all routes and alert groups.`))) return;
             await api('DELETE', `/api/notifiers/${n.id}`).catch(reportError);
             route();
           },
@@ -1323,9 +1636,12 @@ async function sendTest(n, btn) {
   }
 }
 
-function editNotifier(n) {
+// editNotifier opens the notifier editor. type preselects the type of a
+// new one; onSaved, when given, is called with the saved notifier instead
+// of re-rendering the page.
+function editNotifier(n, { type, onSaved } = {}) {
   const isNew = !n;
-  n = n ? JSON.parse(JSON.stringify(n)) : { name: '', type: cache.types[0].type, enabled: true, settings: {} };
+  n = n ? JSON.parse(JSON.stringify(n)) : { name: '', type: type || cache.types[0].type, enabled: true, settings: {} };
   const name = h('input', { value: n.name, placeholder: 'e.g. #ops-alerts' });
   const typeSel = select(cache.types.map((t) => [t.type, t.label]), n.type, { disabled: !isNew });
   const enabled = checkbox('Enabled', n.enabled);
@@ -1378,10 +1694,10 @@ function editNotifier(n) {
         label: isNew ? 'Create notifier' : 'Save', primary: true,
         onClick: async (close) => {
           const data = collect();
-          if (isNew) await api('POST', '/api/notifiers', data); else await api('PUT', `/api/notifiers/${n.id}`, data);
+          const saved = isNew ? await api('POST', '/api/notifiers', data) : await api('PUT', `/api/notifiers/${n.id}`, data);
           close();
           toast('Notifier saved');
-          route();
+          if (onSaved) await onSaved(saved); else route();
         },
       },
     ],
@@ -1430,7 +1746,9 @@ pages.routes = async (main) => {
   }
 };
 
-function editRoute(r) {
+// editRoute opens the route editor. onSaved, when given, is called with
+// the saved route instead of re-rendering the page.
+function editRoute(r, { onSaved } = {}) {
   const isNew = !r;
   r = r ? JSON.parse(JSON.stringify(r)) : { name: '', enabled: true, min_severity: 'error', categories: [], source_ids: [], tags: [], notifier_ids: [], throttle_seconds: 900 };
   const name = h('input', { value: r.name, placeholder: 'e.g. Production errors to on-call' });
@@ -1471,10 +1789,127 @@ function editRoute(r) {
             notifier_ids: nts.filter((x) => x.box.input.checked).map((x) => x.id),
             tags: splitList(tagsIn.value), message_regex: regex.value.trim(), throttle_seconds: Number(throttle.value),
           };
-          if (isNew) await api('POST', '/api/routes', data); else await api('PUT', `/api/routes/${r.id}`, data);
+          const saved = isNew ? await api('POST', '/api/routes', data) : await api('PUT', `/api/routes/${r.id}`, data);
           close();
           toast('Route saved');
+          if (onSaved) await onSaved(saved); else route();
+        },
+      },
+    ],
+  });
+}
+
+// ---------- Alert groups ----------
+
+pages.groups = async (main) => {
+  await load('groups', 'notifiers', 'sources', 'settings');
+  const list = h('div', { class: 'card flush' });
+  append(main,
+    pageHead('Alert groups', 'Teams and people to alert about specific sources: each group has its channels, its members\' email addresses and a minimum severity. Assign sources here or in each source\'s settings.',
+      h('button', { type: 'button', class: 'primary', onclick: () => editGroup(null) }, 'Add alert group')),
+    list);
+  if (!cache.notifiers.length) {
+    main.insertBefore(h('div', { class: 'callout' }, 'Add a notifier first: a group is alerted through notifiers (a Slack or Teams channel, PagerDuty, or an email server for its members). ', h('a', { href: '#/notifiers' }, 'Go to notifiers →')), list);
+  }
+  if (!cache.groups.length) list.append(h('div', { class: 'empty' }, 'No alert groups yet.'));
+  for (const g of cache.groups) {
+    list.append(groupItem(g,
+      h('button', { type: 'button', class: 'small', onclick: () => editGroup(g) }, 'Edit'),
+      h('button', {
+        type: 'button', class: 'small danger',
+        onclick: async () => {
+          if (!(await confirmDialog(`Delete alert group "${g.name}"? Its sources stop alerting it.`))) return;
+          await api('DELETE', `/api/alert-groups/${g.id}`).catch(reportError);
           route();
+        },
+      }, 'Delete')));
+  }
+};
+
+function notifierName(id) {
+  return (cache.notifiers.find((n) => n.id === id) || {}).name;
+}
+
+// groupItem shows an alert group in a list, with the given action buttons.
+function groupItem(g, ...actions) {
+  const channels = g.notifier_ids.map(notifierName).filter(Boolean);
+  const when = [`severity ≥ ${g.min_severity}`];
+  if (g.categories && g.categories.length) when.push(`category in [${g.categories.join(', ')}]`);
+  const throttle = THROTTLES.find((t) => t[0] === g.throttle_seconds);
+  const reach = [];
+  if (channels.length) reach.push(channels.join(', '));
+  if ((g.emails || []).length) {
+    reach.push(g.email_notifier_id ? `${plural(g.emails.length, 'member')} by email (${notifierName(g.email_notifier_id)})` : h('span', { class: 'badge warn' }, `${plural(g.emails.length, 'member')}, no email notifier`));
+  }
+  return h('div', { class: `list-item ${g.enabled ? '' : 'disabled-item'}` },
+    h('div', { class: 'main' },
+      h('div', { class: 'title' }, g.name, g.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
+      g.description ? h('div', { class: 'meta' }, g.description) : null,
+      h('div', { class: 'meta' }, 'Sources: ', g.source_ids.length ? g.source_ids.map(sourceName).join(', ') : h('span', { class: 'badge warn' }, 'none: the group gets no alerts')),
+      h('div', { class: 'meta' }, 'When ', when.join(' and ')),
+      h('div', { class: 'meta' }, '→ ', reach.length ? reach.map((x, i) => [i ? ' · ' : '', x]) : h('span', { class: 'badge warn' }, 'no channels or members'),
+        ' · ', g.throttle_seconds ? `throttle ${throttle ? throttle[1] : `${g.throttle_seconds}s`}` : 'no throttling')),
+    h('div', { class: 'actions' }, actions));
+}
+
+// activeGroups are the alert groups that get alerts: enabled, with
+// sources assigned.
+function activeGroups() {
+  return (cache.groups || []).filter((g) => g.enabled && g.source_ids.length);
+}
+
+function editGroup(g, { onSaved } = {}) {
+  const isNew = !g;
+  g = g ? JSON.parse(JSON.stringify(g)) : { name: '', enabled: true, min_severity: 'error', categories: [], notifier_ids: [], emails: [], source_ids: [], throttle_seconds: 900 };
+  const name = h('input', { value: g.name, placeholder: 'e.g. Payments team' });
+  const desc = h('input', { value: g.description || '' });
+  const enabled = checkbox('Enabled', g.enabled);
+  const minSev = select(SEVERITIES, g.min_severity);
+  const cats = [...new Set([...categories(), 'uncategorized', ...(g.categories || [])])].map((c) => ({ c, box: checkbox(c, (g.categories || []).includes(c)) }));
+  const srcs = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, g.source_ids.includes(x.id)) }));
+  const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, g.notifier_ids.includes(x.id)) }));
+  const emailNotifiers = cache.notifiers.filter((n) => n.type === 'email');
+  const emails = h('textarea', { rows: 3, placeholder: 'alice@example.com\nbob@example.com' }, (g.emails || []).join('\n'));
+  const emailVia = select([['', emailNotifiers.length ? '— choose an email notifier —' : 'no email notifier configured'], ...emailNotifiers.map((n) => [n.id, n.name])], g.email_notifier_id || (emailNotifiers.length === 1 ? emailNotifiers[0].id : ''));
+  const throttleOpts = THROTTLES.some((t) => t[0] === g.throttle_seconds) ? THROTTLES : [...THROTTLES, [g.throttle_seconds, `${g.throttle_seconds} seconds`]];
+  const throttle = select(throttleOpts.map(([v, l]) => [String(v), l]), String(g.throttle_seconds));
+
+  const body = h('div', null,
+    h('div', { class: 'fields-2' }, field('Name', name), field('Description', desc)), enabled.el,
+    h('fieldset', { class: 'mt' }, h('legend', null, 'Sources'),
+      srcs.length ? h('div', { class: 'chips' }, srcs.map((x) => x.box.el)) : h('p', { class: 'muted' }, 'No sources yet.'),
+      h('div', { class: 'help mt-small' }, 'The group is alerted about events from these sources only.')),
+    h('fieldset', null, h('legend', null, 'Which events'),
+      field('Minimum severity', minSev),
+      h('div', { class: 'field' }, h('label', null, 'Categories'), h('div', { class: 'chips' }, cats.map((x) => x.box.el)), h('div', { class: 'help' }, 'None checked = any category.'))),
+    h('fieldset', null, h('legend', null, 'Alert'),
+      h('div', { class: 'field' }, h('label', null, 'Channels'),
+        nts.length ? h('div', { class: 'chips' }, nts.map((x) => x.box.el)) : h('p', { class: 'muted' }, 'No notifiers configured yet.'),
+        h('div', { class: 'help' }, 'Slack or Teams channels, PagerDuty, webhooks: the notifiers this group is reached on.')),
+      h('div', { class: 'fields-2' },
+        field('Members (email)', emails, 'One address per line (or comma-separated).'),
+        field('Email them through', emailVia, 'An email notifier: its SMTP server and From address are used, with these members as the recipients.')),
+      field('Throttle repeats', throttle, 'After alerting on a problem, suppress the same fingerprint on the same channel for this long.')));
+
+  openModal({
+    title: isNew ? 'Add alert group' : `Edit alert group "${g.name}"`, body, wide: true,
+    actions: [
+      { label: 'Cancel', onClick: (c) => c() },
+      {
+        label: isNew ? 'Create group' : 'Save', primary: true,
+        onClick: async (close) => {
+          const data = {
+            ...g, name: name.value.trim(), description: desc.value.trim(), enabled: enabled.input.checked, min_severity: minSev.value,
+            categories: cats.filter((x) => x.box.input.checked).map((x) => x.c),
+            source_ids: srcs.filter((x) => x.box.input.checked).map((x) => x.id),
+            notifier_ids: nts.filter((x) => x.box.input.checked).map((x) => x.id),
+            emails: emails.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean),
+            email_notifier_id: emailVia.value, throttle_seconds: Number(throttle.value),
+          };
+          const saved = isNew ? await api('POST', '/api/alert-groups', data) : await api('PUT', `/api/alert-groups/${g.id}`, data);
+          close();
+          toast('Alert group saved');
+          if (onSaved) await onSaved(saved); else route();
         },
       },
     ],
@@ -1514,7 +1949,7 @@ pages.deliveries = async (main) => {
 const MANY_CATEGORIES = 20;
 
 pages.settings = async (main) => {
-  await load('settings', 'info', 'sources');
+  await load('settings', 'info', 'sources', 'auth', 'onboarding');
   const st = cache.settings;
   const publicURL = h('input', { value: st.public_url || '', placeholder: cache.info.public_url });
   const cats = categoryEditor(categoryList());
@@ -1531,6 +1966,8 @@ pages.settings = async (main) => {
     setSev: checkbox('Let the engine judge severity when the record states no level (about doubles engine time; off by default)', false),
     inFlight: h('input', { type: 'number', min: 1, max: 16, step: 1 }),
     timeout: h('input', { type: 'number', min: 1, max: 300, step: 1 }),
+    learn: checkbox('Learn rules from the engine\'s answers (marked for review under Classification rules)', false),
+    learnConf: h('input', { type: 'number', min: 0, max: 1, step: 0.05 }),
   };
   const fill = (x) => {
     f.enabled.input.checked = Boolean(x.enabled);
@@ -1544,6 +1981,8 @@ pages.settings = async (main) => {
     f.setSev.input.checked = Boolean(x.set_severity);
     f.inFlight.value = x.max_in_flight || 1;
     f.timeout.value = x.timeout_seconds || 30;
+    f.learn.input.checked = x.learn_rules !== false;
+    f.learnConf.value = x.learn_min_confidence ?? 0.8;
   };
   fill(e);
 
@@ -1635,6 +2074,8 @@ pages.settings = async (main) => {
         set_severity: f.setSev.input.checked,
         max_in_flight: numberIn(f.inFlight, 'Requests per engine instance', 1, 16, true),
         timeout_seconds: numberIn(f.timeout, 'Timeout', 1, 300, true),
+        learn_rules: f.learn.input.checked,
+        learn_min_confidence: numberIn(f.learnConf, 'Confidence to learn a rule', 0, 1, false),
       };
     } catch (err) {
       if (err instanceof InputError) showErr(engineErr, err.message);
@@ -1655,11 +2096,6 @@ pages.settings = async (main) => {
     fill(cache.settings.engine || {});
     toast('Settings saved');
     renderStatus().catch(reportError);
-  };
-
-  const busy = async (btn, fn) => {
-    btn.disabled = true;
-    try { await fn(); } catch (err) { reportError(err); } finally { btn.disabled = false; }
   };
 
   const healthOut = h('div');
@@ -1703,14 +2139,8 @@ pages.settings = async (main) => {
   const importFile = h('input', { type: 'file', accept: 'application/json', hidden: true });
   importFile.addEventListener('change', async () => {
     const file = importFile.files[0];
-    if (!file) return;
-    try {
-      const cfg = JSON.parse(await file.text());
-      if (!(await confirmDialog('Replace the entire configuration with this file? Masked secrets are kept for matching IDs.', 'Import'))) return;
-      await api('POST', '/api/config/import', cfg);
-      toast('Configuration imported');
-      route();
-    } catch (err) { reportError(err); } finally { importFile.value = ''; }
+    importFile.value = '';
+    if (file) await importConfigFile(file);
   });
 
   const exportCfg = (secrets) => download(`/api/config/export${secrets ? '?include_secrets=true' : ''}`,
@@ -1722,7 +2152,8 @@ pages.settings = async (main) => {
     pageHead('Settings', null, saveBtn()),
     h('div', { class: 'grid cols-2 top' },
       h('div', null,
-        h('div', { class: 'card' },
+        accessCard(),
+        h('div', { class: 'card mt' },
           h('h2', null, 'General'),
           field('Public URL', publicURL, 'How users and senders reach Laya (e.g. https://laya.example.com). Used for ingest URLs and links in notifications. Defaults to LAYA_PUBLIC_URL or the address you are using now.'),
           generalErr,
@@ -1732,6 +2163,7 @@ pages.settings = async (main) => {
             h('button', { type: 'button', onclick: () => exportCfg(false).catch(reportError) }, 'Export'),
             h('button', { type: 'button', onclick: () => exportCfg(true).catch(reportError) }, 'Export with secrets'),
             h('button', { type: 'button', onclick: () => importFile.click() }, 'Import…'), importFile)),
+        setupGuideCard(),
         h('div', { class: 'card mt' },
           h('h2', null, 'Categories'),
           h('p', { class: 'small muted' }, 'Rules set categories by name, and alert routes and filters use them. For events no rule categorizes, the Laya engine picks one of these names, or "none of the above": those events stay "uncategorized", which is built in. The order is kept: it is the order the engine sees and editors show.'),
@@ -1751,6 +2183,10 @@ pages.settings = async (main) => {
         h('div', { class: 'fields-2 mt' },
           field('Requests per engine instance', f.inFlight, 'At once, to each laya-serve (1–16, default 1). laya-serve computes one answer at a time, so more only wait inside it. For more throughput, run more instances and list every URL.'),
           field('Timeout (seconds)', f.timeout, 'Events wait at most this long (up to 300) for the engine, queueing included, then go on with the rules\' result.')),
+        h('h3', null, 'Learning'),
+        h('div', { class: 'checks' }, f.learn.el),
+        h('div', { class: 'fields-2' },
+          field('Confidence to learn a rule', f.learnConf, 'An answer at least this confident (and at least the minimum confidence above) becomes a rule for its message pattern and source, under review. Default 0.8.')),
         engineErr,
         h('h3', null, 'Status'), statusBox,
         h('h3', null, 'Connection'),
@@ -1767,6 +2203,136 @@ pages.settings = async (main) => {
     h('div', { class: 'row mt' }, h('span', { class: 'spacer' }), saveBtn()));
   await renderStatus();
 };
+
+// importConfigFile replaces the configuration with a JSON file, once
+// confirmed, then runs after (by default, re-renders the page).
+async function importConfigFile(file, { after } = {}) {
+  try {
+    const cfg = JSON.parse(await file.text());
+    if (!(await confirmDialog('Replace the entire configuration with this file? Masked secrets are kept for matching IDs.', 'Import'))) return;
+    await api('POST', '/api/config/import', cfg);
+    // The setup wizard's drafts were edits of the configuration replaced.
+    // The access one is kept: an import keeps the admin token, and the user
+    // may have copied the token it holds.
+    clearSetupDrafts('access');
+    toast('Configuration imported');
+    if (after) await after(); else route();
+  } catch (err) { reportError(err); }
+}
+
+// accessCard says where the admin token comes from, and sets, rotates or
+// deletes the one stored in Laya.
+function accessCard() {
+  const card = h('div', { class: 'card' });
+  const render = () => {
+    const a = cache.auth;
+    const parts = [];
+    if (a.source === 'generated') {
+      parts.push(h('div', { class: 'callout warn' }, 'Laya generated this token at startup and printed it in its log. It changes every time Laya restarts.'),
+        h('button', { type: 'button', class: 'primary', onclick: () => tokenModal('Set a permanent admin token', render) }, 'Set a permanent token…'));
+    } else if (a.source === 'stored') {
+      parts.push(h('p', { class: 'wrap-anywhere' }, `Set in Laya on ${fmtDate(a.set_at)}. Stored as a keyed hash in ${a.file}.`),
+        h('button', { type: 'button', onclick: () => tokenModal('Rotate the admin token', render) }, 'Rotate token…'),
+        h('p', { class: 'small muted wrap-anywhere' }, `Lost it? Set LAYA_ADMIN_TOKEN, or delete ${a.file}, and restart Laya.`));
+    } else {
+      parts.push(h('p', null, 'Set by LAYA_ADMIN_TOKEN. Change it where it is set (on Nomad: the nomad/jobs/laya Variable), then restart.'));
+      if (a.stored_ignored) {
+        const note = a.stored_error
+          ? storedTokenUnusable(a)
+          : h('div', { class: 'callout warn' }, `A token set in Laya${storedOn(a)} is ignored while the variable is set. It becomes active again if the variable is removed.`);
+        parts.push(note, deleteStoredButton(render));
+      }
+    }
+    // A safety net for a token marked saved that wasn't: whoever has this
+    // tab open is an admin already.
+    const reveal = h('div');
+    const showBtn = h('button', {
+      type: 'button', class: 'link', 'aria-expanded': 'false',
+      onclick: () => {
+        const open = !reveal.firstChild;
+        showBtn.setAttribute('aria-expanded', String(open));
+        if (open) reveal.append(secretBox(() => token).el); else clear(reveal);
+      },
+    }, 'Show the token this tab is signed in with');
+    append(clear(card), h('h2', null, 'Access'), parts, h('div', { class: 'mt' }, showBtn, reveal));
+  };
+  render();
+  return card;
+}
+
+// storedOn is " on <date>" for the date an ignored stored token was set,
+// or "" when it isn't known.
+function storedOn(a) {
+  return a.stored_set_at ? ` on ${fmtDate(a.stored_set_at)}` : '';
+}
+
+// storedTokenUnusable says why admin-token.json can't be used, and what
+// that means while LAYA_ADMIN_TOKEN is set.
+function storedTokenUnusable(a) {
+  return h('div', { class: 'callout warn' }, `${a.file} can't be used (${a.stored_error}). While it is there, Laya won't start without LAYA_ADMIN_TOKEN: delete it.`);
+}
+
+// deleteStoredButton deletes admin-token.json, once confirmed, then runs
+// after.
+function deleteStoredButton(after) {
+  return h('button', {
+    type: 'button', class: 'danger',
+    onclick: (e) => busy(e.currentTarget, async () => {
+      if (!(await confirmDialog('Delete the admin token stored in Laya? LAYA_ADMIN_TOKEN stays the admin token.'))) return;
+      await api('DELETE', '/api/auth/token');
+      await load('auth');
+      toast('Stored admin token deleted');
+      after();
+    }),
+  }, 'Delete stored token');
+}
+
+// tokenModal sets a new admin token from tokenPanel, then runs after.
+function tokenModal(title, after) {
+  const panel = tokenPanel({ current: token, source: cache.auth.source });
+  openModal({
+    title, body: panel.el,
+    actions: [
+      { label: 'Cancel', onClick: (close) => close() },
+      {
+        label: 'Save token', primary: true,
+        onClick: async (close) => {
+          if (!(await commitToken(panel))) return false;
+          close();
+          after();
+        },
+      },
+    ],
+  });
+}
+
+// setupGuideCard starts the setup wizard again, or resumes it.
+function setupGuideCard() {
+  const ob = cache.onboarding;
+  const running = ob.status === 'pending' || ob.status === 'deferred';
+  let text, label;
+  if (running) {
+    text = `In progress: ${plural((ob.remaining || []).length, 'step')} left.`;
+    label = 'Resume setup';
+  } else if (ob.status === 'completed' || ob.status === 'dismissed') {
+    text = `${ob.status === 'completed' ? 'Finished' : 'Skipped'} on ${fmtDate(ob.finished_at)}.`;
+    label = 'Run setup again';
+  } else {
+    text = 'Not run: this configuration predates it, or came from a seed.';
+    label = 'Run setup';
+  }
+  return h('div', { class: 'card mt' },
+    h('h2', null, 'Setup guide'),
+    h('p', { class: 'small muted' }, 'Walks through access, sources, classification and alerts. Every step can be skipped.'),
+    h('p', null, text),
+    h('button', {
+      type: 'button',
+      onclick: (e) => busy(e.currentTarget, async () => {
+        cache.onboarding = await api('POST', '/api/onboarding/start');
+        location.hash = `#/setup/${running ? cache.onboarding.resume : 'welcome'}`;
+      }),
+    }, label));
+}
 
 const CATEGORY_DESC_HELP = 'Optional: only to tell similar names apart — plain names work best';
 
@@ -1844,6 +2410,8 @@ function categoryEditor(initial) {
     el: h('div', null, list, h('div', { class: 'row' }, addBtn),
       h('div', { class: 'small muted cat-help' }, h('strong', null, 'Descriptions. '), `${CATEGORY_DESC_HELP}.`), note, errBox),
     set: (next) => { cats = next.map((c) => ({ name: c.name, description: c.description || '' })); problem = null; render(); },
+    // rows returns the rows as they are, unchecked: a draft to restore.
+    rows: () => cats.map((c) => ({ name: c.name, description: c.description })),
     showError,
     // value returns the list to save, or throws (and marks the rows) on one
     // that can't be saved.
@@ -1931,9 +2499,7 @@ const uploadQueue = [];
 let uploading = false;
 
 function newImportId() {
-  const b = new Uint8Array(8);
-  crypto.getRandomValues(b);
-  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return randomHex(8);
 }
 
 function queueUpload(file, opts) {
@@ -1965,7 +2531,7 @@ function pumpUploads() {
     pumpUploads();
   };
   xhr.onload = () => {
-    if (xhr.status === 401) { showLogin(); done('error', 'Sign in required'); return; }
+    if (xhr.status === 401) { showLogin(TOKEN_REJECTED); done('error', 'Sign in required'); return; }
     let data = null;
     try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
     if (xhr.status >= 400 && (!data || !data.status)) done('error', (data && data.error) || `${xhr.status} ${xhr.statusText}`);
@@ -2411,6 +2977,1390 @@ async function loadEvents(card, rep, filter, setFilter) {
   await page().catch(reportError);
 }
 
+// ---------- Admin token ----------
+
+// checkTokenLocally applies the server's rules for a new admin token and
+// returns what is wrong, or ''. The rules catch mistakes: a token's
+// strength comes from it being random.
+function checkTokenLocally(t) {
+  if (!/^[\x21-\x7e]*$/.test(t)) return 'Use printable ASCII characters only: no spaces or accented letters.';
+  if (t.length < 32) return `Use at least 32 characters (this has ${t.length}).`;
+  if (t.length > 256) return 'Use at most 256 characters.';
+  const counts = {};
+  for (const ch of t) counts[ch] = (counts[ch] || 0) + 1;
+  if (Object.keys(counts).length < 10) return 'Use at least 10 different characters.';
+  if (Math.max(...Object.values(counts)) * 4 > t.length) return 'No single character may make up more than a quarter of the token.';
+  return '';
+}
+
+// newAdminToken returns 24 random bytes as hex, the format of the tokens
+// Laya generates. The rare draw that fails the variety rules is redrawn.
+function newAdminToken() {
+  let t;
+  do { t = randomHex(24); } while (checkTokenLocally(t));
+  return t;
+}
+
+// secretBox shows value() masked, with Show and Copy, and any extra
+// buttons. The box is a status region: the token is announced when shown.
+function secretBox(value, ...extra) {
+  let shown = false;
+  const box = h('code', { class: 'token-box', role: 'status' });
+  const toggle = h('button', { type: 'button', class: 'small', onclick: () => { shown = !shown; paint(); } });
+  const paint = () => {
+    box.textContent = shown ? value() : '•'.repeat(24);
+    toggle.textContent = shown ? 'Hide' : 'Show';
+  };
+  paint();
+  return {
+    el: h('div', { class: 'row token-row' }, box, toggle, h('button', { type: 'button', class: 'small', onclick: () => copyText(value()) }, 'Copy'), extra),
+    paint,
+  };
+}
+
+// tokenPanel picks a new admin token: one generated here (the default) or
+// the user's own. Nothing is sent until the user has seen the token and
+// ticked that they saved it. draft holds the panel's state, so the setup
+// wizard can move between pages without replacing a token the user may
+// have copied. current is the token in use, from source.
+function tokenPanel({ current = '', source = '', draft = {}, onChange } = {}) {
+  if (!draft.generated) draft.generated = newAdminToken();
+  if (!draft.mode) draft.mode = 'generate';
+  const changed = () => { if (onChange) onChange(); };
+  const errBox = h('div');
+  const own = secretInput(draft.own || '', { placeholder: 'at least 32 characters' });
+  const repeat = secretInput(draft.repeat || '', {});
+  const ack = checkbox('I have saved this token somewhere safe, such as a password manager.', draft.acked, (v) => { draft.acked = v; clearError(); changed(); });
+  ack.input.required = true;
+  const setAck = (v) => { draft.acked = v; ack.input.checked = v; };
+  const clearError = () => {
+    clear(errBox);
+    for (const el of [own, repeat, ack.input]) el.removeAttribute('aria-invalid');
+  };
+  // The tick is for the token as it is: an edit clears it.
+  for (const [input, key] of [[own, 'own'], [repeat, 'repeat']]) {
+    input.setAttribute('autocomplete', 'new-password');
+    input.addEventListener('input', () => { draft[key] = input.value; setAck(false); clearError(); changed(); });
+  }
+
+  const gen = secretBox(() => draft.generated,
+    h('button', { type: 'button', class: 'small', onclick: () => saveBlob(new Blob([`${draft.generated}\n`], { type: 'text/plain' }), 'laya-admin-token.txt') }, 'Download'),
+    h('button', { type: 'button', class: 'small', onclick: () => { draft.generated = newAdminToken(); setAck(false); clearError(); gen.paint(); changed(); } }, 'New token'));
+  const genPart = h('div', { class: 'token-part' }, gen.el,
+    h('div', { class: 'help' }, 'If you download it, delete the file once the token is in your password manager.'));
+  const ownPart = h('div', { class: 'token-part' },
+    field('Token', own, ['Use a random value from a password manager\'s generator, or ', h('code', null, 'openssl rand -hex 24'),
+      '. Don\'t use a password you use elsewhere: Laya stores a fast keyed hash meant for random tokens.']),
+    field('Repeat it', repeat));
+  const group = `token-mode-${++fieldSeq}`;
+  const radios = {};
+  const radio = (value, label) => {
+    radios[value] = h('input', {
+      type: 'radio', name: group, value, checked: draft.mode === value,
+      onchange: () => { draft.mode = value; setAck(false); clearError(); toggle(); changed(); },
+    });
+    return h('label', { class: 'check' }, radios[value], label);
+  };
+  const toggle = () => {
+    genPart.hidden = draft.mode !== 'generate';
+    ownPart.hidden = draft.mode !== 'own';
+  };
+  const el = h('div', { class: 'token-panel' },
+    h('fieldset', null, h('legend', null, 'New admin token'),
+      radio('generate', 'Generate a token (recommended)'), genPart,
+      radio('own', 'Use my own token'), ownPart),
+    ack.el,
+    h('p', { class: 'small muted' }, `This tab stays signed in. Other tabs and API scripts will need the new token, and ${source === 'generated' ? 'the token in Laya\'s log' : 'the current one'} stops working.`),
+    errBox);
+  toggle();
+
+  // showError shows text in the panel, on input when given.
+  const showError = (text, input) => {
+    if (input) fieldError(errBox, input, text);
+    else clear(errBox).append(h('div', { class: 'callout bad', role: 'alert' }, text));
+  };
+  const fail = (text, input) => {
+    showError(text, input);
+    throw new InputError(text);
+  };
+  return {
+    el,
+    mode: () => draft.mode,
+    generated: () => draft.generated,
+    // value returns the token to save, or shows what is wrong and throws.
+    value: () => {
+      clearError();
+      if (draft.mode === 'generate') return draft.generated;
+      const t = own.value;
+      if (!t) fail('Enter your token, or choose "Generate a token".', own);
+      if (t === current) {
+        fail(source === 'generated' ? 'That\'s the token you signed in with, which is in Laya\'s log. Use a new one.' : 'That\'s the token in use now. Use a new one.', own);
+      }
+      const problem = checkTokenLocally(t);
+      if (problem) fail(problem, own);
+      if (repeat.value !== t) fail('The two tokens don\'t match.', repeat);
+      return t;
+    },
+    acked: () => Boolean(draft.acked),
+    requireAck: () => { if (!draft.acked) fail('Tick "I have saved this token somewhere safe" once it is.', ack.input); },
+    dirty: () => draft.mode === 'own' && Boolean(own.value || repeat.value),
+    reset: () => {
+      draft.mode = 'generate';
+      radios.generate.checked = true;
+      own.value = '';
+      repeat.value = '';
+      draft.own = '';
+      draft.repeat = '';
+      setAck(false);
+      clearError();
+      toggle();
+      changed();
+    },
+    showError,
+  };
+}
+
+// commitToken saves the panel's token (with generatedOnly, its generated
+// one) as the admin token, showing any problem in the panel. It returns
+// whether the token was changed.
+async function commitToken(panel, { generatedOnly } = {}) {
+  let next;
+  try {
+    panel.requireAck();
+    next = generatedOnly ? panel.generated() : panel.value();
+  } catch (err) {
+    if (err instanceof InputError) return false;
+    throw err;
+  }
+  try {
+    await changeAdminToken(next);
+  } catch (err) {
+    if (err instanceof AuthError) throw err;
+    panel.showError(err.message);
+    return false;
+  }
+  return true;
+}
+
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+// probeToken returns the status of GET /api/auth signed in with t, or 0
+// when Laya can't be reached.
+async function probeToken(t) {
+  try {
+    return (await fetch('/api/auth', { headers: { Authorization: `Bearer ${t}` } })).status;
+  } catch {
+    return 0;
+  }
+}
+
+// changeAdminToken makes next the admin token. The PUT is a plain fetch:
+// api() would wait on tokenChange, which waits on this request. It throws,
+// with a message for the panel, when the token was not changed or it is
+// not known whether it was.
+async function changeAdminToken(next) {
+  const sent = token;
+  const wasGenerated = cache.auth && cache.auth.source === 'generated';
+  let settle;
+  tokenChange = new Promise((resolve) => { settle = resolve; });
+  try {
+    let res = null;
+    try {
+      res = await fetch('/api/auth/token', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${sent}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: next }),
+      });
+    } catch {
+      await settleChange(sent, next);
+    }
+    if (res && !res.ok) {
+      if (res.status === 401) {
+        showLogin(TOKEN_CHANGED_ELSEWHERE);
+        throw new AuthError('Sign in required');
+      }
+      const data = await res.json().catch(() => null);
+      throw new Error((data && data.error) || `${res.status} ${res.statusText}`);
+    }
+    setToken(next);
+  } finally {
+    tokenChange = null;
+    settle();
+  }
+  // The token is changed whatever this refresh does.
+  await load('auth', 'info').catch(reportError);
+  toast(`Admin token saved. This tab stays signed in. Other tabs and API scripts need the new token, and ${wasGenerated ? 'the token in Laya\'s log' : 'the old one'} no longer works.`);
+}
+
+// settleChange finds out whether a token change that got no answer was
+// applied: it returns once Laya accepts next, and throws while it still
+// accepts sent, or after 30 seconds without reaching it. The new token is
+// never dropped while that is unknown.
+async function settleChange(sent, next) {
+  const until = Date.now() + 30000;
+  while (Date.now() < until) {
+    const withNext = await probeToken(next);
+    if (withNext === 200) return;
+    const withSent = await probeToken(sent);
+    if (withSent === 200) throw new Error('Not changed; try again.');
+    if (withNext === 401 && withSent === 401) {
+      showLogin(TOKEN_CHANGED_ELSEWHERE);
+      throw new AuthError('Sign in required');
+    }
+    await sleep(3000);
+  }
+  throw new Error('Laya couldn\'t be reached. If signing in with your old token fails later, use this one.');
+}
+
+// ---------- Setup wizard ----------
+
+// The wizard's pages, in order. The five tracked steps record an outcome
+// (done, defaults or skipped); welcome and review don't. summary is a
+// step's line on the welcome page: for access, it depends on the token in
+// use (a, the /api/auth status).
+const SETUP_PAGES = [
+  { id: 'welcome', title: 'Welcome to Laya', label: 'Welcome', render: setupWelcome },
+  {
+    id: 'access', step: true, title: 'Secure access to Laya', label: 'Access', render: setupAccess,
+    summary: (a) => {
+      if (a.source === 'generated') return 'Replace the token Laya generated at startup with a permanent one.';
+      if (a.source === 'stored') return 'A permanent token is set in Laya; you can rotate it.';
+      return a.stored_error ? 'Set by LAYA_ADMIN_TOKEN. Delete admin-token.json, which Laya can\'t use.' : 'Set by LAYA_ADMIN_TOKEN; nothing to change here.';
+    },
+  },
+  {
+    id: 'sources', step: true, title: 'Where logs come from', label: 'Sources', render: setupSources,
+    summary: 'See where to send logs, and check that they arrive.',
+  },
+  {
+    id: 'classify', step: true, title: 'How logs are classified', label: 'Classification', render: setupClassify,
+    summary: 'Choose the categories, and the rules that set them.',
+  },
+  {
+    id: 'channels', step: true, title: 'Alert channels', label: 'Channels', render: setupChannels,
+    summary: 'Add email, Slack, PagerDuty or another channel to alert through.',
+  },
+  {
+    id: 'notify', step: true, title: 'Who gets notified', label: 'Who gets notified', render: setupNotify,
+    summary: 'Pick who receives each channel\'s alerts and which alerts they get, and add teams to alert about their own sources.',
+  },
+  { id: 'review', title: 'Review your setup', label: 'Review', render: setupReview },
+];
+const SETUP_STEPS = SETUP_PAGES.filter((p) => p.step);
+const setupPage = (id) => SETUP_PAGES.find((p) => p.id === id);
+
+// Unsaved edits per page, kept while the user moves between pages and
+// dropped once the step is recorded. Only in memory: they can hold
+// recipients and tokens.
+const setupDrafts = {};
+
+// clearSetupDrafts drops the drafts, except keep's (a page id).
+function clearSetupDrafts(keep) {
+  for (const k of Object.keys(setupDrafts)) if (k !== keep) delete setupDrafts[k];
+}
+
+const STEP_STATES = {
+  done: { label: 'Done', cls: 'ok', sr: 'done' },
+  defaults: { label: 'Defaults', cls: 'ok', sr: 'defaults used' },
+  skipped: { label: 'Skipped', cls: 'warn', sr: 'skipped' },
+  todo: { label: 'Not yet', cls: '', sr: 'not done yet' },
+  na: { label: 'Not needed', cls: '', sr: 'not needed' },
+};
+
+// stepState is a step's outcome, else todo, or na while it doesn't apply
+// (there is no channel to notify through).
+function stepState(state, id) {
+  if ((state.not_needed || []).includes(id)) return 'na';
+  const s = (state.steps || {})[id];
+  return s && STEP_STATES[s.outcome] ? s.outcome : 'todo';
+}
+
+function stepBadge(state, id) {
+  const st = STEP_STATES[stepState(state, id)];
+  return h('span', { class: `badge ${st.cls}` }, st.label);
+}
+
+function nextPage(id, state) {
+  if (id === 'channels') return (state.not_needed || []).includes('notify') ? 'review' : 'notify';
+  const i = SETUP_PAGES.findIndex((p) => p.id === id);
+  return SETUP_PAGES[Math.min(i + 1, SETUP_PAGES.length - 1)].id;
+}
+
+function prevPage(id, state) {
+  if (id === 'review') return (state.not_needed || []).includes('notify') ? 'channels' : 'notify';
+  const i = SETUP_PAGES.findIndex((p) => p.id === id);
+  return SETUP_PAGES[Math.max(i - 1, 0)].id;
+}
+
+// goTo renders hash, also when it is the current one.
+function goTo(hash) {
+  if (location.hash === hash) route(); else location.hash = hash;
+}
+
+// setupApi sends a setup request. When setup was finished, skipped or
+// deferred in another session in a way that stops this one, it says so
+// and goes to the dashboard.
+async function setupApi(method, path, body) {
+  try {
+    return await api(method, path, body);
+  } catch (err) {
+    if (err.status !== 409 || err.code !== 'setup_not_running') throw err;
+    clearSetupDrafts();
+    toast('Setup was finished or skipped in another session');
+    goTo('#/dashboard');
+    throw new SetupStopped(err.message);
+  }
+}
+
+// markStep records a step's outcome ({state, changes}), or with dryRun
+// asks what "Use defaults" would add ({changes}).
+async function markStep(step, outcome, { dryRun } = {}) {
+  const r = await setupApi('POST', `/api/onboarding/steps/${step}`, dryRun ? { outcome, dry_run: true } : { outcome });
+  if (r.state) cache.onboarding = r.state;
+  return r;
+}
+
+async function finishLater() {
+  await setupApi('POST', '/api/onboarding/defer');
+  clearSetupDrafts();
+  location.hash = '#/dashboard';
+}
+
+async function skipSetup() {
+  if (!(await confirmDialog('Skip setup? Laya keeps its current configuration. You can run setup again from Settings.', 'Skip setup'))) return;
+  await setupApi('POST', '/api/onboarding/dismiss');
+  clearSetupDrafts();
+  location.hash = '#/dashboard';
+}
+
+const CHANGE_KINDS = { source: 'sources', category: 'categories', route: 'routes' };
+
+// changeSummary words what defaults add: 'source "default"', or
+// '2 categories and route "Ops: error and above"'.
+function changeSummary(changes) {
+  const parts = [...new Set(changes.map((c) => c.kind))].map((k) => {
+    const of = changes.filter((c) => c.kind === k);
+    return of.length === 1 ? `${k} "${of[0].name}"` : `${num(of.length)} ${CHANGE_KINDS[k] || `${k}s`}`;
+  });
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
+}
+
+// defaultsLabel is the effect a defaults button names: "adds 2
+// categories", or "no changes".
+function defaultsLabel(changes) {
+  return changes && changes.length ? `adds ${changeSummary(changes)}` : 'no changes';
+}
+
+// changeList names every change, for a confirmation.
+function changeList(changes) {
+  return changes.map((c) => `${c.kind} "${c.name}"`).join(', ');
+}
+
+pages.setup = async (main, arg) => {
+  // A render the user has moved on from by the time it loads changes
+  // nothing: not the title, not the URL.
+  const gen = routeGen;
+  await load('onboarding', 'auth', 'info');
+  if (gen !== routeGen) return null;
+  const state = cache.onboarding;
+  if (state.status !== 'pending' && state.status !== 'deferred') {
+    setupNotRunning(main, state);
+    return null;
+  }
+  let page = setupPage(arg);
+  if (!page) {
+    page = setupPage(state.resume) || SETUP_PAGES[0];
+    history.replaceState(null, '', `#/setup/${page.id}`);
+  }
+  const n = SETUP_STEPS.indexOf(page) + 1;
+  document.title = `Set up Laya · ${n ? `Step ${n} of ${SETUP_STEPS.length}: ${page.label}` : page.label}`;
+  const ctx = {
+    state, page,
+    drafts: setupDrafts[page.id] || (setupDrafts[page.id] = {}),
+    // An action that finishes after the user left the page leaves them
+    // where they went.
+    go: (id) => { if (gen === routeGen) goTo(`#/setup/${id}`); },
+    mark: (outcome) => markStep(page.id, outcome),
+    refresh: () => route(),
+  };
+  const view = await page.render(ctx);
+  main.append(setupShell(state, page, view));
+  return view.cleanup || null;
+};
+
+// setupNotRunning is the setup page once setup is over, or was never
+// offered, with a way to run it again. Drafts of a run that ended in
+// another session don't carry over into the next one.
+function setupNotRunning(main, state) {
+  clearSetupDrafts();
+  let when = 'never offered: this configuration predates it, or came from a seed';
+  if (state.status === 'completed') when = `finished on ${fmtDate(state.finished_at)}`;
+  else if (state.status === 'dismissed') when = `skipped on ${fmtDate(state.finished_at)}`;
+  const title = h('h1', { id: 'setup-title', tabindex: -1 }, 'Setup isn\'t running');
+  append(main, h('div', { class: 'setup-head' }, brandMark()),
+    h('section', { class: 'card', 'aria-labelledby': 'setup-title' }, title,
+      h('p', null, `Setup was ${when}.`),
+      h('div', { class: 'row' },
+        h('button', {
+          type: 'button', class: 'primary',
+          onclick: (e) => busy(e.currentTarget, async () => {
+            cache.onboarding = await api('POST', '/api/onboarding/start');
+            goTo('#/setup/welcome');
+          }),
+        }, state.status === 'none' ? 'Run setup' : 'Run setup again'),
+        h('button', { type: 'button', onclick: () => { location.hash = '#/dashboard'; } }, 'Back to dashboard'))));
+  requestAnimationFrame(() => title.focus());
+}
+
+// setupShell lays out a wizard page: header, stepper, the page under its
+// h1 (focused when the page opens, so a screen reader starts there), and
+// the footer.
+function setupShell(state, page, view) {
+  const title = h('h1', { id: 'setup-title', tabindex: -1 }, page.title);
+  requestAnimationFrame(() => title.focus());
+  return h('div', { class: 'setup' },
+    setupHeader(),
+    setupStepper(state, page.id),
+    setupCompact(state, page.id),
+    h('section', { class: 'setup-page', 'aria-labelledby': 'setup-title' }, title, view.body),
+    view.footer);
+}
+
+// setupHeader has its own Sign out: the sidebar is hidden in the wizard.
+function setupHeader() {
+  return h('header', { class: 'setup-head' }, brandMark(), h('span', { class: 'muted' }, 'Set up Laya'),
+    h('div', { class: 'actions' },
+      h('button', { type: 'button', class: 'small', onclick: (e) => busy(e.currentTarget, finishLater) }, 'Finish later'),
+      h('button', { type: 'button', class: 'small', onclick: (e) => busy(e.currentTarget, skipSetup) }, 'Skip setup'),
+      h('button', { type: 'button', class: 'small', onclick: () => signOut() }, 'Sign out')));
+}
+
+// stepList is the steps as links. The CSS draws each state as a number
+// or a mark; the words are there for screen readers.
+function stepList(state, pageId) {
+  const link = (p, sr) => h('a', { href: `#/setup/${p.id}`, 'aria-current': p.id === pageId ? 'step' : null },
+    h('span', { class: 'label' }, p.label), sr ? h('span', { class: 'sr-only' }, `, ${sr}`) : null);
+  return h('ol', { class: 'stepper' },
+    SETUP_STEPS.map((p) => {
+      const st = stepState(state, p.id);
+      return h('li', { class: `num st-${st}` }, link(p, STEP_STATES[st].sr));
+    }),
+    h('li', null, link(setupPage('review'))));
+}
+
+function setupStepper(state, pageId) {
+  return h('nav', { class: 'setup-steps', 'aria-label': 'Setup steps' }, stepList(state, pageId));
+}
+
+// setupCompact stands in for the stepper on narrow screens.
+function setupCompact(state, pageId) {
+  const i = SETUP_STEPS.findIndex((p) => p.id === pageId);
+  const where = i >= 0 ? `Step ${i + 1} of ${SETUP_STEPS.length} · ${SETUP_STEPS[i].label}` : setupPage(pageId).label;
+  let frac = 0;
+  if (i >= 0) frac = (i + 1) / SETUP_STEPS.length;
+  else if (pageId === 'review') frac = 1;
+  return h('div', { class: 'setup-compact' },
+    h('div', { class: 'small muted' }, where),
+    progressBar(frac),
+    h('details', { class: 'stepper-all' }, h('summary', null, 'All steps'), stepList(state, pageId)));
+}
+
+// setupFooter lays out a page's buttons in one order, back, skip, defaults,
+// save, which stays the tab order when they stack on a phone. Each is
+// {label, onClick, hidden, blocked, help}. A blocked button (blocked is
+// the reason) stays focusable with aria-disabled, and a click focuses the
+// reason. help is a line the button is described by. An action's error is
+// shown above the buttons, unless it is an InputError: those are shown
+// next to their field.
+function setupFooter(spec) {
+  const keys = ['back', 'skip', 'defaults', 'save'].filter((k) => spec[k]);
+  const errBox = h('div', { class: 'setup-error' });
+  const btns = {};
+  const why = {};
+  const help = {};
+  const reasonOf = {};
+  const run = async (k) => {
+    if (reasonOf[k]) { reasonOf[k].focus(); return; }
+    const btn = btns[k];
+    clear(errBox);
+    keys.forEach((x) => { btns[x].disabled = true; });
+    try {
+      await spec[k].onClick();
+    } catch (err) {
+      if (!(err instanceof AuthError || err instanceof SetupStopped || err instanceof InputError)) {
+        console.error(err);
+        errBox.append(h('div', { class: 'callout bad', role: 'alert' }, err.message || String(err)));
+      }
+    } finally {
+      keys.forEach((x) => { btns[x].disabled = false; });
+      // Disabling the button dropped its focus: give it back, unless an
+      // error moved it to a field.
+      if (!document.activeElement || document.activeElement === document.body) btn.focus();
+    }
+  };
+  for (const k of keys) {
+    btns[k] = h('button', { type: 'button', class: k === 'save' ? 'save primary' : k, onclick: () => run(k) });
+    why[k] = h('div', { class: 'why', id: `setup-${k}-why`, tabindex: -1 });
+    help[k] = h('div', { class: 'why', id: `setup-${k}-help` });
+  }
+  const sync = () => {
+    const seen = {};
+    for (const k of keys) {
+      const b = spec[k];
+      const btn = btns[k];
+      btn.textContent = b.label;
+      btn.hidden = Boolean(b.hidden);
+      const reason = b.hidden ? '' : b.blocked || '';
+      // Buttons blocked for the same reason share its line.
+      if (reason && !seen[reason]) seen[reason] = why[k];
+      reasonOf[k] = reason ? seen[reason] : null;
+      why[k].textContent = reason;
+      why[k].hidden = !reason || seen[reason] !== why[k];
+      help[k].textContent = b.help || '';
+      help[k].hidden = !b.help || Boolean(b.hidden);
+      if (reason) btn.setAttribute('aria-disabled', 'true'); else btn.removeAttribute('aria-disabled');
+      const ids = [reasonOf[k] ? reasonOf[k].id : '', help[k].hidden ? '' : help[k].id].filter(Boolean);
+      if (ids.length) btn.setAttribute('aria-describedby', ids.join(' ')); else btn.removeAttribute('aria-describedby');
+    }
+  };
+  sync();
+  return {
+    el: h('div', { class: 'setup-foot' }, errBox, keys.map((k) => btns[k]), keys.map((k) => [help[k], why[k]])),
+    set: (k, patch) => { Object.assign(spec[k], patch); sync(); },
+  };
+}
+
+// stepFooter is a tracked step's footer, with the meaning every step
+// shares: Back records nothing, Skip changes nothing, Use defaults applies
+// the step's default on the server, and Save & continue saves the page's
+// edits (opts.save, which returns false to stay) before recording done.
+// opts.changes is the dry run of Use defaults, opts.dirty() says whether
+// there are unsaved edits and opts.discard() drops them; opts.back, skip,
+// defaults and saveBtn change parts of each button.
+function stepFooter(ctx, opts) {
+  const id = ctx.page.id;
+  const name = opts.defaultsName || 'Use defaults';
+  let changes = opts.changes || [];
+  const dirty = () => Boolean(opts.dirty && opts.dirty());
+  const discard = opts.discard || (() => { delete setupDrafts[id]; });
+  const next = () => ctx.go(nextPage(id, cache.onboarding));
+  const f = setupFooter({
+    back: { label: 'Back', onClick: () => ctx.go(prevPage(id, cache.onboarding)), ...opts.back },
+    skip: {
+      label: 'Skip',
+      onClick: async () => {
+        if (dirty() && !(await confirmDialog('Skip this step and discard your changes on it?', 'Skip'))) return;
+        await ctx.mark('skipped');
+        discard();
+        next();
+      },
+      ...opts.skip,
+    },
+    defaults: {
+      label: `${name} (${defaultsLabel(changes)})`,
+      onClick: async () => {
+        const lost = dirty() ? ' Your changes on this step are discarded.' : '';
+        if ((changes.length || lost) && !(await confirmDialog(`${changes.length ? `This adds ${changeList(changes)}.` : 'Nothing is added.'}${lost}`, name))) return;
+        const r = await ctx.mark('defaults');
+        discard();
+        if (r.changes && r.changes.length) toast(`Added ${changeSummary(r.changes)}`);
+        next();
+      },
+      ...opts.defaults,
+    },
+    save: {
+      label: 'Save & continue',
+      onClick: async () => {
+        if ((await opts.save()) === false) return;
+        await ctx.mark('done');
+        delete setupDrafts[id];
+        next();
+      },
+      ...opts.saveBtn,
+    },
+  });
+  return {
+    ...f,
+    setChanges: (c) => {
+      changes = c || [];
+      f.set('defaults', { label: `${name} (${defaultsLabel(changes)})` });
+    },
+  };
+}
+
+// --- welcome ---
+
+async function setupWelcome(ctx) {
+  await load('sources', 'rules', 'settings', 'notifiers', 'routes', 'groups');
+  const { state } = ctx;
+  const recorded = SETUP_STEPS.some((p) => (state.steps || {})[p.id]);
+  const configured = cache.sources.length > 1 || cache.notifiers.length > 0 || cache.routes.length > 0 || cache.groups.length > 0;
+  const picker = h('input', { type: 'file', accept: 'application/json', hidden: true });
+  picker.addEventListener('change', async () => {
+    const file = picker.files[0];
+    picker.value = '';
+    // An import keeps this instance's setup progress and admin token.
+    if (file) await importConfigFile(file, { after: () => ctx.go(cache.auth.source === 'generated' ? 'access' : 'review') });
+  });
+  const tile = (title, text) => h('div', { class: 'tile' }, h('strong', null, title), h('span', { class: 'small muted' }, text));
+  const on = cache.rules.filter((r) => r.enabled).length;
+  const cats = categories().length;
+  const body = h('div', { class: 'card' },
+    h('p', { class: 'lead' }, 'Laya receives your logs, classifies them by severity and category, and alerts the right people when something needs attention.'),
+    h('div', { class: 'tile-grid flow' },
+      tile('Ingest', 'Senders push logs to an ingest URL, or Laya polls an API for them.'),
+      tile('Classify', 'Rules, and the Laya engine if you run it, give each event a severity and a category.'),
+      tile('Alert', 'Routes send the events that matter to email, Slack, PagerDuty and other channels.')),
+    h('h2', { class: 'mt' }, 'What setup covers'),
+    h('ul', { class: 'checklist' }, SETUP_STEPS.map((p) => h('li', null, stepBadge(state, p.id),
+      h('div', null, h('strong', null, p.label), h('div', { class: 'small muted' }, typeof p.summary === 'function' ? p.summary(cache.auth) : p.summary))))),
+    h('p', { class: 'muted' }, 'About 5 minutes. Every step can be skipped, and you can come back later.'),
+    configured ? h('div', { class: 'callout' },
+      h('div', null, `Already configured: ${[plural(cache.sources.length, 'source'), `${plural(cache.rules.length, 'rule')} (${num(on)} on)`,
+        `${num(cats)} ${cats === 1 ? 'category' : 'categories'}`, plural(cache.notifiers.length, 'channel'), plural(cache.routes.length, 'route'),
+        plural(cache.groups.length, 'alert group')].join(' · ')}`),
+      h('div', { class: 'small muted' }, 'Nothing changes unless you save.')) : null,
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'link', onclick: () => picker.click() }, 'Import a configuration…'), picker));
+  const footer = setupFooter({
+    skip: { label: 'Skip setup', onClick: skipSetup },
+    defaults: { label: 'Use defaults for everything', onClick: () => useAllDefaults(ctx) },
+    save: { label: 'Start setup', onClick: () => ctx.go(recorded ? state.resume : 'access') },
+  });
+  return { body, footer: footer.el, dirty: () => false };
+}
+
+// useAllDefaults applies the default of every step not done yet, once the
+// user has seen what it adds.
+async function useAllDefaults(ctx) {
+  const dry = await setupApi('POST', '/api/onboarding/defaults', { dry_run: true });
+  const changes = dry.changes || [];
+  const what = changes.length ? `This adds ${changeList(changes)}.` : 'Nothing needs adding.';
+  if (!(await confirmDialog(`Use the defaults for every step not done yet? ${what} Your admin token is not changed.`, 'Use defaults'))) return;
+  const r = await setupApi('POST', '/api/onboarding/defaults', { dry_run: false });
+  cache.onboarding = r.state;
+  clearSetupDrafts();
+  if (r.changes && r.changes.length) toast(`Added ${changeSummary(r.changes)}`);
+  ctx.go('review');
+}
+
+// --- access ---
+
+async function setupAccess(ctx) {
+  const a = cache.auth;
+  const { drafts } = ctx;
+  const body = h('div', { class: 'card' });
+  const panelBox = h('div');
+  let panel = null;
+  let committed = false;
+  let footer = null;
+  const unsaved = 'Tick "I have saved this token somewhere safe" first.';
+  const sync = () => {
+    if (!footer) return;
+    const reason = panel && !committed && !panel.acked() ? unsaved : '';
+    if (a.source === 'stored') footer.set('save', { blocked: reason, label: panel ? 'Rotate & continue' : 'Continue' });
+    if (a.source !== 'generated') return;
+    footer.set('save', { blocked: reason });
+    // The default is the generated token: committing it while the user's
+    // own is selected (and ticked as saved) could lock them out.
+    footer.set('defaults', { blocked: !committed && panel.mode() === 'own' ? 'Select "Generate a token" to use the generated one.' : reason });
+  };
+  const openPanel = () => {
+    panel = tokenPanel({ current: token, source: a.source, draft: drafts, onChange: sync });
+    clear(panelBox).append(panel.el);
+  };
+  // commit saves the panel's token, then forgets it here: it is not kept
+  // on the page or in the drafts once it is in use.
+  const commit = async (generatedOnly) => {
+    if (committed) return true;
+    if (!(await commitToken(panel, { generatedOnly }))) return false;
+    committed = true;
+    clear(panelBox).append(h('div', { class: 'callout ok' }, 'Admin token saved.'));
+    for (const k of Object.keys(drafts)) delete drafts[k];
+    return true;
+  };
+  // Skipping keeps a generated token the user may already have copied.
+  const discard = () => { for (const k of Object.keys(drafts)) if (k !== 'generated') delete drafts[k]; };
+
+  if (a.source === 'generated') {
+    openPanel();
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    append(body,
+      h('div', { class: 'callout warn' }, 'You signed in with a token Laya generated when it started and printed in its log. It changes every time Laya restarts, and anyone who can read the log has it.'),
+      panelBox,
+      location.protocol === 'http:' && !local ? h('div', { class: 'callout warn' }, 'This page isn\'t using HTTPS: the token crosses the network unencrypted.') : null,
+      a.on_nomad ? h('p', { class: 'small muted' }, 'On Nomad, prefer LAYA_ADMIN_TOKEN in the nomad/jobs/laya Variable. A token set here is stored on Laya\'s volume and is lost with it.') : null,
+      h('p', { class: 'small muted wrap-anywhere' }, `Stored as a keyed hash in ${a.file}. If that directory isn't on a persistent volume, set LAYA_ADMIN_TOKEN instead.`));
+    footer = stepFooter(ctx, {
+      dirty: () => panel.dirty(),
+      discard,
+      defaults: {
+        label: 'Use the generated token',
+        help: 'Default: the generated token shown above.',
+        onClick: async () => {
+          if (!(await commit(true))) return;
+          await ctx.mark('defaults');
+          delete setupDrafts.access;
+          ctx.go(nextPage('access', cache.onboarding));
+        },
+      },
+      save: () => commit(false),
+    });
+  } else if (a.source === 'stored') {
+    const toggle = h('button', {
+      type: 'button', class: 'link', 'aria-expanded': String(Boolean(drafts.rotating)),
+      onclick: () => {
+        drafts.rotating = !drafts.rotating;
+        if (drafts.rotating) openPanel(); else { panel = null; clear(panelBox); }
+        toggle.setAttribute('aria-expanded', String(drafts.rotating));
+        toggle.textContent = drafts.rotating ? 'Keep the current token' : 'Rotate token…';
+        sync();
+      },
+    }, drafts.rotating ? 'Keep the current token' : 'Rotate token…');
+    if (drafts.rotating) openPanel();
+    append(body, h('div', { class: 'callout ok' }, `A permanent admin token set in Laya on ${fmtDate(a.set_at)} is in use.`), toggle, panelBox);
+    footer = stepFooter(ctx, {
+      dirty: () => Boolean(panel && panel.dirty()),
+      discard,
+      defaults: { hidden: true },
+      saveBtn: { label: 'Continue' },
+      save: () => (panel ? commit(false) : true),
+    });
+  } else {
+    append(body,
+      h('div', { class: 'callout ok' }, 'The admin token comes from LAYA_ADMIN_TOKEN in Laya\'s environment. Change it where it is set (on Nomad: the nomad/jobs/laya Variable).'),
+      // A file Laya can't use is a startup failure waiting: it can be
+      // deleted from here.
+      a.stored_error ? [storedTokenUnusable(a), deleteStoredButton(ctx.refresh)] : null,
+      a.stored_ignored && !a.stored_error ? h('p', null, `A token set in Laya${storedOn(a)} is ignored while that variable is set. Delete it in Settings → Access.`) : null);
+    footer = stepFooter(ctx, { skip: { hidden: true }, defaults: { hidden: true }, saveBtn: { label: 'Continue' }, save: () => true });
+  }
+  sync();
+  return { body, footer: footer.el, dirty: () => Boolean(panel && panel.dirty()) };
+}
+
+// --- sources ---
+
+async function setupSources(ctx) {
+  const { drafts } = ctx;
+  const [dry] = await Promise.all([markStep('sources', 'defaults', { dryRun: true }), load('sources', 'info', 'settings', 'routes')]);
+  const saved = () => cache.settings.public_url || '';
+  const urlErr = h('div');
+  const url = h('input', {
+    value: drafts.publicURL ?? saved(), placeholder: cache.info.public_url, autocomplete: 'off', spellcheck: 'false',
+    oninput: (e) => { drafts.publicURL = e.target.value; clear(urlErr); url.removeAttribute('aria-invalid'); },
+  });
+  const list = h('div', { class: 'card flush' });
+  const check = h('div', { class: 'card mt' });
+  const hasEnabled = () => cache.sources.some((x) => x.enabled);
+  const blocked = () => (hasEnabled() ? '' : 'Add a source, or use the default one');
+
+  // Arrival is checked against the newest event seen, not the browser's
+  // clock, which can be off from Laya's.
+  let watched = null; // {src, baseline}
+  const waiting = h('div', { class: 'listening' });
+  const arrived = h('div', { class: 'arrived', role: 'status' });
+  const sendOut = h('div', { class: 'small', role: 'status' });
+  const newest = async (id) => (await GET(`/api/events?source=${encodeURIComponent(id)}&limit=1`))[0] || null;
+  const watch = async (src) => {
+    const w = { src, baseline: null };
+    watched = w;
+    clear(arrived);
+    clear(sendOut);
+    waiting.textContent = `Waiting for events on '${src.name}'…`;
+    waiting.hidden = false;
+    const ev = await newest(src.id);
+    w.baseline = ev ? ev.id : '';
+  };
+  const poll = async () => {
+    const w = watched;
+    if (!w || w.baseline === null) return;
+    const ev = await newest(w.src.id);
+    if (w !== watched || !ev || ev.id === w.baseline) return;
+    // Every new event is announced, and answers a test event's "Sent".
+    w.baseline = ev.id;
+    waiting.hidden = true;
+    clear(sendOut);
+    clear(arrived).append('Received ', timeCell(ev.received_at), ': ', sevBadge(ev.severity), ` ${ev.category} · ${String(ev.message).split('\n')[0].slice(0, 200)}`);
+  };
+
+  const renderCheck = async () => {
+    const pushes = cache.sources.filter((x) => x.type === 'push' && x.enabled);
+    const pulls = cache.sources.filter((x) => x.type === 'pull' && x.enabled);
+    clear(check).append(h('h2', null, 'Check that logs arrive'));
+    if (!pushes.length) {
+      watched = null;
+      check.append(h('p', { class: 'muted' }, 'No enabled push source to send to.'));
+    } else {
+      // An edit or token rotation replaced the source: send with the new one.
+      const cur = watched && pushes.find((x) => x.id === watched.src.id);
+      if (cur) watched.src = cur; else await watch(pushes[0]);
+      const pick = pushes.length > 1 ? select(pushes.map((x) => [x.id, x.name]), watched.src.id, {
+        onchange: (e) => watch(pushes.find((x) => x.id === e.target.value)).catch(reportError),
+      }) : null;
+      const sendBtn = h('button', { type: 'button', onclick: () => busy(sendBtn, () => sendTestEvent(watched.src, sendOut)) }, 'Send a test event');
+      append(check,
+        pick ? field('Source', pick) : null,
+        waiting, arrived,
+        h('div', { class: 'row mt' }, sendBtn, h('span', { class: 'small muted' }, 'Optional: one info event, as a sender would post it.')),
+        sendOut);
+    }
+    if (pulls.length) check.append(h('p', { class: 'small muted' }, 'Laya polls pull sources itself. See the Sources page for the last poll.'));
+  };
+
+  let footer = null;
+  const refreshList = async () => {
+    const [d] = await Promise.all([markStep('sources', 'defaults', { dryRun: true }), load('sources')]);
+    renderList();
+    await renderCheck();
+    footer.setChanges(d.changes);
+    footer.set('save', { blocked: blocked() });
+  };
+  const renderList = () => {
+    clear(list);
+    if (!cache.sources.length) list.append(h('div', { class: 'empty' }, 'No sources yet.'));
+    for (const src of cache.sources) {
+      list.append(h('div', { class: `list-item ${src.enabled ? '' : 'disabled-item'}` },
+        h('div', { class: 'main' },
+          h('div', { class: 'title' }, src.name, h('span', { class: 'badge' }, src.type), src.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
+          h('div', { class: 'meta mono' }, src.type === 'push' ? `POST ${cache.info.public_url}/ingest/${src.id}` : `${src.pull.method} ${src.pull.url}`)),
+        h('div', { class: 'actions' },
+          src.type === 'push' ? h('button', { type: 'button', class: 'small', onclick: () => showIngest(src, { onRotated: refreshList }) }, 'Setup instructions') : null,
+          h('button', { type: 'button', class: 'small', onclick: () => editSource(src, { onSaved: refreshList }) }, 'Edit'))));
+    }
+    list.append(h('div', { class: 'row pad' }, h('button', { type: 'button', onclick: () => editSource(null, { onSaved: refreshList }) }, 'Add a source…')));
+  };
+  renderList();
+  await renderCheck();
+
+  const body = h('div', null,
+    h('div', { class: 'card' },
+      h('h2', null, 'Laya\'s address'),
+      field('Public URL', url, 'Used in ingest URLs and in links in notifications.'),
+      urlErr),
+    h('h2', { class: 'mt' }, 'Sources'),
+    list,
+    check);
+  const dirty = () => url.value.trim() !== saved();
+  footer = stepFooter(ctx, {
+    changes: dry.changes,
+    dirty,
+    defaults: { help: 'Default: adds a push source when no source is enabled, named "default" (or "default-2" and so on, if that name is taken).' },
+    saveBtn: { blocked: blocked() },
+    save: async () => {
+      if (!dirty()) return true;
+      try {
+        // A partial update: the server merges it into the saved settings.
+        cache.settings = await api('PUT', '/api/settings', { public_url: url.value.trim() });
+      } catch (err) {
+        if (err.status !== 400) throw err;
+        fieldError(urlErr, url, `Not saved: ${err.message.replace(/^settings: /, '')}`);
+        throw new InputError(err.message);
+      }
+      await load('info');
+      toast('Public URL saved');
+      return true;
+    },
+  });
+  return { body, footer: footer.el, dirty, cleanup: every(3000, poll) };
+}
+
+// sendTestEvent posts one info event to a push source, the way a sender
+// would, after asking when it would notify people. An info event is never
+// judged by the engine, which at its default minimum severity never sees
+// it.
+async function sendTestEvent(src, out) {
+  const body = JSON.stringify({ level: 'info', message: 'Hello from the Laya setup wizard', laya_test: true });
+  const preview = await api('POST', '/api/rules/test', { sample: body, source_id: src.id });
+  const names = new Set();
+  for (const row of preview.events || []) for (const name of row.routes || []) names.add(name);
+  for (const r of cache.routes) if (r.enabled && (r.min_severity === 'debug' || r.min_severity === 'info')) names.add(r.name);
+  if (names.size && !(await confirmDialog(`This test event matches route(s) ${[...names].join(', ')} and will notify people. Send it anyway?`, 'Send'))) return;
+  clear(out).append('Sending…');
+  let res;
+  try {
+    // A plain fetch, not api(): a 401 here is about the ingest token, and
+    // must not open the admin sign-in.
+    res = await fetch(`/ingest/${encodeURIComponent(src.id)}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${src.ingest_token}`, 'Content-Type': 'application/json' },
+      body,
+    });
+  } catch {
+    clear(out).append('Not sent: Laya couldn\'t be reached.');
+    return;
+  }
+  const outcomes = {
+    202: 'Sent. Waiting for Laya to classify it…',
+    403: 'This source is disabled.',
+    401: 'The ingest token changed. Reload this page.',
+    503: 'Laya\'s queue is full. Retry in a few seconds.',
+  };
+  clear(out).append(outcomes[res.status] || `Not sent: ${res.status} ${res.statusText}`);
+}
+
+// --- classify ---
+
+// engineLine says in a few words whether the Laya engine classifies what
+// the rules leave.
+function engineLine(e) {
+  if (!e.enabled) return 'Laya engine: off. Rules classify on their own.';
+  if (!e.configured) return 'Laya engine: not configured. Rules classify on their own.';
+  const paused = e.paused_until && new Date(e.paused_until) > new Date();
+  return `Laya engine: ${paused ? 'paused after errors' : 'active'} (${e.model || engineSettings().model || 'english'})`;
+}
+
+// draftRules is the rules with the page's unsaved toggles applied.
+function draftRules(draft) {
+  return cache.rules.map((r) => (r.id in draft.enabled ? { ...r, enabled: draft.enabled[r.id] } : r));
+}
+
+// setupRuleList lists rules with a toggle each. Toggles go into
+// draft.enabled and are saved with the step, so Skip changes nothing (the
+// Rules page's list saves and reorders at once). onSaved runs after a rule
+// is edited or added.
+function setupRuleList(rules, draft, onSaved) {
+  const root = h('div', { class: 'card flush' });
+  if (!rules.length) root.append(h('div', { class: 'empty' }, 'No rules. Events will only get heuristic severities.'));
+  for (const r of rules) {
+    const on = r.id in draft.enabled ? draft.enabled[r.id] : r.enabled;
+    const row = h('div', { class: `list-item ${on ? '' : 'disabled-item'}` });
+    const box = h('input', {
+      type: 'checkbox', checked: on, 'aria-label': `Enable rule "${r.name}"`,
+      onchange: (e) => {
+        if (e.target.checked === r.enabled) delete draft.enabled[r.id]; else draft.enabled[r.id] = e.target.checked;
+        row.classList.toggle('disabled-item', !e.target.checked);
+      },
+    });
+    append(row, box,
+      h('div', { class: 'main' },
+        h('div', { class: 'title' }, r.name),
+        r.description ? h('div', { class: 'meta' }, r.description) : null,
+        r.name === 'Drop health checks' ? h('div', { class: 'meta' }, 'Off by default. Turn it on to ignore load-balancer probes.') : null,
+        h('div', { class: 'meta' }, ruleActions(r))),
+      h('div', { class: 'actions' }, h('button', { type: 'button', class: 'small', onclick: () => editRule(r, null, { onSaved }) }, 'Edit')));
+    root.append(row);
+  }
+  root.append(h('div', { class: 'row pad' }, h('button', { type: 'button', onclick: () => editRule(null, null, { onSaved }) }, 'Add a rule…')));
+  return root;
+}
+
+async function setupClassify(ctx) {
+  const { drafts } = ctx;
+  if (!drafts.enabled) drafts.enabled = {};
+  const [dry, stats] = await Promise.all([markStep('classify', 'defaults', { dryRun: true }), GET('/api/stats'), load('rules', 'settings', 'sources')]);
+  const cats = categoryEditor(drafts.cats || categoryList());
+  const catsDirty = () => {
+    const rows = cats.rows().map((c) => ({ name: c.name.trim().toLowerCase(), description: c.description.trim() })).filter((c) => c.name || c.description);
+    return JSON.stringify(rows) !== JSON.stringify(categoryList());
+  };
+  const rulesBox = h('div');
+  const paintRules = () => clear(rulesBox).append(setupRuleList(cache.rules, drafts, refreshRules));
+  // The editor saved the rule's own toggle: drop its draft one.
+  const refreshRules = async (saved) => {
+    if (saved && saved.id) delete drafts.enabled[saved.id];
+    await load('rules');
+    paintRules();
+  };
+  paintRules();
+
+  const body = h('div', null,
+    h('div', { class: 'card' },
+      h('h2', null, 'Categories'),
+      h('p', { class: 'small muted' }, 'Rules set categories by name, and alert routes can pick them. For events no rule categorizes, the Laya engine picks one of these names, or leaves the event "uncategorized".'),
+      cats.el),
+    h('div', { class: 'card mt' },
+      h('h2', null, 'Rules'),
+      h('p', { class: 'small muted' }, 'Evaluated top to bottom: matches set severity, category and tags. The switches here are saved with Save & continue.'),
+      rulesBox,
+      h('p', { class: 'small' }, engineLine(stats.engine || {}), ' · ', h('a', { href: '#/settings' }, 'Engine settings')),
+      h('details', { class: 'try-it' }, h('summary', null, 'Try it'), ruleTester({ rules: () => draftRules(drafts) }))));
+
+  const dirty = () => catsDirty() || Object.keys(drafts.enabled).length > 0;
+  const footer = stepFooter(ctx, {
+    changes: dry.changes,
+    dirty,
+    defaults: { help: 'Default: adds back the built-in categories that are missing. Rules are not changed.' },
+    save: async () => {
+      let next;
+      try {
+        next = cats.value();
+      } catch (err) {
+        focusInvalid(cats.el);
+        throw err;
+      }
+      let saved = false;
+      if (JSON.stringify(next) !== JSON.stringify(categoryList())) {
+        try {
+          cache.settings = await api('PUT', '/api/settings', { categories: next });
+        } catch (err) {
+          if (err.status !== 400) throw err;
+          cats.showError(`Not saved: ${err.message.replace(/^settings: /, '')}`);
+          focusInvalid(cats.el);
+          throw new InputError(err.message);
+        }
+        cats.set(categoryList());
+        saved = true;
+      }
+      for (const r of cache.rules) {
+        if (!(r.id in drafts.enabled)) continue;
+        const enabled = drafts.enabled[r.id];
+        await api('PUT', `/api/rules/${r.id}`, { ...r, enabled });
+        r.enabled = enabled;
+        delete drafts.enabled[r.id];
+        saved = true;
+      }
+      if (saved) toast('Classification saved');
+      return true;
+    },
+  });
+  // The category rows are kept only when edited, so a later change made
+  // elsewhere isn't hidden behind an old copy.
+  const cleanup = () => { if (catsDirty()) drafts.cats = cats.rows(); else delete drafts.cats; };
+  return { body, footer: footer.el, dirty, cleanup };
+}
+
+function focusInvalid(root) {
+  const el = root.querySelector('[aria-invalid="true"]');
+  if (el) el.focus();
+}
+
+// --- channels ---
+
+async function setupChannels(ctx) {
+  await load('notifiers', 'types');
+  const list = h('div', { class: 'card flush' });
+  const enabledAny = () => cache.notifiers.some((n) => n.enabled);
+  let footer = null;
+  const refresh = async () => {
+    await load('notifiers');
+    paint();
+    footer.set('defaults', { hidden: enabledAny() });
+    footer.set('save', { blocked: enabledAny() ? '' : 'Add a channel, or choose No alerts for now' });
+  };
+  const paint = () => {
+    clear(list);
+    if (!cache.notifiers.length) list.append(h('div', { class: 'empty' }, 'No channels yet. Pick a type above to add one.'));
+    for (const n of cache.notifiers) {
+      const type = cache.types.find((t) => t.type === n.type);
+      list.append(h('div', { class: `list-item ${n.enabled ? '' : 'disabled-item'}` },
+        h('div', { class: 'main' },
+          h('div', { class: 'title' }, n.name, h('span', { class: 'badge' }, type ? type.label : n.type), n.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
+          h('div', { class: 'meta' }, notifierSummary(n, type))),
+        h('div', { class: 'actions' },
+          h('button', { type: 'button', class: 'small', onclick: (e) => sendTest(n, e.currentTarget) }, 'Send test'),
+          h('button', { type: 'button', class: 'small', onclick: () => editNotifier(n, { onSaved: refresh }) }, 'Edit'))));
+    }
+  };
+  paint();
+  const body = h('div', null,
+    h('div', { class: 'card' },
+      h('h2', null, 'Add a channel'),
+      h('div', { class: 'tile-grid' }, cache.types.map((t) => h('button', {
+        type: 'button', class: 'tile', onclick: () => editNotifier(null, { type: t.type, onSaved: refresh }),
+      }, h('strong', null, t.label), h('span', { class: 'small muted' }, t.description)))),
+      h('p', { class: 'small muted' }, 'Keep webhook URLs and passwords in Laya\'s environment: write ${env:NAME}.')),
+    h('h2', { class: 'mt' }, 'Your channels'),
+    list);
+  footer = stepFooter(ctx, {
+    defaults: { label: 'No alerts for now', help: 'Events are still classified and shown in Laya. Nobody is notified.', hidden: enabledAny() },
+    saveBtn: { blocked: enabledAny() ? '' : 'Add a channel, or choose No alerts for now' },
+    save: () => true,
+  });
+  return { body, footer: footer.el, dirty: () => false };
+}
+
+// --- notify ---
+
+// notifyCard edits who receives a channel's alerts (its recipient fields)
+// and which alerts it gets: through the first route that targets only this
+// channel, or a new one. draft keeps the edits; onRouteSaved runs after
+// the route is edited in its own editor. It returns {el, dirty(), save()},
+// where save returns whether anything was saved.
+function notifyCard(n, routes, draft, onRouteSaved) {
+  const type = cache.types.find((t) => t.type === n.type) || { label: n.type, fields: [] };
+  const own = routes.find((r) => r.notifier_ids.length === 1 && r.notifier_ids[0] === n.id);
+  const others = routes.filter((r) => r !== own && r.notifier_ids.includes(n.id));
+  const teams = activeGroups().filter((g) => g.notifier_ids.includes(n.id));
+  // As in the server's suggested routes: a team's channel stays scoped to
+  // the team's sources unless the user asks for more.
+  const reached = teams.length > 0 || routes.some((r) => r.enabled && r.notifier_ids.includes(n.id));
+  const base = own
+    ? { on: own.enabled, sev: own.min_severity, cats: own.categories || [], throttle: own.throttle_seconds }
+    // PagerDuty pages someone: only for critical by default.
+    : { on: !reached, sev: n.type === 'pagerduty' ? 'critical' : 'error', cats: [], throttle: 900 };
+  const v = (k) => (k in draft ? draft[k] : base[k]);
+  const errBox = h('div');
+
+  const recips = type.fields.filter((f) => f.recipient).map((f) => ({
+    f,
+    input: h('input', {
+      value: (draft.recipients || {})[f.key] ?? n.settings[f.key] ?? '', placeholder: f.placeholder || '', autocomplete: 'off',
+      oninput: (e) => { draft.recipients = { ...draft.recipients, [f.key]: e.target.value }; },
+    }),
+  }));
+  const on = checkbox(own ? 'Enabled' : 'Create a route for this channel', v('on'), (x) => { draft.on = x; });
+  const sev = select(SEVERITIES, v('sev'), { onchange: (e) => { draft.sev = e.target.value; } });
+  const catBoxes = [...new Set([...categories(), 'uncategorized', ...v('cats')])].map((c) => ({
+    c, box: checkbox(c, v('cats').includes(c), () => { draft.cats = catBoxes.filter((x) => x.box.input.checked).map((x) => x.c); }),
+  }));
+  const throttleOpts = THROTTLES.some((t) => t[0] === v('throttle')) ? THROTTLES : [...THROTTLES, [v('throttle'), `${v('throttle')} seconds`]];
+  const throttle = select(throttleOpts.map(([x, l]) => [String(x), l]), String(v('throttle')), { onchange: (e) => { draft.throttle = Number(e.target.value); } });
+  const extra = own ? [
+    own.source_ids && own.source_ids.length ? `sources ${own.source_ids.map(sourceName).join(', ')}` : '',
+    own.tags && own.tags.length ? `tags ${own.tags.join(', ')}` : '',
+    own.message_regex ? `message ~ /${own.message_regex}/` : '',
+  ].filter(Boolean) : [];
+  const catsLabel = `cats-${++fieldSeq}`;
+
+  const el = h('div', { class: 'card mt notify-card' },
+    h('div', { class: 'row' }, h('h2', null, n.name), h('span', { class: 'badge' }, type.label), h('span', { class: 'spacer' }),
+      h('button', { type: 'button', class: 'small', onclick: (e) => sendTest(n, e.currentTarget) }, 'Send test')),
+    h('h3', null, 'Who receives these alerts'),
+    type.audience ? h('p', { class: 'small' }, type.audience) : null,
+    recips.map(({ f, input }) => field(f.label + (f.required ? ' *' : ''), input, f.help)),
+    h('h3', null, 'Which alerts'),
+    own ? h('p', { class: 'small muted' }, `Edits route "${own.name}"`) : null,
+    on.el,
+    h('div', { class: 'fields-2 mt' }, field('Minimum severity', sev), field('Throttle repeats', throttle)),
+    h('div', { class: 'field' }, h('label', { id: catsLabel }, 'Categories'),
+      h('div', { class: 'chips', role: 'group', 'aria-labelledby': catsLabel }, catBoxes.map((x) => x.box.el)),
+      h('div', { class: 'help' }, 'None checked = any category.')),
+    extra.length ? h('p', { class: 'small muted' }, `The route also filters by ${extra.join(' · ')}.`) : null,
+    own ? h('button', {
+      type: 'button', class: 'small',
+      onclick: () => editRoute(own, {
+        onSaved: async () => {
+          for (const k of ['on', 'sev', 'cats', 'throttle']) delete draft[k];
+          await onRouteSaved();
+        },
+      }),
+    }, 'Edit route…') : null,
+    others.length ? h('p', { class: 'small muted' }, `Also receives alerts from: ${others.map((r) => (r.enabled ? r.name : `${r.name} (off)`)).join(', ')}`) : null,
+    teams.length ? h('p', { class: 'small muted' }, `A channel of ${teams.map((g) => `the alert group "${g.name}"`).join(', ')}, for ${teams.length === 1 ? 'its' : 'their'} sources' alerts.`) : null,
+    errBox);
+
+  const want = () => ({ enabled: v('on'), min_severity: v('sev'), categories: v('cats'), throttle_seconds: v('throttle') });
+  const showError = (text) => fieldError(errBox, recips.length ? recips[0].input : sev, text);
+  return {
+    el,
+    id: n.id,
+    showError,
+    dirty: () => ['recipients', 'on', 'sev', 'cats', 'throttle'].some((k) => k in draft),
+    save: async () => {
+      clear(errBox);
+      let saved = false;
+      try {
+        const changed = recips.filter(({ f, input }) => input.value.trim() !== (n.settings[f.key] || ''));
+        if (changed.length) {
+          // Secrets come back masked, and the server keeps the stored ones.
+          const settings = { ...n.settings };
+          for (const { f, input } of changed) settings[f.key] = input.value.trim();
+          await api('PUT', `/api/notifiers/${n.id}`, { ...n, settings });
+          n.settings = settings;
+          saved = true;
+        }
+        const w = want();
+        if (own) {
+          const cur = { enabled: own.enabled, min_severity: own.min_severity, categories: own.categories || [], throttle_seconds: own.throttle_seconds };
+          if (JSON.stringify(cur) !== JSON.stringify(w)) {
+            Object.assign(own, await api('PUT', `/api/routes/${own.id}`, { ...own, ...w }));
+            saved = true;
+          }
+        } else if (w.enabled || draft.createdId) {
+          const route = { name: `${n.name}: ${w.min_severity} and above`, ...w, notifier_ids: [n.id] };
+          // A retry updates the route the first attempt created, also to
+          // switch it off.
+          if (draft.createdId) await api('PUT', `/api/routes/${draft.createdId}`, { ...route, id: draft.createdId });
+          else draft.createdId = (await api('POST', '/api/routes', route)).id;
+          saved = true;
+        }
+      } catch (err) {
+        if (err instanceof AuthError) throw err;
+        showError(`Not saved: ${err.message}`);
+        throw new InputError(`Not saved: ${err.message}`);
+      }
+      return saved;
+    },
+  };
+}
+
+async function setupNotify(ctx) {
+  const { drafts } = ctx;
+  if (!drafts.cards) drafts.cards = {};
+  await load('notifiers', 'types', 'routes', 'settings', 'sources', 'groups');
+  const enabled = () => cache.notifiers.filter((n) => n.enabled);
+  if (!enabled().length) {
+    const footer = setupFooter({
+      back: { label: 'Back', onClick: () => ctx.go('channels') },
+      save: { label: 'Continue', onClick: () => ctx.go('review') },
+    });
+    return {
+      body: h('div', { class: 'callout' }, 'No alert channels yet. Go back to add one, or continue: Laya keeps events either way.'),
+      footer: footer.el,
+      dirty: () => false,
+    };
+  }
+  const dry = await markStep('notify', 'defaults', { dryRun: true });
+  const cardsBox = h('div');
+  let cards = [];
+  let footer = null;
+  let stale = false; // a save failed, and the cards weren't painted again since
+  const teamsBox = h('div', { class: 'card flush' });
+  const paint = () => {
+    cards = enabled().map((n) => notifyCard(n, cache.routes, drafts.cards[n.id] || (drafts.cards[n.id] = {}), refresh));
+    append(clear(cardsBox), cards.map((c) => c.el));
+    clear(teamsBox);
+    if (!cache.groups.length) teamsBox.append(h('div', { class: 'empty' }, 'No alert groups yet.'));
+    for (const g of cache.groups) {
+      teamsBox.append(groupItem(g, h('button', { type: 'button', class: 'small', onclick: () => editGroup(g, { onSaved: refresh }) }, 'Edit')));
+    }
+  };
+  const refresh = async () => {
+    const [d] = await Promise.all([markStep('notify', 'defaults', { dryRun: true }), load('routes', 'notifiers', 'groups')]);
+    paint();
+    stale = false;
+    footer.setChanges(d.changes);
+  };
+  paint();
+  const body = h('div', null,
+    h('p', { class: 'muted' }, 'Laya has no user accounts: people get alerts through channels. For each channel, set who receives its alerts and which alerts go to it.'),
+    cardsBox,
+    h('h2', { class: 'mt' }, 'Teams'),
+    h('p', { class: 'muted' }, 'Optional. An alert group alerts a team about its own sources only: through the team\'s channels, and by email to its members through an email channel\'s server, with its own minimum severity and categories.'),
+    teamsBox,
+    h('div', { class: 'row mt' }, h('button', { type: 'button', onclick: () => editGroup(null, { onSaved: refresh }) }, 'Add an alert group…')));
+  const dirty = () => cards.some((c) => c.dirty());
+  footer = stepFooter(ctx, {
+    changes: dry.changes,
+    dirty,
+    defaultsName: 'Use suggested routes',
+    defaults: { help: 'Default: a route for each channel no route or alert group reaches, for error and above (critical for PagerDuty), any category, repeats throttled for 15 minutes.' },
+    save: async () => {
+      // A request that failed may still have been applied, only its answer
+      // lost. So after a failure the cards are painted again, from Laya's
+      // routes and their drafts: a route a lost create made is then its
+      // card's own, and a retry edits it instead of making another. When
+      // that reload fails too, the retry reloads first.
+      if (stale) await refresh();
+      let saved = false;
+      for (const c of cards) {
+        try {
+          saved = (await c.save()) || saved;
+        } catch (err) {
+          if (!(err instanceof InputError)) throw err;
+          stale = true;
+          await refresh().catch(() => {}); // else the card keeps its error
+          const again = cards.find((x) => x.id === c.id);
+          if (again && again !== c) again.showError(err.message);
+          throw err;
+        }
+      }
+      if (saved) toast('Recipients and routes saved');
+      return true;
+    },
+  });
+  return { body, footer: footer.el, dirty };
+}
+
+// --- review ---
+
+// routeLine sums up which events a route sends: "≥ error · any category ·
+// throttle 15 minutes".
+function routeLine(r) {
+  const t = THROTTLES.find((x) => x[0] === r.throttle_seconds);
+  const parts = [`≥ ${r.min_severity}`, r.categories && r.categories.length ? r.categories.join(', ') : 'any category'];
+  if (r.source_ids && r.source_ids.length) parts.push(`sources ${r.source_ids.map(sourceName).join(', ')}`);
+  if (r.tags && r.tags.length) parts.push(`tags ${r.tags.join(', ')}`);
+  if (r.message_regex) parts.push(`message ~ /${r.message_regex}/`);
+  parts.push(r.throttle_seconds ? `throttle ${t ? t[1] : `${r.throttle_seconds}s`}` : 'no throttling');
+  return parts.join(' · ');
+}
+
+// whoGetsWhat lists, per enabled channel, who receives its alerts and the
+// enabled routes and alert groups that reach it; then the members of each
+// alert group that emails its members.
+function whoGetsWhat() {
+  const chans = cache.notifiers.filter((n) => n.enabled);
+  if (!chans.length) return h('p', { class: 'muted' }, 'No alert channels: nobody is notified.');
+  const teams = activeGroups();
+  const tbl = h('table', null, h('tr', null, h('th', null, 'Channel'), h('th', null, 'Who receives'), h('th', null, 'Which alerts')));
+  for (const n of chans) {
+    const type = cache.types.find((t) => t.type === n.type) || { label: n.type, fields: [] };
+    const who = type.fields.filter((f) => f.recipient && n.settings[f.key]).map((f) => `${f.label}: ${n.settings[f.key]}`);
+    const lines = [
+      ...cache.routes.filter((r) => r.enabled && r.notifier_ids.includes(n.id)).map((r) => h('div', { title: r.name }, routeLine(r))),
+      ...teams.filter((g) => g.notifier_ids.includes(n.id)).map((g) => h('div', { title: `Alert group "${g.name}"` }, `${g.name}: ${routeLine(g)}`)),
+    ];
+    tbl.append(h('tr', null,
+      h('td', null, n.name, h('div', { class: 'muted small' }, type.label)),
+      h('td', null, who.map((x) => h('div', null, x)), type.audience ? h('div', { class: who.length ? 'muted small' : '' }, type.audience) : null),
+      h('td', null, lines.length ? lines : h('span', { class: 'badge warn' }, 'No route or alert group: gets no alerts'))));
+  }
+  for (const g of (cache.groups || []).filter((x) => x.enabled && (x.emails || []).length)) {
+    const via = cache.notifiers.find((n) => n.id === g.email_notifier_id);
+    // As the dispatcher: members are emailed only through an enabled email
+    // channel, about the group's sources.
+    let which = h('span', { class: 'badge warn' }, 'No sources: gets no alerts');
+    if (!via || !via.enabled) which = h('span', { class: 'badge warn' }, 'Email channel missing or off: gets no alerts');
+    else if (g.source_ids.length) which = h('div', null, routeLine(g));
+    tbl.append(h('tr', null,
+      h('td', null, `${g.name} members`, h('div', { class: 'muted small' }, via ? `Alert group, email via ${via.name}` : 'Alert group')),
+      h('td', null, g.emails.map((x) => h('div', null, x))),
+      h('td', null, which)));
+  }
+  return h('div', { class: 'table-wrap' }, tbl);
+}
+
+async function setupReview(ctx) {
+  const { state } = ctx;
+  const [stats, latest] = await Promise.all([GET('/api/stats'), GET('/api/events?limit=1'),
+    load('auth', 'sources', 'rules', 'settings', 'notifiers', 'types', 'routes', 'groups')]);
+  const a = cache.auth;
+  const row = (id, ...what) => {
+    const p = setupPage(id);
+    return h('div', { class: 'list-item' }, stepBadge(state, id),
+      h('div', { class: 'main' }, h('div', { class: 'title' }, p.label), h('div', { class: 'meta' }, what)),
+      h('a', { href: `#/setup/${id}`, class: 'small', 'aria-label': `Change ${p.label}` }, 'Change'));
+  };
+  const push = cache.sources.find((x) => x.type === 'push' && x.enabled);
+  const rulesOn = cache.rules.filter((r) => r.enabled).length;
+  const cats = categories().length;
+  const chans = cache.notifiers.filter((n) => n.enabled);
+  const routesOn = cache.routes.filter((r) => r.enabled).length;
+  let access = 'Managed by LAYA_ADMIN_TOKEN';
+  if (a.source === 'stored') access = 'Permanent token set in Laya';
+  else if (a.source === 'generated') access = h('span', { class: 'badge warn' }, 'Changes every time Laya restarts');
+
+  const body = h('div', null,
+    h('div', { class: 'card flush' },
+      row('access', access),
+      row('sources',
+        h('div', null, cache.sources.map((x) => x.name).join(', ') || 'No sources'),
+        push ? h('div', { class: 'row' }, h('span', { class: 'mono' }, `${cache.info.public_url}/ingest/${push.id}`),
+          h('button', { type: 'button', class: 'small', onclick: () => showIngest(push) }, 'Setup instructions')) : null,
+        h('div', null, latest.length ? `Last event received ${ago(latest[0].received_at)}` : 'No event received yet')),
+      row('classify', `${num(cats)} ${cats === 1 ? 'category' : 'categories'} · ${num(rulesOn)} of ${plural(cache.rules.length, 'rule')} on · ${engineLine(stats.engine || {})}`),
+      row('channels', chans.length
+        ? chans.map((n) => h('div', { class: 'row' }, n.name, h('button', { type: 'button', class: 'small', onclick: (e) => sendTest(n, e.currentTarget) }, 'Send test')))
+        : 'None: nobody is notified'),
+      row('notify', `${plural(routesOn, 'enabled route')} · ${plural(cache.groups.filter((g) => g.enabled).length, 'enabled alert group')}`)),
+    h('div', { class: 'card mt' }, h('h2', null, 'Who gets what'), whoGetsWhat()));
+  const footer = setupFooter({
+    back: { label: 'Back', onClick: () => ctx.go(prevPage('review', state)) },
+    skip: { label: 'Finish later', onClick: finishLater },
+    save: {
+      label: 'Finish setup',
+      onClick: async () => {
+        cache.onboarding = await setupApi('POST', '/api/onboarding/complete');
+        clearSetupDrafts();
+        toast('Laya is set up');
+        location.hash = '#/dashboard';
+      },
+    },
+  });
+  return { body, footer: footer.el, dirty: () => false };
+}
+
 // ---------- Boot ----------
 
 let booted = false;
@@ -2422,14 +4372,19 @@ async function boot() {
     return;
   }
   document.getElementById('version').textContent = `v${cache.info.version}`;
+  GET('/api/stats').then((st) => updateReviewBadge(st.learning ? st.learning.review : 0)).catch(() => {});
   if (!booted) {
     booted = true;
     window.addEventListener('hashchange', route);
-    document.getElementById('logout').addEventListener('click', () => {
-      sessionStorage.removeItem('laya.token');
-      token = '';
-      showLogin();
-    });
+    document.getElementById('logout').addEventListener('click', signOut);
+  }
+  // A pending setup takes over the default landing page only, at boot and
+  // sign-in: deep links and later visits to the dashboard stay where they
+  // are. replaceState fires no hashchange, so the page renders once.
+  const ob = cache.info.onboarding;
+  const { page } = parseHash();
+  if (ob && ob.status === 'pending' && (!location.hash || location.hash === '#' || page === 'dashboard')) {
+    history.replaceState(null, '', `#/setup/${SETUP_PAGES.some((p) => p.id === ob.resume) ? ob.resume : 'welcome'}`);
   }
   route();
 }

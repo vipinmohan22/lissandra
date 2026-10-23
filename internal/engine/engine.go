@@ -427,7 +427,7 @@ func (c *Classifier) Eligible(ev *model.Event) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := c.settings
-	if !s.Enabled || c.client == nil || !ev.Severity.AtLeast(s.MinSeverity) {
+	if !s.Enabled || c.client == nil || ev.NoEngine || !ev.Severity.AtLeast(s.MinSeverity) {
 		return false
 	}
 	if s.OnlyUncategorized && ev.Category != model.Uncategorized {
@@ -480,6 +480,15 @@ func (c *Classifier) Pending(ev *model.Event) bool {
 	defer c.mu.Unlock()
 	_, ok := c.flights[c.flightKeyLocked(ev, text)]
 	return ok
+}
+
+// AnswerKey identifies the request that answers ev: events with the same
+// key, asked about together, cost one request.
+func (c *Classifier) AnswerKey(ev *model.Event) string {
+	text := textKey(ev)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.flightKeyLocked(ev, text)
 }
 
 // flightKeyLocked identifies an open request: the answer's key, and the

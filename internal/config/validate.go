@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/mail"
 	"net/url"
 	"regexp"
 	"slices"
@@ -128,6 +129,34 @@ func Normalize(c *Config) error {
 		}
 	}
 
+	if c.AlertGroups == nil {
+		c.AlertGroups = []AlertGroup{}
+	}
+	groupIDs := map[string]bool{}
+	for i := range c.AlertGroups {
+		g := &c.AlertGroups[i]
+		if g.ID == "" {
+			g.ID = model.NewID()
+		}
+		if err := uniq("alert group", g.ID); err != nil {
+			return err
+		}
+		if err := normalizeAlertGroup(g, c.Notifiers, notifierIDs); err != nil {
+			return fmt.Errorf("alert group %q: %w", g.Name, err)
+		}
+		groupIDs[g.ID] = true
+	}
+	// Drop references to alert groups that no longer exist.
+	for i := range c.Sources {
+		src := &c.Sources[i]
+		src.AlertGroupIDs = slices.DeleteFunc(src.AlertGroupIDs, func(id string) bool { return !groupIDs[id] })
+		slices.Sort(src.AlertGroupIDs)
+		src.AlertGroupIDs = slices.Compact(src.AlertGroupIDs)
+		if len(src.AlertGroupIDs) == 0 {
+			src.AlertGroupIDs = nil
+		}
+	}
+
 	st := &c.Settings
 	st.PublicURL = strings.TrimRight(strings.TrimSpace(st.PublicURL), "/")
 	if st.PublicURL != "" {
@@ -171,7 +200,35 @@ func Normalize(c *Config) error {
 	if len(cats) > MaxCategories {
 		return fmt.Errorf("settings: at most %d categories", MaxCategories)
 	}
+	if c.Onboarding != nil {
+		normalizeOnboarding(c.Onboarding)
+	}
 	return normalizeEngine(&st.Engine)
+}
+
+// normalizeOnboarding repairs setup state rather than rejecting it: it must
+// never stop Laya from starting. The API checks what clients send.
+func normalizeOnboarding(o *Onboarding) {
+	switch o.Status {
+	case "":
+		o.Status = OnboardingPending // a seed's "onboarding": {}
+	case OnboardingPending, OnboardingDeferred, OnboardingCompleted, OnboardingDismissed:
+	default:
+		o.Status = OnboardingDismissed // from a newer release, after a downgrade
+	}
+	for id, st := range o.Steps {
+		if !slices.Contains(OnboardingSteps, id) || !ValidOutcome(st.Outcome) {
+			delete(o.Steps, id)
+		}
+	}
+	if len(o.Steps) == 0 {
+		o.Steps = nil
+	}
+}
+
+// ValidOutcome reports whether s is a setup step outcome.
+func ValidOutcome(s string) bool {
+	return s == OutcomeDone || s == OutcomeDefaults || s == OutcomeSkipped
 }
 
 // MaxCategories bounds the category list: the engine answers a choice over
@@ -249,6 +306,62 @@ func normalizeEngine(e *EngineSettings) error {
 	}
 	if e.TimeoutSeconds > 300 {
 		return fmt.Errorf("settings: engine timeout_seconds is at most 300")
+	}
+	if e.LearnMinConfidence == 0 {
+		e.LearnMinConfidence = DefaultLearnMinConfidence
+	}
+	if e.LearnMinConfidence < 0 || e.LearnMinConfidence > 1 {
+		return fmt.Errorf("settings: engine learn_min_confidence must be between 0 and 1")
+	}
+	return nil
+}
+
+func normalizeAlertGroup(g *AlertGroup, notifiers []Notifier, notifierIDs map[string]bool) error {
+	g.Name = strings.TrimSpace(g.Name)
+	if g.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	g.Description = strings.TrimSpace(g.Description)
+	if g.MinSeverity == "" {
+		g.MinSeverity = model.SeverityError
+	}
+	if !g.MinSeverity.Valid() {
+		return fmt.Errorf("invalid min_severity %q", g.MinSeverity)
+	}
+	if g.ThrottleSeconds < 0 {
+		g.ThrottleSeconds = 0
+	}
+	for j, cat := range g.Categories {
+		g.Categories[j] = strings.ToLower(strings.TrimSpace(cat))
+	}
+	g.Categories = slices.DeleteFunc(g.Categories, func(c string) bool { return c == "" })
+	// Notifiers that no longer exist are dropped, as from routes.
+	g.NotifierIDs = slices.DeleteFunc(g.NotifierIDs, func(id string) bool { return !notifierIDs[id] })
+	if g.NotifierIDs == nil {
+		g.NotifierIDs = []string{}
+	}
+	if !notifierIDs[g.EmailNotifierID] {
+		g.EmailNotifierID = ""
+	} else if i := slices.IndexFunc(notifiers, func(n Notifier) bool { return n.ID == g.EmailNotifierID }); notifiers[i].Type != "email" {
+		return fmt.Errorf("members are emailed through an email notifier; %q is a %s notifier", notifiers[i].Name, notifiers[i].Type)
+	}
+	emails := g.Emails[:0]
+	for _, e := range g.Emails {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		a, err := mail.ParseAddress(e)
+		if err != nil {
+			return fmt.Errorf("invalid email address %q", model.Truncate(e, 100))
+		}
+		if !slices.Contains(emails, a.Address) {
+			emails = append(emails, a.Address)
+		}
+	}
+	g.Emails = emails
+	if len(g.Emails) == 0 {
+		g.Emails = nil
 	}
 	return nil
 }
@@ -391,6 +504,11 @@ func normalizeRule(r *Rule) error {
 				return fmt.Errorf("condition %d: %w", i+1, err)
 			}
 		}
+	}
+	switch r.Status {
+	case RuleActive, RuleReview, RuleRejected:
+	default:
+		return fmt.Errorf("status must be empty, %q or %q", RuleReview, RuleRejected)
 	}
 	r.Category = strings.ToLower(strings.TrimSpace(r.Category))
 	if r.Severity != "" && !r.Severity.Valid() {

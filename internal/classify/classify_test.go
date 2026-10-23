@@ -231,3 +231,39 @@ func TestSeverityGuessed(t *testing.T) {
 		}
 	}
 }
+
+// Learned rules match the message's pattern: the same problem with other
+// numbers, ids and times, case aside.
+func TestPatternField(t *testing.T) {
+	e := New([]config.Rule{{Name: "learned", Enabled: true, Match: config.MatchAll, Category: "audit",
+		Conditions: []config.Condition{{Field: "pattern", Op: config.OpEquals, Value: Pattern("shipment 4411 stuck for 12 minutes")}}}})
+	for msg, want := range map[string]string{
+		"Shipment 9 stuck for 3 minutes":  "audit",
+		"shipment 9 stuck for 3 hours":    model.Uncategorized,
+		"shipment 0x1f stuck for minutes": model.Uncategorized,
+	} {
+		ev := model.Event{Message: msg}
+		e.Classify(&ev)
+		if ev.Category != want {
+			t.Errorf("%q: %q, want %q", msg, ev.Category, want)
+		}
+	}
+	if v, ok := FieldValue(&model.Event{Message: "took 12 ms"}, "pattern"); !ok || v != "took <n> ms" {
+		t.Errorf("FieldValue: %q %v", v, ok)
+	}
+}
+
+func TestSkipEngineRule(t *testing.T) {
+	e := New([]config.Rule{{Name: "rejected", Enabled: true, Match: config.MatchAll, SkipEngine: true,
+		Conditions: []config.Condition{{Field: "message", Op: config.OpContains, Value: "noisy"}}}})
+	ev := model.Event{Message: "noisy thing", NoEngine: true}
+	e.Classify(&ev)
+	if !ev.NoEngine || ev.Category != model.Uncategorized {
+		t.Errorf("matching: %+v", ev)
+	}
+	ev = model.Event{Message: "quiet thing", NoEngine: true}
+	e.Classify(&ev)
+	if ev.NoEngine {
+		t.Error("NoEngine kept from an earlier classification")
+	}
+}

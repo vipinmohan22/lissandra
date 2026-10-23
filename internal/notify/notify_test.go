@@ -515,3 +515,69 @@ func TestNotifierErrorsHideSecrets(t *testing.T) {
 		t.Errorf("request error: %v", err)
 	}
 }
+
+func TestRecipientAndAudience(t *testing.T) {
+	recipients := map[string]string{"email": "to", "slack": "mention"}
+	for _, typ := range []string{"email", "slack", "teams", "discord", "googlechat", "pagerduty", "webhook"} {
+		p, ok := PluginFor(typ)
+		if !ok {
+			t.Fatalf("no plugin %s", typ)
+		}
+		if p.Audience == "" {
+			t.Errorf("%s has no audience", p.Type)
+		}
+		var keys []string
+		for _, f := range p.Fields {
+			if f.Recipient {
+				keys = append(keys, f.Key)
+			}
+		}
+		if want := recipients[p.Type]; strings.Join(keys, ",") != want {
+			t.Errorf("%s recipient fields = %v, want %q", p.Type, keys, want)
+		}
+	}
+	data, _ := json.Marshal(Plugins())
+	if !strings.Contains(string(data), `"recipient":true`) || !strings.Contains(string(data), `"audience":"The addresses in To."`) {
+		t.Errorf("JSON = %s", data)
+	}
+}
+
+// An alert group becomes a route limited to its sources, to its channels
+// and to its members through the email notifier's server; a group without
+// sources, or disabled, matches nothing.
+func TestAlertGroupRoutes(t *testing.T) {
+	c := config.Defaults()
+	c.Notifiers = []config.Notifier{
+		{ID: "mail", Name: "SMTP", Type: "email", Enabled: true, Settings: map[string]string{"smtp_host": "smtp.example.com", "from": "laya@example.com", "to": "everyone@example.com"}},
+		{ID: "chat", Name: "chat", Type: "slack", Enabled: true, Settings: map[string]string{"webhook_url": "https://hooks.example.com/x"}},
+	}
+	c.Sources = append(c.Sources, config.Source{ID: "pay", Name: "payments", Type: config.SourcePush, Enabled: true, AlertGroupIDs: []string{"team"}})
+	c.AlertGroups = []config.AlertGroup{
+		{ID: "team", Name: "Payments", Enabled: true, NotifierIDs: []string{"chat"}, EmailNotifierID: "mail", Emails: []string{"a@example.com", "b@example.com"}, MinSeverity: model.SeverityError},
+		{ID: "idle", Name: "Nobody's", Enabled: true, NotifierIDs: []string{"chat"}},
+		{ID: "off", Name: "Off", NotifierIDs: []string{"chat"}},
+	}
+	c.Sources[0].AlertGroupIDs = []string{"off"}
+	if err := config.Normalize(c); err != nil {
+		t.Fatal(err)
+	}
+	routes, channels := alertGroups(c)
+	if len(routes) != 1 || routes[0].Name != "Alert group: Payments" || strings.Join(routes[0].SourceIDs, ",") != "pay" ||
+		strings.Join(routes[0].NotifierIDs, ",") != "chat,"+groupEmailID("team") {
+		t.Fatalf("routes: %+v", routes)
+	}
+	n := channels[groupEmailID("team")]
+	if n.Settings["to"] != "a@example.com, b@example.com" || n.Settings["smtp_host"] != "smtp.example.com" || c.Notifiers[0].Settings["to"] != "everyone@example.com" {
+		t.Errorf("email channel: %+v (the notifier's own: %v)", n.Settings, c.Notifiers[0].Settings["to"])
+	}
+	match := RouteMatcher(c)
+	for _, tc := range []struct {
+		src  string
+		sev  model.Severity
+		want int
+	}{{"pay", model.SeverityError, 1}, {"pay", model.SeverityWarning, 0}, {c.Sources[0].ID, model.SeverityCritical, 0}} {
+		if got := match(&model.Event{SourceID: tc.src, Severity: tc.sev}); len(got) != tc.want {
+			t.Errorf("%s %s: %v", tc.src, tc.sev, got)
+		}
+	}
+}

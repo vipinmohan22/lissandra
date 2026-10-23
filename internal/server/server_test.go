@@ -21,6 +21,7 @@ import (
 	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/importer"
+	"github.com/vipinmohan22/layalogs/internal/learn"
 	"github.com/vipinmohan22/layalogs/internal/model"
 	"github.com/vipinmohan22/layalogs/internal/notify"
 	"github.com/vipinmohan22/layalogs/internal/pipeline"
@@ -45,8 +46,26 @@ func newGzip(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
 
 func newEnvWith(t *testing.T, mutate func(*Options)) *env {
 	t.Helper()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg, err := config.Open(filepath.Join(t.TempDir(), "config.json"), "")
+	return newEnvFrom(t, envConfig{mutate: mutate})
+}
+
+// envConfig sets up an env beyond Options.
+type envConfig struct {
+	configPath string       // default: a new file
+	log        *slog.Logger // default: discarded
+	mutate     func(*Options)
+}
+
+func newEnvFrom(t *testing.T, ec envConfig) *env {
+	t.Helper()
+	log := ec.log
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	if ec.configPath == "" {
+		ec.configPath = filepath.Join(t.TempDir(), "config.json")
+	}
+	cfg, err := config.Open(ec.configPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,17 +76,26 @@ func newEnvWith(t *testing.T, mutate func(*Options)) *env {
 	a := engine.New(log)
 	t.Cleanup(a.Close)
 	p := pipeline.New(100, store, d, a)
+	l := learn.New(log, cfg.Update)
+	p.Learn = l.Observe
 	pm := poller.NewManager(ctx, log, p.SubmitWait)
-	cfg.Subscribe(func(c *config.Config) { p.Configure(c); d.Configure(c); a.Configure(c); pm.Configure(c) })
+	cfg.Subscribe(func(c *config.Config) {
+		p.Configure(c)
+		d.Configure(c)
+		a.Configure(c)
+		l.Configure(c)
+		pm.Configure(c)
+	})
 	go d.Run(ctx, 1)
+	go l.Run(ctx)
 	go p.Run(ctx, 1, 1)
 	ui := fstest.MapFS{"index.html": {Data: []byte("<html>laya</html>")}}
 	opts := Options{Version: "test", AdminToken: adminToken, UI: ui}
-	if mutate != nil {
-		mutate(&opts)
+	if ec.mutate != nil {
+		ec.mutate(&opts)
 	}
 	reg := importer.NewRegistry(importer.RegistryConfig{Keep: 3, Limits: importer.Limits{Events: 1000, Bytes: 8 << 20}})
-	s := New(opts, log, cfg, store, p, d, a, pm, reg)
+	s := New(opts, log, cfg, store, p, d, a, l, pm, reg)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return &env{t: t, srv: srv, cfg: cfg, imports: reg}

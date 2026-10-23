@@ -68,19 +68,24 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/config/import", s.importConfig)
 
 	s.importRoutes(mux)
+	s.setupRoutes(mux)
+	s.groupRoutes(mux)
 }
 
 // update runs a config mutation and maps errors to HTTP responses.
 func (s *Server) update(w http.ResponseWriter, fn func(c *config.Config) error) bool {
 	err := s.cfg.Update(fn)
+	var ae *apiError
 	switch {
-	case err == nil:
+	case err == nil, errors.Is(err, errUnchanged):
 		return true
+	case errors.As(err, &ae):
+		writeErrorCode(w, ae.status, ae.code, ae.msg)
 	case errors.Is(err, errNotFound):
 		writeError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, config.ErrSave):
 		s.log.Error("saving the configuration failed", "err", err)
-		writeError(w, http.StatusInternalServerError, "saving the configuration failed; see Laya's log")
+		writeErrorCode(w, http.StatusInternalServerError, "save_failed", "saving the configuration failed; see Laya's log")
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}
@@ -100,6 +105,7 @@ func indexOf[T any](items []T, id string, idOf func(*T) string) int {
 
 func (s *Server) getInfo(w http.ResponseWriter, r *http.Request) {
 	c := s.cfg.Get()
+	ob := s.onboardingView(c)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":    s.opts.Version,
 		"public_url": s.publicURL(r, c),
@@ -115,6 +121,13 @@ func (s *Server) getInfo(w http.ResponseWriter, r *http.Request) {
 			"formats":                ImportFormats,
 			"engine_calls_per_file":  maxImportEngineCalls,
 		},
+		// For the UI's first request, so it can open the setup wizard or warn
+		// about a generated token without asking again.
+		"onboarding": map[string]any{
+			"status": ob.Status, "resume": ob.Resume, "remaining": len(ob.Remaining),
+			"total": len(config.OnboardingSteps) - len(ob.NotNeeded),
+		},
+		"auth": map[string]any{"source": ob.Auth.Source, "changeable": ob.Auth.Changeable, "persistent": ob.Auth.Persistent},
 	})
 }
 
@@ -132,6 +145,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 			"dropped": d.Dropped.Load(), "throttled": d.Throttled.Load(),
 		},
 		"engine":         s.laya.Status(),
+		"learning":       s.learningStats(),
 		"imports":        map[string]any{"active": s.imports.Active(), "done": s.imports.Succeeded.Load(), "failed": s.imports.Failed.Load()},
 		"sources":        s.pollers.Status(),
 		"uptime_seconds": int(time.Since(s.started).Seconds()),
@@ -792,6 +806,9 @@ func (s *Server) engineHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) exportConfig(w http.ResponseWriter, r *http.Request) {
 	c := s.cfg.Get()
+	// Setup progress belongs to this instance: an export used as a seed
+	// must neither restart nor skip the wizard elsewhere.
+	c.Onboarding = nil
 	if r.URL.Query().Get("include_secrets") != "true" {
 		for i := range c.Sources {
 			c.Sources[i] = config.MaskSource(c.Sources[i])
@@ -806,7 +823,8 @@ func (s *Server) exportConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // importConfig replaces the whole configuration. Masked secrets are kept
-// from the current config when IDs match.
+// from the current config when IDs match, and so is the setup state:
+// importing a backup neither starts nor finishes the wizard.
 func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	body, ok := readBody(w, r)
 	if !ok {
@@ -845,6 +863,7 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		next.Settings.Engine.URL = u
 		next.Version = c.Version
+		next.Onboarding = c.Onboarding
 		*c = next
 		return nil
 	}) {
