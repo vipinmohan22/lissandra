@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/vipinmohan22/layalogs/internal/model"
 )
 
 func TestOpenSeedsDefaultsAndPersists(t *testing.T) {
@@ -406,5 +408,73 @@ func TestFileRefsOnlyInExpandedFields(t *testing.T) {
 	var d Config
 	if err := Decode([]byte(`{"settings": {"engine": null}}`), &d); err != nil || d.Settings.Engine.MinConfidence != 0.6 {
 		t.Errorf("engine null: %+v %v", d.Settings.Engine, err)
+	}
+}
+
+// Engine settings written before rule learning existed get it on; a
+// document that turns it off keeps it off.
+func TestLearningDefaultsOnUnlessTurnedOff(t *testing.T) {
+	var c Config
+	if err := Decode([]byte(`{"settings": {"engine": {"enabled": true, "min_confidence": 0.7}}}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if err := Normalize(&c); err != nil {
+		t.Fatal(err)
+	}
+	if e := c.Settings.Engine; !e.LearnRules || e.LearnMinConfidence != DefaultLearnMinConfidence {
+		t.Errorf("old engine settings: %+v", e)
+	}
+	c = Config{}
+	Decode([]byte(`{"settings": {"engine": {"learn_rules": false}}}`), &c)
+	if c.Settings.Engine.LearnRules {
+		t.Error("learn_rules false was turned on")
+	}
+	c = *Defaults()
+	c.Settings.Engine.LearnMinConfidence = 1.5
+	if err := Normalize(&c); err == nil {
+		t.Error("learn_min_confidence above 1 accepted")
+	}
+}
+
+func TestAlertGroupValidation(t *testing.T) {
+	c := Defaults()
+	c.Notifiers = []Notifier{{ID: "mail", Name: "mail", Type: "email"}, {ID: "chat", Name: "chat", Type: "slack"}}
+	c.AlertGroups = []AlertGroup{{ID: "g", Name: " Payments ", NotifierIDs: []string{"chat", "gone"}, EmailNotifierID: "mail",
+		Emails: []string{" a@example.com ", "Bee <b@example.com>", "a@example.com", ""}, Categories: []string{" Database ", ""}}}
+	c.Sources[0].AlertGroupIDs = []string{"g", "missing", "g"}
+	if err := Normalize(c); err != nil {
+		t.Fatal(err)
+	}
+	g := c.AlertGroups[0]
+	if g.Name != "Payments" || g.MinSeverity != model.SeverityError || len(g.NotifierIDs) != 1 ||
+		strings.Join(g.Emails, ",") != "a@example.com,b@example.com" || strings.Join(g.Categories, ",") != "database" {
+		t.Errorf("normalized: %+v", g)
+	}
+	if got := c.Sources[0].AlertGroupIDs; len(got) != 1 || got[0] != "g" {
+		t.Errorf("source groups: %v", got)
+	}
+
+	for name, mutate := range map[string]func(*AlertGroup){
+		"no name":            func(g *AlertGroup) { g.Name = "" },
+		"bad email":          func(g *AlertGroup) { g.Emails = []string{"not an address"} },
+		"bad severity":       func(g *AlertGroup) { g.MinSeverity = "loud" },
+		"non-email notifier": func(g *AlertGroup) { g.EmailNotifierID = "chat" },
+	} {
+		c := Defaults()
+		c.Notifiers = []Notifier{{ID: "mail", Name: "mail", Type: "email"}, {ID: "chat", Name: "chat", Type: "slack"}}
+		g := AlertGroup{Name: "x", EmailNotifierID: "mail"}
+		mutate(&g)
+		c.AlertGroups = []AlertGroup{g}
+		if err := Normalize(c); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestRuleStatusValidated(t *testing.T) {
+	c := Defaults()
+	c.Rules[0].Status = "maybe"
+	if err := Normalize(c); err == nil {
+		t.Error("unknown rule status accepted")
 	}
 }

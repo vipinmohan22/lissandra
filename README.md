@@ -5,15 +5,16 @@ Laya reads logs, classifies them, and alerts the right people. It runs as a sing
 - **Ingest two ways.** Senders POST logs to Laya's ingest endpoint (push), or Laya polls your HTTP APIs for logs (pull). JSON, JSON arrays, NDJSON and plain text are all accepted.
 - **Analyze log files.** Upload a log file on the **Log files** page (or with curl, or `laya analyze` in a terminal) to get a classified report: a timeline in the file's own time, top issues, the alert routes that would have fired, and searchable events. Analysis never touches live events or sends alerts.
 - **Classify.** Every event gets a severity, a category and tags. Built-in detection reads level fields and common log formats; an ordered rule engine that you edit in the UI does the rest. Repeats of the same problem are grouped by fingerprint.
+- **Learn.** When the Laya engine categorizes a pattern no rule covers, Laya turns the answer into a rule for that pattern, marked for review. From then on the rules classify it (and alert on it) without asking the model. Review learned rules on their own tab, then approve, edit or reject them.
 - **Notify.** Routes send matching events to pluggable notifiers: email (SMTP), Slack, Microsoft Teams, Discord, Google Chat, PagerDuty, or any HTTP endpoint through a templated webhook. Per-problem throttling keeps channels quiet.
-- **Laya engine for what the rules miss (optional).** Events the rules leave uncategorized can go to the [Laya engine](#laya-engine-optional), a small decision model you run yourself, which picks one of your categories. Rules always win, a severity the log states is never replaced, unsure answers are ignored, and each message pattern is asked about once.
+- **A local model for what the rules miss.** Events the rules leave uncategorized go to the [Laya engine](#laya-engine), a small decision model that runs next to Laya (`make up` starts both), which picks one of your categories. Rules always win, a severity the log states is never replaced, unsure answers are ignored, and each message pattern is asked about once.
 
 ```mermaid
 flowchart LR
   A[Apps / Fluent Bit / Vector] -- "POST /ingest/{source}" --> I[Ingest]
   P[Pollers] -- "GET/POST your log APIs" --> I
   I --> C[Classifier: heuristics + rules]
-  C -. "uncategorized, once per pattern (optional)" .-> E[Laya engine]
+  C -. "uncategorized, once per pattern" .-> E[Laya engine: local model]
   E -. "category, severity" .-> C
   C --> S[(Recent events + stats)]
   C --> R{Alert routes}
@@ -27,16 +28,23 @@ flowchart LR
 ## Quick start
 
 ```sh
-# Run locally (Go 1.24+)
-LAYA_ADMIN_TOKEN=change-me-to-something-long make run
-# → http://localhost:8080, sign in with the token
-
-# or with Docker (BuildKit's buildx)
-docker buildx build -t laya --load .
-docker run -p 8080:8080 -e LAYA_ADMIN_TOKEN=change-me-to-something-long -v laya-data:/data laya
+make up     # Laya and its local model, with Docker Compose
+# → http://localhost:8080, sign in with LAYA_ADMIN_TOKEN from .env
+make down
 ```
 
-Without `LAYA_ADMIN_TOKEN`, Laya generates an admin token for each run and logs it as `admin_token`; sign in with it and the [setup wizard](#first-run) lets you set a permanent one. In production, set `LAYA_ADMIN_TOKEN` from your secret store (on Nomad, a Variable) instead.
+`make up` writes `.env` with a new admin token and engine key on its first run, then starts two containers from `compose.yaml`: Laya, and the [Laya engine](#laya-engine) with the `english` checkpoint. The first start builds the engine image from upstream (PyTorch, a few minutes) and downloads the checkpoint (about 0.85 GB) into the `laya-model-cache` volume; `make up` returns once the model is loaded. Later starts load it from the volume in seconds. Give Docker at least 6 GB of memory: the engine uses about 2.4 GB, and nearly 3 GB while loading. Nothing leaves the machine except the one-time downloads.
+
+To work on Laya itself (Go 1.24+), run the engine in Docker and Laya on the host:
+
+```sh
+make engine   # the model alone, on 127.0.0.1:8000
+make run      # Laya, using that engine (it reads .env)
+```
+
+Without `.env`, `make run` runs on rules alone. The single image works too: `docker buildx build -t laya --load .` and `docker run -p 8080:8080 -e LAYA_ADMIN_TOKEN=… -e LAYA_ENGINE_URL=http://<engine>:8000 -e LAYA_ENGINE_API_KEY=… -v laya-data:/data laya`.
+
+With `make up`, `.env` sets `LAYA_ADMIN_TOKEN`, so it is the only admin token. Without `LAYA_ADMIN_TOKEN`, Laya generates an admin token for each run and logs it as `admin_token`; sign in with it and the [setup wizard](#first-run) lets you set a permanent one. In production, set `LAYA_ADMIN_TOKEN` from your secret store (on Nomad, a Variable) instead.
 
 The image builds with `docker buildx build` (the legacy `docker build` can't read its Dockerfile), and `docker` needs a running daemon. Docker Desktop has both. On a Mac without it: `brew install colima docker docker-buildx`, add `"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]` to `~/.docker/config.json` so the CLI finds the plugin, then `colima start`. `make docker` builds `ghcr.io/vipinmohan22/laya:<version>` for your machine's platform; `make docker PLATFORM=linux/amd64` builds for x86 servers from an Apple Silicon Mac (Go cross-compiles, so it is as fast as a native build). The container runs as UID 65532: a named volume works as is, a host directory must be writable by that user.
 
@@ -51,7 +59,7 @@ curl -X POST http://localhost:8080/ingest/default \
 
 It appears on **Events** classified as `error / network`. Add a notifier under **Notifiers**, use **Send test** to check it, then create an **Alert route** to connect them.
 
-To deploy on Nomad, see [deploy/nomad/README.md](deploy/nomad/README.md). It includes a second, optional job for the [Laya engine](#laya-engine-optional).
+To deploy on Nomad, see [deploy/nomad/README.md](deploy/nomad/README.md). It includes a second job for the [Laya engine](#laya-engine).
 
 ## First run
 
@@ -152,9 +160,41 @@ The response is the finished report. `GET /api/imports/{id}/events` (and `?forma
 1. **Severity detection.** Laya reads explicit level fields (names such as `level`, `severity`, `@l`, `severityText`; syslog 0–7; pino/bunyan 10–60) and the levels formats write into the text: a syslog `<PRI>`, klog prefixes (`E1011 …`), `level=`/`"level":` keys, and level words near the start of the record (within 96 characters after any syslog header) that are uppercase (`ERROR …`, `WARN[0042]`, `[WRN]`), bracketed (`[crit]`, `<warn>`, `[core:error]`), a label (`app[42]: warning: …`, `main.go:42: error:`, `PHP Warning:`, `fail:`), or open the line with a colon, tab or column spacing after them (`error: …`, `2026-10-11T10:00:00Z info   …`); plus fixed-place level columns of common daemons (MongoDB, Redis, etcd, PostgreSQL csvlog, java.util.logging, Monolog, NestJS, dmesg, kernel `BTRFS error`, npm, …). The record's first level wins. Lowercase level words inside a sentence (`user info`, `debug symbols`, `error rate`, `2026/10/11 10:00:00 error connecting …` from Go's level-less `log`) are not levels, and neither are words in request paths, echoed commands, JSON values or quoted settings (`GET /logs?level=error`, `COMMAND=… FATAL`, `set to "WARN"`). A level field of 3 or 6 (journald's default for a service's stdout and stderr, Docker's stream levels) or a syslog PRI with those severities gives way to a level the text states. A severity found this way is *stated* by the record. Otherwise Laya *guesses* it from keywords such as panic/fatal/outage/breach, error/exception/failed/failing/refused/unable to/cannot/timed out (and a message ending in "permission denied" or "no such file or directory"), and warn/deprecated/retrying, ignoring URLs, paths, mail addresses, negations like "no errors" and zero counters (`failed=0`). It defaults to *info* and marks the event `severity_guessed`. A rule that sets a severity makes it stated. `internal/classify/testdata/severity/` holds the corpus of real formats this is tested against.
 2. **Rules, top to bottom.** Conditions test `message`, `level`, `severity`, `source`, `category`, `tags`, or any structured field by dot path (`http.status_code`). The operators are contains, equals, starts/ends with, regex (RE2, so no catastrophic backtracking), exists/missing, and numeric `>`/`<`, each with a negated form where it makes sense. Every matching rule adds tags and can set the severity or raise it to a minimum. The first matching rule with a category decides the category. **Drop** discards the event and **Stop** ends evaluation. Rules can be limited to specific sources.
 3. **Fingerprint.** The message is reduced to a pattern (numbers, IPs, UUIDs, hex ids and timestamps replaced by placeholders) and hashed with the source. The fingerprint groups the dashboard's "Top issues" and drives notification throttling. The Laya engine's answers are cached by the text the engine reads instead (see below).
-4. **Laya engine (optional).** What the rules leave uncategorized, at *warning* or above, goes to the [Laya engine](#laya-engine-optional), which may fill in the category, and the severity when it was only guessed.
+4. **Laya engine.** What the rules leave uncategorized, at *warning* or above, goes to the [Laya engine](#laya-engine), which may fill in the category, and the severity when it was only guessed.
+5. **Learning.** A confident engine answer becomes a [learned rule](#learned-rules), so the next event of that pattern is classified at step 2.
+
+Conditions can also test `pattern`: the message lowercased, with numbers, IPs, UUIDs, hex ids and timestamps replaced by `<n>`, `<ip>`, `<uuid>`, `<hex>` and `<ts>` (the first 400 bytes). `pattern equals "shipment <n> stuck in queue"` matches every shipment number. A rule can also keep matching events away from the engine (**Don't ask the Laya engine**, `skip_engine`).
 
 Laya ships with editable default rules for crashes and panics, resource exhaustion, security attacks, auth failures, HTTP 5xx, database, network, slow operations, exceptions and deployments. The **Rule tester** runs a pasted sample through the rules without storing it, and the rule editor can test a draft rule on its own.
+
+### Learned rules
+
+Rules are the main classifier, and the Laya engine handles what they miss. Learning turns the engine's answers into rules, so each new kind of problem costs one engine call:
+
+1. A live event that no rule categorizes goes to the engine, which answers with one of your categories.
+2. When that answer is applied, at least `learn_min_confidence` confident (0.8 by default, and never below `min_confidence`), Laya adds a rule at the end of the list. The rule tests `pattern equals "<the event's pattern>"`, applies only to the event's source, and sets the category. It also sets the severity (as a minimum) when the engine's severity answer was applied. Proposals are written in batches, one config write per second at most.
+3. The rule is active at once, so the event and the ones after it are classified and alerted on as the category says. It is marked **under review** and appears under **Classification rules → Under review**, with the engine's confidence, the checkpoint and the message it was learned from. The sidebar shows how many await review, and so does the dashboard.
+4. Review each one:
+   - **Approve** it, and it becomes an ordinary rule (labelled *learned*).
+   - **Edit** it, for example to correct the category or widen the condition, then **Save & approve**.
+   - **Reject** it. A rejected rule loses its category and severity but stays, enabled, with **Don't ask the Laya engine** set, so the pattern stays uncategorized and the model isn't asked about it, or learned from, again. **Restore** applies what was learned again.
+   - **Delete** it, and the next event of the pattern goes to the engine again, which may teach the same rule anew.
+
+Only live events teach rules; file analysis never does. At most 500 learned rules may await review: past that, Laya learns nothing new (and the dashboard says so) until some are reviewed. Turn learning off, or change the confidence it needs, under **Settings → Laya engine → Learning** (`learn_rules`, `learn_min_confidence`). Over the API, `POST /api/rules/review` with `{"action": "approve"|"reject", "ids": [...]}` reviews one or many. Learned rules carry where they came from in `learned` (`at`, `model`, `category`, `confidence`, `source_id`, `event_id`, `example`) and their state in `status` (`review`, `rejected`, or empty once approved).
+
+A learned rule is only as good as the answer it came from, and zero-shot the published checkpoints are often wrong (see **Accuracy** below). Rules under review do alert, so review them, especially before routing pages on their categories. A higher `learn_min_confidence` learns less, and less often wrongly.
+
+### Alert groups
+
+An **alert group** is a team, or a set of people, alerted about specific sources:
+
+- **Sources.** The sources whose events it hears about. Assign them in the group, or under **Alerts** in each source's settings. A source can have several groups.
+- **Which events.** A minimum severity (*error* by default) and, optionally, categories.
+- **Channels.** Notifiers the group is reached on: its Slack or Teams channel, PagerDuty service, a webhook.
+- **Members.** Email addresses, emailed through an email notifier you pick. Its SMTP server and From address are used, with the members as the recipients instead of the notifier's own.
+- **Throttling**, as for routes.
+
+Groups work alongside alert routes: an event goes to every route and every group of its source that it matches. A group with no sources gets nothing. Deliveries show the group as the route (`Alert group: <name>`), and file analysis reports list the groups that would have been alerted. The API is `/api/alert-groups` (`GET`, `POST`, `PUT /{id}`, `DELETE /{id}`), where `source_ids` sets the group's sources; sources list their groups in `alert_group_ids`.
 
 ### Notifiers and routes
 
@@ -179,9 +219,9 @@ File contents lose their trailing newline, and a file that can't be read, isn't 
 
 **Adding a notifier type.** Create a file in `internal/notify/` that calls `Register(&Plugin{...})` from `init()`, declaring its fields (label, type, required, secret, help) and a constructor that returns a `Sender`. The UI renders the form from that schema and nothing else needs to change. See `chat.go` for compact examples.
 
-### Laya engine (optional)
+### Laya engine
 
-The Laya engine is [`laya-serve`](https://github.com/NandhaKishorM/laya), a small Python/PyTorch decision model served over HTTP. You run it yourself, next to Laya (the Nomad deployment includes a job for it), so log text never leaves your infrastructure. Laya uses it for what the rules can't place:
+The Laya engine is [`laya-serve`](https://github.com/NandhaKishorM/laya), a small Python/PyTorch decision model served over HTTP. It runs locally, next to Laya (`make up` starts it with Laya, and the Nomad deployment includes a job for it), so log text never leaves your infrastructure. Laya itself stays a single Go binary: when no engine is configured or the engine is down, it classifies with its rules alone. Laya uses it for what the rules can't place:
 
 1. **Rules first.** Events go through severity detection and the rules as usual.
 2. **What goes to the engine.** An event is sent when its severity, stated or guessed, is at least `min_severity` (*warning*) and, with `only_uncategorized` on (the default), no rule gave it a category. A message with no level and no telling keyword is guessed *info*, so at the default it isn't sent.
@@ -189,7 +229,8 @@ The Laya engine is [`laya-serve`](https://github.com/NandhaKishorM/laya), a smal
 4. **Confidence.** Each answer, category and severity, is used only when its confidence is at least `min_confidence` (0.6). Below that it's recorded on the event and nothing changes.
 5. **Applied.** An answer counts as *applied* only when it changed the event: an uncategorized event got one of your categories, or a guessed severity became another one. An answer of `uncategorized`, a severity equal to the guessed one, or an answer below the threshold changes nothing.
 6. **Rules win.** The engine only fills in a missing category and corrects a guessed severity. It never overrides a rule.
-7. **Once per pattern.** Answers are cached per source by everything the engine reads about an event (the message, level and fields, with numbers, IPs, UUIDs, hex ids and timestamps normalized as in patterns) and the checkpoint (and whether the severity was asked) for 24 hours, up to 5,000 answers, and simultaneous events that read the same share one request, so a recurring error costs one call. Fields that identify a request, trace, session or user (`request_id`, `traceId`, `user`, `email`, any `*_id`…) aren't sent, so they don't make each event look new; other fields that differ per event (free text, paths with names) do cost a request each. Answers aren't shared between sources: two texts that normalize the same can still read differently to the engine (numbers, case), and one source's events must not decide another's. File analysis read as a source (**Parse as**) reuses that source's answers and adds to them; files read without a source share answers only with each other. Changing the categories, a checkpoint (the default or a source's) or the key clears it, and so does a new checkpoint revision reported by the engine; instances coming and going (Nomad scaling or rescheduling) don't. A new `min_confidence` applies to cached answers at once.
+7. **Learned.** An applied answer at least `learn_min_confidence` confident becomes a [learned rule](#learned-rules) for the pattern, under review, so the engine isn't asked about it again.
+8. **Once per pattern.** Answers are cached per source by everything the engine reads about an event (the message, level and fields, with numbers, IPs, UUIDs, hex ids and timestamps normalized as in patterns) and the checkpoint (and whether the severity was asked) for 24 hours, up to 5,000 answers, and simultaneous events that read the same share one request, so a recurring error costs one call. Fields that identify a request, trace, session or user (`request_id`, `traceId`, `user`, `email`, any `*_id`…) aren't sent, so they don't make each event look new; other fields that differ per event (free text, paths with names) do cost a request each. Answers aren't shared between sources: two texts that normalize the same can still read differently to the engine (numbers, case), and one source's events must not decide another's. File analysis read as a source (**Parse as**) reuses that source's answers and adds to them; files read without a source share answers only with each other. Changing the categories, a checkpoint (the default or a source's) or the key clears it, and so does a new checkpoint revision reported by the engine; instances coming and going (Nomad scaling or rescheduling) don't. A new `min_confidence` applies to cached answers at once.
 
 Each event that was sent carries the engine's answer in `engine`: the checkpoint (`model`), the chosen `category` and its `confidence` (no category when only the severity was asked), the `top` three categories, the `severity` and `severity_confidence` when it was asked, the `threshold` (`min_confidence` when the answer was used), whether it was `applied` (and whether to the `category_applied` or `severity_applied`), and whether the event was `truncated` to fit the model. Its `classifier` is `laya` when the engine's category was applied (a severity alone doesn't change it).
 
@@ -240,6 +281,8 @@ Laya sends each event as compact text: the first line, the root cause of a stack
 | `set_severity` | `false` | Ask for a severity when it was only guessed (step 3). About doubles the engine's time per event. |
 | `max_in_flight` | `1` | Concurrent requests per engine instance, at most 16. See **Load and waiting**. |
 | `timeout_seconds` | `30` | The longest an event waits for an answer, queueing included, at most 300. |
+| `learn_rules` | `true` | Turn applied category answers into [learned rules](#learned-rules) awaiting review. Engine settings saved before learning existed get it on. |
+| `learn_min_confidence` | `0.8` | The confidence an answer needs to become a rule (never less than `min_confidence`). |
 
 Larger values are refused when you save.
 
@@ -363,12 +406,12 @@ Endpoints:
 - `GET /healthz` returns liveness (used by the Nomad check).
 - `GET /metrics` serves Prometheus metrics: events received, processed, dropped and rejected; queue depths; last-hour events by severity; notification outcomes; log file analyses; pull-source health; and the Laya engine (below).
 - `POST /ingest/{source}` accepts logs.
-- `/api/*` is the REST API the UI uses. Everything requires the [admin token](#admin-token) (`Authorization: Bearer …`). Besides the configuration (`/api/sources`, `/api/rules`, `/api/notifiers`, `/api/routes`, `/api/settings`, `/api/config/export` and `/import`):
+- `/api/*` is the REST API the UI uses. Everything requires the [admin token](#admin-token) (`Authorization: Bearer …`). Besides the configuration (`/api/sources`, `/api/rules` and `/api/rules/review`, `/api/notifiers`, `/api/routes`, `/api/alert-groups`, `/api/settings`, `/api/config/export` and `/import`):
   - `GET /api/stats` (counters and engine status) and `GET /api/events`;
   - `GET /api/auth` says where the admin token comes from, `PUT /api/auth/token` sets a new one (`{"token": "…"}`, sent with the current one) and `DELETE /api/auth/token` deletes a stored token that `LAYA_ADMIN_TOKEN` overrides;
   - `GET /api/onboarding` is the setup wizard's progress, and `POST /api/onboarding/start`, `/steps/{step}`, `/defaults`, `/defer`, `/complete` and `/dismiss` change it;
   - `POST /api/imports` analyzes a log file (`?engine=1` to ask the Laya engine), and `GET /api/imports/{id}` (with `/events`, `/patterns` and `/training-data`) returns the results;
-  - `GET /api/engine/health` checks the Laya engine, `POST /api/engine/classify` asks it about one message or event, and `GET /api/engine/training-data` exports laya-train data (see [Laya engine](#laya-engine-optional)).
+  - `GET /api/engine/health` checks the Laya engine, `POST /api/engine/classify` asks it about one message or event, and `GET /api/engine/training-data` exports laya-train data (see [Laya engine](#laya-engine)).
 
 The Laya engine's metrics:
 
@@ -387,6 +430,8 @@ The Laya engine's metrics:
 | `laya_engine_inference_seconds_total` | The engine's compute time for answered requests (its `X-Inference-Time-Ms`). |
 | `laya_engine_paused` | 1 while all calls are paused after errors. |
 | `laya_engine_checkpoints_paused` | Checkpoints paused alone because the engine answered with another. |
+| `laya_rules_learned_total` | Rules learned from the engine's answers since Laya started. |
+| `laya_rules_review` | Learned rules awaiting review. |
 
 ### Admin token
 
@@ -417,6 +462,8 @@ The token is an API key, not a password: use the generated one, a password manag
 make test            # go test -race ./...
 make lint            # gofmt, go vet, JS syntax check
 make build           # bin/laya
+make up / make down  # Laya and the Laya engine with Docker Compose
+make engine          # the Laya engine alone, for make run
 make docker          # container image
 make nomad-validate  # nomad fmt -check + job validate
 ```
@@ -432,6 +479,7 @@ internal/ingest     payload parsing (JSON / NDJSON / text / CSV), streaming file
 internal/poller     pull-source polling
 internal/classify   severity heuristics, rule engine, fingerprints
 internal/engine     Laya engine client (laya-serve) and classifier
+internal/learn      rules learned from the engine's answers
 internal/pipeline   queue → classify → (Laya engine) → store → dispatch
 internal/importer   log file analysis: reports, retention, timeline
 internal/events     in-memory recent events and stats

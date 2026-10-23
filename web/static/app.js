@@ -283,7 +283,7 @@ const cache = {};
 async function load(...keys) {
   const paths = {
     info: '/api/info', sources: '/api/sources', notifiers: '/api/notifiers', settings: '/api/settings',
-    types: '/api/notifier-types', rules: '/api/rules', routes: '/api/routes',
+    types: '/api/notifier-types', rules: '/api/rules', routes: '/api/routes', groups: '/api/alert-groups',
     auth: '/api/auth', onboarding: '/api/onboarding',
   };
   await Promise.all(keys.map(async (k) => { cache[k] = await GET(paths[k]); }));
@@ -292,6 +292,11 @@ async function load(...keys) {
 function sourceName(id) {
   const src = (cache.sources || []).find((x) => x.id === id);
   return src ? src.name : id;
+}
+
+function groupName(id) {
+  const g = (cache.groups || []).find((x) => x.id === id);
+  return g ? g.name : id;
 }
 
 // categoryList returns the configured categories as {name, description}, in
@@ -730,7 +735,9 @@ function renderDashboard(root, st) {
     kpi('Pull sources', pulls.length ? `${healthy}/${pulls.length}` : '—', pulls.length ? 'healthy' : 'none configured', healthy < pulls.length),
     st.engine && st.engine.enabled
       ? engineKpi(st.engine, st.pipeline, kpi)
-      : kpi('Pipeline queue', num(st.pipeline.queue_depth), `${num(st.pipeline.dropped)} dropped by rules`));
+      : kpi('Pipeline queue', num(st.pipeline.queue_depth), `${num(st.pipeline.dropped)} dropped by rules`),
+    st.learning && st.learning.enabled ? learningKpi(st.learning, kpi) : null);
+  updateReviewBadge(st.learning ? st.learning.review : 0);
 
   const timeline = h('div', { class: 'card' }, h('h2', null, 'Events per minute'), timelineChart(ev.timeline));
 
@@ -803,6 +810,16 @@ function engineKpi(e, pipeline, kpi) {
   for (const w of warnings) notes.push(`Warning: ${w}`);
   card.title = notes.join('\n');
   return card;
+}
+
+// learningKpi links to the learned rules awaiting review.
+function learningKpi(l, kpi) {
+  const full = l.review >= l.max_review;
+  const card = kpi('Rules to review', num(l.review),
+    full ? `limit reached: nothing new is learned until some are reviewed` : `${num(l.learned)} learned since start`, full);
+  const link = h('a', { class: 'kpi-link', href: '#/rules?status=review' }, card);
+  link.title = `Rules Laya learned from the engine's answers (at ${pct(l.min_confidence)} confidence or more). They classify and alert already; approve, edit or reject them.`;
+  return link;
 }
 
 // timelineChart draws stacked severity bars. labels sets the axis text:
@@ -999,7 +1016,7 @@ async function showEvent(target, opts = {}) {
 // ---------- Sources ----------
 
 pages.sources = async (main) => {
-  await load('sources', 'info', 'settings');
+  await load('sources', 'info', 'settings', 'groups');
   const list = h('div', { class: 'card flush' });
   append(main, pageHead('Sources', 'Where logs come from: Laya can receive them on an ingest endpoint (push) or poll an API (pull).',
     h('button', { type: 'button', class: 'primary', onclick: () => editSource(null) }, 'Add source')), list);
@@ -1030,7 +1047,10 @@ function renderSources(root, sources, status) {
       h('div', { class: 'main' },
         h('div', { class: 'title' }, src.name, h('span', { class: 'badge' }, src.type), src.enabled ? null : h('span', { class: 'badge' }, 'disabled'),
           src.engine_model ? h('span', { class: 'badge', title: 'Laya engine checkpoint for this source' }, `checkpoint: ${src.engine_model}`) : null, tags(src.tags)),
-        meta),
+        meta,
+        h('div', { class: 'meta' }, 'Alerts → ', (src.alert_group_ids || []).length
+          ? src.alert_group_ids.map(groupName).join(', ')
+          : h('span', { class: 'muted' }, 'no alert group (alert routes only)'))),
       h('div', { class: 'actions' },
         src.type === 'push' ? h('button', { type: 'button', class: 'small', onclick: () => showIngest(src) }, 'Setup instructions') : null,
         h('button', { type: 'button', class: 'small', onclick: () => { location.hash = `#/files?source=${encodeURIComponent(src.id)}`; } }, 'Analyze a file'),
@@ -1124,6 +1144,7 @@ function editSource(src, { onSaved } = {}) {
     levelField: h('input', { value: src.parse.level_field || '', placeholder: 'auto: level, severity…' }),
     tsField: h('input', { value: src.parse.timestamp_field || '', placeholder: 'auto: @timestamp, timestamp, time…' }),
     engineModel: modelPicker(src.engine_model || '', ['', `Default (${engineSettings().model || 'english'})`]),
+    groups: (cache.groups || []).map((g) => ({ id: g.id, box: checkbox(g.name, (src.alert_group_ids || []).includes(g.id)) })),
   };
 
   const authFields = h('div');
@@ -1164,6 +1185,11 @@ function editSource(src, { onSaved } = {}) {
       h('div', { class: 'fields-3' }, field('Message field', f.messageField), field('Level field', f.levelField), field('Timestamp field', f.tsField))),
     h('fieldset', null, h('legend', null, 'Classification'),
       field('Laya engine checkpoint', f.engineModel.el, 'The checkpoint that classifies this source\'s events when no rule does. Pick multilingual for logs that are not in English. The engine must have it loaded (its LAYA_MODELS): Laya never asks for one it hasn\'t, and those events keep the rules\' result.')),
+    h('fieldset', null, h('legend', null, 'Alerts'),
+      f.groups.length
+        ? h('div', { class: 'field' }, h('label', null, 'Alert groups'), h('div', { class: 'chips' }, f.groups.map((x) => x.box.el)),
+          h('div', { class: 'help' }, 'The teams and people alerted about this source\'s events, each with its own channels and minimum severity. Alert routes apply as well.'))
+        : h('p', { class: 'muted small' }, 'No alert groups yet. ', h('a', { href: '#/groups' }, 'Create one'), ' to send this source\'s alerts to a team\'s channels and people.')),
     preview);
 
   const collect = () => {
@@ -1175,6 +1201,7 @@ function editSource(src, { onSaved } = {}) {
       enabled: f.enabled.input.checked,
       type: f.type.value,
       engine_model: f.engineModel.value(),
+      alert_group_ids: f.groups.filter((x) => x.box.input.checked).map((x) => x.id),
       parse: {
         format: f.format.value, records_path: f.recordsPath.value.trim(), message_field: f.messageField.value.trim(),
         level_field: f.levelField.value.trim(), timestamp_field: f.tsField.value.trim(),
@@ -1241,65 +1268,153 @@ function previewTable(items) {
 
 // ---------- Rules ----------
 
-const FIELD_SUGGESTIONS = ['message', 'level', 'severity', 'source', 'category', 'tags', 'status', 'status_code', 'http.status_code', 'service', 'host', 'logger', 'kubernetes.namespace_name'];
+const FIELD_SUGGESTIONS = ['message', 'pattern', 'level', 'severity', 'source', 'category', 'tags', 'status', 'status_code', 'http.status_code', 'service', 'host', 'logger', 'kubernetes.namespace_name'];
 const OP_LABELS = {
   contains: 'contains', not_contains: 'does not contain', equals: 'equals', not_equals: 'does not equal',
   regex: 'matches regex', not_regex: 'does not match regex', starts_with: 'starts with', ends_with: 'ends with',
   exists: 'exists', missing: 'is missing', gt: '>', lt: '<',
 };
 
-pages.rules = async (main) => {
+// Rule tabs: learned rules await review until approved or rejected.
+const RULE_TABS = [['all', 'All'], ['active', 'Active'], ['review', 'Under review'], ['rejected', 'Rejected']];
+const ruleStatus = (r) => r.status || 'active';
+
+// updateReviewBadge shows how many learned rules await review next to
+// "Classification rules" in the sidebar.
+function updateReviewBadge(n) {
+  const el = document.getElementById('review-badge');
+  if (!el) return;
+  el.textContent = n > 0 ? String(n) : '';
+  el.hidden = !(n > 0);
+  el.title = n > 0 ? `${plural(n, 'learned rule')} awaiting review` : '';
+}
+
+pages.rules = async (main, _arg, params) => {
   await load('rules', 'sources', 'settings', 'routes');
+  let tab = RULE_TABS.some(([k]) => k === params.get('status')) ? params.get('status') : 'all';
+  const tabs = h('div', { class: 'row tabs' });
   const list = h('div', { class: 'card flush' });
   const tester = ruleTester();
   append(main,
-    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation.',
+    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation. When no rule categorizes an event, the Laya engine does, and Laya learns a rule from its answer for you to review.',
       h('button', { type: 'button', class: 'primary', onclick: () => editRule(null) }, 'Add rule')),
+    tabs,
     h('div', { class: 'grid cols-2 top' }, list, tester));
-  renderRules(list);
+  const render = () => {
+    const count = (k) => (k === 'all' ? cache.rules.length : cache.rules.filter((r) => ruleStatus(r) === k).length);
+    clear(tabs).append(RULE_TABS.map(([k, label]) => h('button', {
+      type: 'button', class: `small ${tab === k ? 'primary' : ''}`, 'aria-pressed': String(tab === k),
+      onclick: () => {
+        tab = k;
+        history.replaceState(null, '', k === 'all' ? '#/rules' : `#/rules?status=${k}`);
+        render();
+      },
+    }, label, h('span', { class: 'count' }, num(count(k))))));
+    updateReviewBadge(count('review'));
+    renderRules(list, tab, render);
+  };
+  render();
 };
 
-function renderRules(root) {
+// review approves or rejects learned rules, then re-renders.
+async function reviewRules(action, ids, rerender) {
+  try {
+    cache.rules = await api('POST', '/api/rules/review', { action, ids });
+    toast(`${plural(ids.length, 'rule')} ${action === 'approve' ? 'approved' : 'rejected'}`);
+  } catch (err) { reportError(err); }
+  rerender();
+}
+
+function learnedNote(r) {
+  const l = r.learned;
+  if (!l) return null;
+  const parts = [`Learned ${ago(l.at)} from the ${l.model || 'Laya'} checkpoint`, `${pct(l.confidence)} confident in ${l.category}`];
+  if (l.severity) parts.push(`severity ${l.severity} (${pct(l.severity_confidence)})`);
+  parts.push(`source ${sourceName(l.source_id)}`);
+  return h('div', { class: 'learned' },
+    h('div', { class: 'meta' }, parts.join(' · '), l.event_id ? [' · ', h('a', { href: `#/events/${l.event_id}` }, 'event')] : null),
+    l.example ? h('div', { class: 'meta mono example', title: l.example }, l.example) : null);
+}
+
+function renderRules(root, tab = 'all', rerender = () => renderRules(root, tab)) {
   clear(root);
-  const rules = cache.rules;
-  if (!rules.length) root.append(h('div', { class: 'empty' }, 'No rules. Events will only get heuristic severities.'));
-  const move = async (i, d) => {
+  const all = cache.rules;
+  const rules = tab === 'all' ? all : all.filter((r) => ruleStatus(r) === tab);
+  if (tab === 'review' && rules.length) {
     const ids = rules.map((r) => r.id);
+    root.append(h('div', { class: 'list-item review-bar' },
+      h('div', { class: 'main' }, h('div', { class: 'meta' },
+        'Laya learned these from the engine\'s answers. They already classify and alert. Approve the ones that are right, edit the ones that are close, and reject the rest: a rejected rule keeps the engine away from its pattern.')),
+      h('div', { class: 'actions' },
+        h('button', { type: 'button', class: 'small', onclick: () => reviewRules('approve', ids, rerender) }, `Approve all ${num(ids.length)}`),
+        h('button', {
+          type: 'button', class: 'small danger',
+          onclick: async () => {
+            if (!(await confirmDialog(`Reject all ${plural(ids.length, 'learned rule')}? Their patterns stay uncategorized and aren't sent to the engine again.`, 'Reject all'))) return;
+            reviewRules('reject', ids, rerender);
+          },
+        }, 'Reject all'))));
+  }
+  if (!rules.length) {
+    const empty = {
+      all: 'No rules. Events will only get heuristic severities.',
+      active: 'No active rules.',
+      review: engineSettings().learn_rules === false
+        ? 'Nothing to review. Rule learning is off (Settings → Laya engine).'
+        : 'Nothing to review. When the Laya engine categorizes a pattern no rule covers, the rule Laya learns from it appears here.',
+      rejected: 'No rejected rules.',
+    };
+    root.append(h('div', { class: 'empty' }, empty[tab]));
+  }
+  const move = async (i, d) => {
+    const ids = all.map((r) => r.id);
     [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
     cache.rules = await api('POST', '/api/rules/reorder', { ids }).catch(reportError) || cache.rules;
-    renderRules(root);
+    rerender();
   };
-  rules.forEach((r, i) => {
+  rules.forEach((r) => {
+    const i = all.indexOf(r);
     const conds = r.conditions.map((c) => `${c.field} ${OP_LABELS[c.op] || c.op}${['exists', 'missing'].includes(c.op) ? '' : ` "${c.value}"`}`).join(r.match === 'any' ? '  OR  ' : '  AND  ');
     const acts = ruleActions(r);
+    const status = ruleStatus(r);
     const toggle = h('input', {
       type: 'checkbox', checked: r.enabled, title: 'Enabled',
       onchange: async (e) => {
         try {
           await api('PUT', `/api/rules/${r.id}`, { ...r, enabled: e.target.checked });
           r.enabled = e.target.checked;
-          renderRules(root);
+          rerender();
         } catch (err) { e.target.checked = !e.target.checked; reportError(err); }
       },
     });
     root.append(h('div', { class: `list-item ${r.enabled ? '' : 'disabled-item'}` },
-      h('div', { class: 'order-btns' },
+      // Order only makes sense against every rule.
+      tab === 'all' ? h('div', { class: 'order-btns' },
         h('button', { type: 'button', disabled: i === 0, 'aria-label': 'Move up', onclick: () => move(i, -1) }, '▲'),
-        h('button', { type: 'button', disabled: i === rules.length - 1, 'aria-label': 'Move down', onclick: () => move(i, 1) }, '▼')),
+        h('button', { type: 'button', disabled: i === all.length - 1, 'aria-label': 'Move down', onclick: () => move(i, 1) }, '▼')) : null,
       toggle,
       h('div', { class: 'main' },
-        h('div', { class: 'title' }, r.name, r.source_ids && r.source_ids.length ? h('span', { class: 'badge' }, `only: ${r.source_ids.map(sourceName).join(', ')}`) : null),
+        h('div', { class: 'title' }, r.name,
+          status === 'review' ? h('span', { class: 'badge warn' }, 'under review') : null,
+          status === 'rejected' ? h('span', { class: 'badge bad' }, 'rejected') : null,
+          status === 'active' && r.learned ? h('span', { class: 'badge', title: 'Learned from the Laya engine and approved' }, 'learned') : null,
+          r.source_ids && r.source_ids.length ? h('span', { class: 'badge' }, `only: ${r.source_ids.map(sourceName).join(', ')}`) : null),
         h('div', { class: 'meta mono' }, conds),
-        h('div', { class: 'meta' }, acts)),
+        h('div', { class: 'meta' }, acts),
+        status !== 'active' ? learnedNote(r) : null),
       h('div', { class: 'actions' },
+        status === 'review' ? h('button', { type: 'button', class: 'small primary', onclick: () => reviewRules('approve', [r.id], rerender) }, 'Approve') : null,
+        status === 'rejected' && r.learned ? h('button', { type: 'button', class: 'small', title: 'Apply what was learned again', onclick: () => reviewRules('approve', [r.id], rerender) }, 'Restore') : null,
         h('button', { type: 'button', class: 'small', onclick: () => editRule(r) }, 'Edit'),
+        status === 'review' ? h('button', { type: 'button', class: 'small danger', onclick: () => reviewRules('reject', [r.id], rerender) }, 'Reject') : null,
         h('button', {
           type: 'button', class: 'small danger',
           onclick: async () => {
-            if (!(await confirmDialog(`Delete rule "${r.name}"?`))) return;
+            const relearn = r.learned ? ' Laya may learn its pattern again when the engine next answers it; reject it instead to keep the engine away.' : '';
+            if (!(await confirmDialog(`Delete rule "${r.name}"?${relearn}`))) return;
             await api('DELETE', `/api/rules/${r.id}`).catch(reportError);
             await load('rules');
-            renderRules(root);
+            rerender();
           },
         }, 'Delete'))));
   });
@@ -1311,6 +1426,7 @@ function ruleActions(r) {
   if (r.drop) acts.push(h('span', { class: 'badge bad' }, 'drop'));
   if (r.category) acts.push(h('span', { class: 'badge' }, `category: ${r.category}`));
   if (r.severity) acts.push(h('span', { class: 'badge' }, `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}`));
+  if (r.skip_engine) acts.push(h('span', { class: 'badge', title: 'Matching events are not sent to the Laya engine' }, 'no engine'));
   if (r.stop) acts.push(h('span', { class: 'badge' }, 'stop'));
   acts.push(tags(r.tags));
   return acts;
@@ -1394,6 +1510,7 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
   const tagsIn = h('input', { value: (rule.tags || []).join(', ') });
   const drop = checkbox('Drop matching events (don\'t store or alert)', rule.drop);
   const stop = checkbox('Stop evaluating later rules', rule.stop);
+  const skipEngine = checkbox('Don\'t ask the Laya engine about matching events', rule.skip_engine);
   const srcChecks = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (rule.source_ids || []).includes(x.id)) }));
 
   const testIn = h('textarea', { rows: 3, placeholder: 'Sample log to try this rule on…' }, fromEvent ? fromEvent.message : '');
@@ -1404,10 +1521,16 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
     name: name.value.trim(), description: desc.value.trim(), enabled: enabled.input.checked, match: match.value,
     conditions: conds.map((c) => ({ field: c.field.trim(), op: c.op, value: c.value || '', case_sensitive: Boolean(c.case_sensitive) })),
     category: catIn.value.trim(), severity: sev.value, severity_mode: sevMode.value, tags: splitList(tagsIn.value),
-    drop: drop.input.checked, stop: stop.input.checked, source_ids: srcChecks.filter((x) => x.box.input.checked).map((x) => x.id),
+    drop: drop.input.checked, stop: stop.input.checked, skip_engine: skipEngine.input.checked,
+    source_ids: srcChecks.filter((x) => x.box.input.checked).map((x) => x.id),
   });
+  const status = ruleStatus(rule);
 
   const body = h('div', null, dl, catList,
+    rule.learned ? h('div', { class: `callout ${status === 'review' ? 'warn' : ''}` },
+      status === 'review' ? 'Learned from the Laya engine and awaiting review. It already classifies matching events. ' : null,
+      status === 'rejected' ? 'Rejected: it keeps the Laya engine away from its pattern. ' : null,
+      learnedNote(rule)) : null,
     h('div', { class: 'fields-2' }, field('Name', name), field('Description', desc)),
     enabled.el,
     h('fieldset', { class: 'mt' }, h('legend', null, 'When'),
@@ -1418,7 +1541,7 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
     h('fieldset', null, h('legend', null, 'Then'),
       h('div', { class: 'fields-3' }, field('Category', catIn), field('Severity', sev), field('Severity mode', sevMode)),
       field('Add tags', tagsIn, 'Comma-separated.'),
-      h('div', { class: 'row' }, drop.el, stop.el)),
+      h('div', { class: 'row' }, drop.el, stop.el, skipEngine.el)),
     h('fieldset', null, h('legend', null, 'Try it'),
       testIn,
       h('div', { class: 'row mt' }, h('button', {
@@ -1432,23 +1555,23 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
       }, 'Test this rule alone')),
       testOut));
 
+  // A rule under review can be saved as it is, or saved and approved.
+  const save = (approve) => async (close) => {
+    const r = collect();
+    if (approve) r.status = '';
+    const saved = isNew ? await api('POST', '/api/rules', r) : await api('PUT', `/api/rules/${rule.id}`, r);
+    close();
+    toast(approve ? 'Rule saved and approved' : 'Rule saved');
+    if (onSaved) await onSaved(saved);
+    else if (parseHash().page === 'rules') route();
+    else location.hash = '#/rules';
+  };
+  const cancel = { label: 'Cancel', onClick: (c) => c() };
   openModal({
     title: isNew ? 'Add rule' : `Edit rule "${rule.name}"`, body, wide: true,
-    actions: [
-      { label: 'Cancel', onClick: (c) => c() },
-      {
-        label: isNew ? 'Create rule' : 'Save', primary: true,
-        onClick: async (close) => {
-          const r = collect();
-          const saved = isNew ? await api('POST', '/api/rules', r) : await api('PUT', `/api/rules/${rule.id}`, r);
-          close();
-          toast('Rule saved');
-          if (onSaved) await onSaved(saved);
-          else if (parseHash().page === 'rules') route();
-          else location.hash = '#/rules';
-        },
-      },
-    ],
+    actions: status === 'review'
+      ? [cancel, { label: 'Save', onClick: save(false) }, { label: 'Save & approve', primary: true, onClick: save(true) }]
+      : [cancel, { label: isNew ? 'Create rule' : 'Save', primary: true, onClick: save(false) }],
   });
 }
 
@@ -1477,7 +1600,7 @@ pages.notifiers = async (main) => {
         h('button', {
           type: 'button', class: 'small danger',
           onclick: async () => {
-            if (!(await confirmDialog(`Delete notifier "${n.name}"? It will be removed from all routes.`))) return;
+            if (!(await confirmDialog(`Delete notifier "${n.name}"? It will be removed from all routes and alert groups.`))) return;
             await api('DELETE', `/api/notifiers/${n.id}`).catch(reportError);
             route();
           },
@@ -1667,6 +1790,109 @@ function editRoute(r, { onSaved } = {}) {
   });
 }
 
+// ---------- Alert groups ----------
+
+pages.groups = async (main) => {
+  await load('groups', 'notifiers', 'sources', 'settings');
+  const list = h('div', { class: 'card flush' });
+  append(main,
+    pageHead('Alert groups', 'Teams and people to alert about specific sources: each group has its channels, its members\' email addresses and a minimum severity. Assign sources here or in each source\'s settings.',
+      h('button', { type: 'button', class: 'primary', onclick: () => editGroup(null) }, 'Add alert group')),
+    list);
+  if (!cache.notifiers.length) {
+    main.insertBefore(h('div', { class: 'callout' }, 'Add a notifier first: a group is alerted through notifiers (a Slack or Teams channel, PagerDuty, or an email server for its members). ', h('a', { href: '#/notifiers' }, 'Go to notifiers →')), list);
+  }
+  if (!cache.groups.length) list.append(h('div', { class: 'empty' }, 'No alert groups yet.'));
+  const notifierName = (id) => (cache.notifiers.find((n) => n.id === id) || {}).name;
+  for (const g of cache.groups) {
+    const channels = g.notifier_ids.map(notifierName).filter(Boolean);
+    const when = [`severity ≥ ${g.min_severity}`];
+    if (g.categories && g.categories.length) when.push(`category in [${g.categories.join(', ')}]`);
+    const throttle = THROTTLES.find((t) => t[0] === g.throttle_seconds);
+    const reach = [];
+    if (channels.length) reach.push(channels.join(', '));
+    if ((g.emails || []).length) {
+      reach.push(g.email_notifier_id ? `${plural(g.emails.length, 'member')} by email (${notifierName(g.email_notifier_id)})` : h('span', { class: 'badge warn' }, `${plural(g.emails.length, 'member')}, no email notifier`));
+    }
+    list.append(h('div', { class: `list-item ${g.enabled ? '' : 'disabled-item'}` },
+      h('div', { class: 'main' },
+        h('div', { class: 'title' }, g.name, g.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
+        g.description ? h('div', { class: 'meta' }, g.description) : null,
+        h('div', { class: 'meta' }, 'Sources: ', g.source_ids.length ? g.source_ids.map(sourceName).join(', ') : h('span', { class: 'badge warn' }, 'none: the group gets no alerts')),
+        h('div', { class: 'meta' }, 'When ', when.join(' and ')),
+        h('div', { class: 'meta' }, '→ ', reach.length ? reach.map((x, i) => [i ? ' · ' : '', x]) : h('span', { class: 'badge warn' }, 'no channels or members'),
+          ' · ', g.throttle_seconds ? `throttle ${throttle ? throttle[1] : `${g.throttle_seconds}s`}` : 'no throttling')),
+      h('div', { class: 'actions' },
+        h('button', { type: 'button', class: 'small', onclick: () => editGroup(g) }, 'Edit'),
+        h('button', {
+          type: 'button', class: 'small danger',
+          onclick: async () => {
+            if (!(await confirmDialog(`Delete alert group "${g.name}"? Its sources stop alerting it.`))) return;
+            await api('DELETE', `/api/alert-groups/${g.id}`).catch(reportError);
+            route();
+          },
+        }, 'Delete'))));
+  }
+};
+
+function editGroup(g) {
+  const isNew = !g;
+  g = g ? JSON.parse(JSON.stringify(g)) : { name: '', enabled: true, min_severity: 'error', categories: [], notifier_ids: [], emails: [], source_ids: [], throttle_seconds: 900 };
+  const name = h('input', { value: g.name, placeholder: 'e.g. Payments team' });
+  const desc = h('input', { value: g.description || '' });
+  const enabled = checkbox('Enabled', g.enabled);
+  const minSev = select(SEVERITIES, g.min_severity);
+  const cats = [...new Set([...categories(), 'uncategorized', ...(g.categories || [])])].map((c) => ({ c, box: checkbox(c, (g.categories || []).includes(c)) }));
+  const srcs = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, g.source_ids.includes(x.id)) }));
+  const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, g.notifier_ids.includes(x.id)) }));
+  const emailNotifiers = cache.notifiers.filter((n) => n.type === 'email');
+  const emails = h('textarea', { rows: 3, placeholder: 'alice@example.com\nbob@example.com' }, (g.emails || []).join('\n'));
+  const emailVia = select([['', emailNotifiers.length ? '— choose an email notifier —' : 'no email notifier configured'], ...emailNotifiers.map((n) => [n.id, n.name])], g.email_notifier_id || (emailNotifiers.length === 1 ? emailNotifiers[0].id : ''));
+  const throttleOpts = THROTTLES.some((t) => t[0] === g.throttle_seconds) ? THROTTLES : [...THROTTLES, [g.throttle_seconds, `${g.throttle_seconds} seconds`]];
+  const throttle = select(throttleOpts.map(([v, l]) => [String(v), l]), String(g.throttle_seconds));
+
+  const body = h('div', null,
+    h('div', { class: 'fields-2' }, field('Name', name), field('Description', desc)), enabled.el,
+    h('fieldset', { class: 'mt' }, h('legend', null, 'Sources'),
+      srcs.length ? h('div', { class: 'chips' }, srcs.map((x) => x.box.el)) : h('p', { class: 'muted' }, 'No sources yet.'),
+      h('div', { class: 'help mt-small' }, 'The group is alerted about events from these sources only.')),
+    h('fieldset', null, h('legend', null, 'Which events'),
+      field('Minimum severity', minSev),
+      h('div', { class: 'field' }, h('label', null, 'Categories'), h('div', { class: 'chips' }, cats.map((x) => x.box.el)), h('div', { class: 'help' }, 'None checked = any category.'))),
+    h('fieldset', null, h('legend', null, 'Alert'),
+      h('div', { class: 'field' }, h('label', null, 'Channels'),
+        nts.length ? h('div', { class: 'chips' }, nts.map((x) => x.box.el)) : h('p', { class: 'muted' }, 'No notifiers configured yet.'),
+        h('div', { class: 'help' }, 'Slack or Teams channels, PagerDuty, webhooks: the notifiers this group is reached on.')),
+      h('div', { class: 'fields-2' },
+        field('Members (email)', emails, 'One address per line (or comma-separated).'),
+        field('Email them through', emailVia, 'An email notifier: its SMTP server and From address are used, with these members as the recipients.')),
+      field('Throttle repeats', throttle, 'After alerting on a problem, suppress the same fingerprint on the same channel for this long.')));
+
+  openModal({
+    title: isNew ? 'Add alert group' : `Edit alert group "${g.name}"`, body, wide: true,
+    actions: [
+      { label: 'Cancel', onClick: (c) => c() },
+      {
+        label: isNew ? 'Create group' : 'Save', primary: true,
+        onClick: async (close) => {
+          const data = {
+            ...g, name: name.value.trim(), description: desc.value.trim(), enabled: enabled.input.checked, min_severity: minSev.value,
+            categories: cats.filter((x) => x.box.input.checked).map((x) => x.c),
+            source_ids: srcs.filter((x) => x.box.input.checked).map((x) => x.id),
+            notifier_ids: nts.filter((x) => x.box.input.checked).map((x) => x.id),
+            emails: emails.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean),
+            email_notifier_id: emailVia.value, throttle_seconds: Number(throttle.value),
+          };
+          if (isNew) await api('POST', '/api/alert-groups', data); else await api('PUT', `/api/alert-groups/${g.id}`, data);
+          close();
+          toast('Alert group saved');
+          route();
+        },
+      },
+    ],
+  });
+}
+
 // ---------- Deliveries ----------
 
 pages.deliveries = async (main) => {
@@ -1717,6 +1943,8 @@ pages.settings = async (main) => {
     setSev: checkbox('Let the engine judge severity when the record states no level (about doubles engine time; off by default)', false),
     inFlight: h('input', { type: 'number', min: 1, max: 16, step: 1 }),
     timeout: h('input', { type: 'number', min: 1, max: 300, step: 1 }),
+    learn: checkbox('Learn rules from the engine\'s answers (marked for review under Classification rules)', false),
+    learnConf: h('input', { type: 'number', min: 0, max: 1, step: 0.05 }),
   };
   const fill = (x) => {
     f.enabled.input.checked = Boolean(x.enabled);
@@ -1730,6 +1958,8 @@ pages.settings = async (main) => {
     f.setSev.input.checked = Boolean(x.set_severity);
     f.inFlight.value = x.max_in_flight || 1;
     f.timeout.value = x.timeout_seconds || 30;
+    f.learn.input.checked = x.learn_rules !== false;
+    f.learnConf.value = x.learn_min_confidence ?? 0.8;
   };
   fill(e);
 
@@ -1821,6 +2051,8 @@ pages.settings = async (main) => {
         set_severity: f.setSev.input.checked,
         max_in_flight: numberIn(f.inFlight, 'Requests per engine instance', 1, 16, true),
         timeout_seconds: numberIn(f.timeout, 'Timeout', 1, 300, true),
+        learn_rules: f.learn.input.checked,
+        learn_min_confidence: numberIn(f.learnConf, 'Confidence to learn a rule', 0, 1, false),
       };
     } catch (err) {
       if (err instanceof InputError) showErr(engineErr, err.message);
@@ -1928,6 +2160,10 @@ pages.settings = async (main) => {
         h('div', { class: 'fields-2 mt' },
           field('Requests per engine instance', f.inFlight, 'At once, to each laya-serve (1–16, default 1). laya-serve computes one answer at a time, so more only wait inside it. For more throughput, run more instances and list every URL.'),
           field('Timeout (seconds)', f.timeout, 'Events wait at most this long (up to 300) for the engine, queueing included, then go on with the rules\' result.')),
+        h('h3', null, 'Learning'),
+        h('div', { class: 'checks' }, f.learn.el),
+        h('div', { class: 'fields-2' },
+          field('Confidence to learn a rule', f.learnConf, 'An answer at least this confident (and at least the minimum confidence above) becomes a rule for its message pattern and source, under review. Default 0.8.')),
         engineErr,
         h('h3', null, 'Status'), statusBox,
         h('h3', null, 'Connection'),
@@ -4015,6 +4251,7 @@ async function boot() {
     return;
   }
   document.getElementById('version').textContent = `v${cache.info.version}`;
+  GET('/api/stats').then((st) => updateReviewBadge(st.learning ? st.learning.review : 0)).catch(() => {});
   if (!booted) {
     booted = true;
     window.addEventListener('hashchange', route);

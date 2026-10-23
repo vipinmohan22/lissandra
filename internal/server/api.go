@@ -69,6 +69,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	s.importRoutes(mux)
 	s.setupRoutes(mux)
+	s.groupRoutes(mux)
 }
 
 // update runs a config mutation and maps errors to HTTP responses.
@@ -144,6 +145,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 			"dropped": d.Dropped.Load(), "throttled": d.Throttled.Load(),
 		},
 		"engine":         s.laya.Status(),
+		"learning":       s.learningStats(),
 		"imports":        map[string]any{"active": s.imports.Active(), "done": s.imports.Succeeded.Load(), "failed": s.imports.Failed.Load()},
 		"sources":        s.pollers.Status(),
 		"uptime_seconds": int(time.Since(s.started).Seconds()),

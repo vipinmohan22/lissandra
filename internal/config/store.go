@@ -93,7 +93,8 @@ var ErrSave = errors.New("saving the configuration failed")
 // Decode parses a config document into c. A document without engine
 // settings (written before the engine existed) gets the engine's defaults
 // rather than zero values, such as a confidence threshold of 0; one that has
-// them keeps exactly what it says.
+// them keeps exactly what it says, except that rule learning is on when it
+// isn't mentioned.
 func Decode(data []byte, c *Config) error {
 	var probe struct {
 		Settings struct {
@@ -103,6 +104,10 @@ func Decode(data []byte, c *Config) error {
 	*c = Config{}
 	if json.Unmarshal(data, &probe) == nil && (probe.Settings.Engine == nil || string(probe.Settings.Engine) == "null") {
 		c.Settings.Engine = Defaults().Settings.Engine
+	} else {
+		// Engine settings written before rule learning existed get it on;
+		// a document that says learn_rules keeps what it says.
+		c.Settings.Engine.LearnRules = true
 	}
 	return json.Unmarshal(data, c)
 }

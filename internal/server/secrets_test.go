@@ -153,7 +153,7 @@ func TestSaveFailureIsAServerError(t *testing.T) {
 	p := pipeline.New(100, store, d, a)
 	pm := poller.NewManager(ctx, log, p.SubmitWait)
 	reg := importer.NewRegistry(importer.RegistryConfig{Keep: 3, Limits: importer.Limits{Events: 1000, Bytes: 8 << 20}})
-	srv := httptest.NewServer(New(Options{Version: "test", AdminToken: adminToken, UI: fstest.MapFS{}}, log, cfg, store, p, d, a, pm, reg).Handler())
+	srv := httptest.NewServer(New(Options{Version: "test", AdminToken: adminToken, UI: fstest.MapFS{}}, log, cfg, store, p, d, a, nil, pm, reg).Handler())
 	defer srv.Close()
 	e := &env{t: t, srv: srv, cfg: cfg, imports: reg}
 	os.RemoveAll(dir)

@@ -22,6 +22,7 @@ import (
 	"github.com/vipinmohan22/layalogs/internal/engine"
 	"github.com/vipinmohan22/layalogs/internal/events"
 	"github.com/vipinmohan22/layalogs/internal/importer"
+	"github.com/vipinmohan22/layalogs/internal/learn"
 	"github.com/vipinmohan22/layalogs/internal/notify"
 	"github.com/vipinmohan22/layalogs/internal/pipeline"
 	"github.com/vipinmohan22/layalogs/internal/poller"
@@ -126,6 +127,8 @@ func run() error {
 	dispatcher := notify.NewDispatcher(log)
 	laya := engine.New(log)
 	pipe := pipeline.New(envInt("LAYA_QUEUE_SIZE", 10000), store, dispatcher, laya)
+	learner := learn.New(log, cfg.Update)
+	pipe.Learn = learner.Observe
 	pollers := poller.NewManager(ctx, log, pipe.SubmitWait)
 
 	cfg.Subscribe(func(c *config.Config) {
@@ -135,6 +138,7 @@ func run() error {
 		pipe.Configure(c)
 		dispatcher.Configure(c)
 		laya.Configure(c)
+		learner.Configure(c)
 		pollers.Configure(c)
 		log.Info("configuration applied", "version", c.Version, "sources", len(c.Sources), "rules", len(c.Rules), "notifiers", len(c.Notifiers), "routes", len(c.Routes))
 	})
@@ -145,6 +149,9 @@ func run() error {
 	defer stopRun()
 	done := make(chan struct{}, 2)
 	go func() { dispatcher.Run(runCtx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
+	// Learned rules are written until the signal: rules proposed during the
+	// drain are learned again when the engine next answers their pattern.
+	go learner.Run(ctx)
 	go func() {
 		pipe.Run(runCtx, envInt("LAYA_WORKERS", 4), envInt("LAYA_ENGINE_WORKERS", 16))
 		done <- struct{}{}
@@ -165,7 +172,7 @@ func run() error {
 		MaxIngestBytes: int64(envInt("LAYA_MAX_INGEST_BYTES", 10<<20)),
 		MaxImportBytes: int64(envInt("LAYA_MAX_IMPORT_BYTES", 100<<20)),
 		UI:             web.FS(),
-	}, log, cfg, store, pipe, dispatcher, laya, pollers, imports)
+	}, log, cfg, store, pipe, dispatcher, laya, learner, pollers, imports)
 
 	httpSrv := &http.Server{
 		Addr:              listen,

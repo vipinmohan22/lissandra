@@ -50,6 +50,9 @@ type Pipeline struct {
 	// Laya engine (queue and request) before it goes on without it; by
 	// default it is the engine's configured timeout.
 	MaxEngineWait time.Duration
+	// Learn, when set, is called with every live event the Laya engine
+	// answered, before it is stored (see package learn). Set it before Run.
+	Learn func(ev *model.Event)
 
 	// engineCtx carries engine requests; Drain cancels it.
 	engineCtx    context.Context
@@ -347,6 +350,9 @@ func (p *Pipeline) enqueue(q queued) bool {
 // finish records ev and hands it to the dispatcher. It is counted as
 // processed last, so Drain doesn't return before its alert is queued.
 func (p *Pipeline) finish(ev model.Event) {
+	if p.Learn != nil && ev.Engine != nil {
+		p.Learn(&ev)
+	}
 	p.store.Add(ev)
 	p.dispatcher.Handle(ev)
 	p.Processed.Add(1)

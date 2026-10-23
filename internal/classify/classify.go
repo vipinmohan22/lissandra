@@ -81,6 +81,7 @@ func (e *Engine) Classify(ev *model.Event) bool {
 	ev.Classifier = ByHeuristic
 	ev.Category = ""
 	ev.MatchedRules = nil
+	ev.NoEngine = false
 
 	ctx := evalCtx{ev: ev}
 	for _, r := range e.rules {
@@ -94,6 +95,9 @@ func (e *Engine) Classify(ev *model.Event) bool {
 		ev.Classifier = ByRules
 		if r.Drop {
 			return false
+		}
+		if r.SkipEngine {
+			ev.NoEngine = true
 		}
 		for _, t := range r.Tags {
 			ev.AddTag(t)
@@ -127,6 +131,20 @@ type evalCtx struct {
 	ev          *model.Event
 	msgFold     string
 	msgFoldDone bool
+	pattern     string
+	patternDone bool
+}
+
+// value returns field's value, computing the message's pattern only once
+// per event: learned rules all test it.
+func (c *evalCtx) value(field string) (string, bool) {
+	if field != "pattern" {
+		return FieldValue(c.ev, field)
+	}
+	if !c.patternDone {
+		c.pattern, c.patternDone = Pattern(c.ev.Message), true
+	}
+	return c.pattern, true
 }
 
 // folded returns the case-folded form of a field value for prefilters,
@@ -155,7 +173,7 @@ func (r *compiledRule) matches(ctx *evalCtx) bool {
 }
 
 func (c *compiledCond) matches(ctx *evalCtx) bool {
-	raw, present := FieldValue(ctx.ev, c.Field)
+	raw, present := ctx.value(c.Field)
 	switch c.Op {
 	case config.OpExists:
 		return present
@@ -207,13 +225,16 @@ func (c *compiledCond) regexMatch(ctx *evalCtx, raw string) bool {
 	return c.re.MatchString(raw)
 }
 
-// FieldValue returns the string form of a named event field. Names other
-// than the built-ins resolve as dot paths into ev.Fields (an optional
-// "fields." prefix is accepted).
+// FieldValue returns the string form of a named event field. "pattern" is
+// the message's Pattern (lowercase, with numbers, ids and times replaced by
+// placeholders). Names other than the built-ins resolve as dot paths into
+// ev.Fields (an optional "fields." prefix is accepted).
 func FieldValue(ev *model.Event, name string) (string, bool) {
 	switch name {
 	case "message", "msg":
 		return ev.Message, true
+	case "pattern":
+		return Pattern(ev.Message), true
 	case "level":
 		return ev.Level, ev.Level != ""
 	case "severity":

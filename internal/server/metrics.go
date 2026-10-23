@@ -59,6 +59,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	metric("laya_engine_paused", "gauge", "1 while all engine requests are paused after errors.", fmt.Sprintf(" %d", paused))
 	metric("laya_engine_checkpoints_paused", "gauge", "Checkpoints paused alone because the engine answered with another.", fmt.Sprintf(" %d", len(est.PausedCheckpoints)))
 
+	ls := s.learningStats()
+	metric("laya_rules_learned_total", "counter", "Rules learned from the Laya engine's answers.", fmt.Sprintf(" %d", ls.Learned))
+	metric("laya_rules_review", "gauge", "Learned rules awaiting review.", fmt.Sprintf(" %d", ls.Review))
+
 	metric("laya_imports_total", "counter", "Log file analyses by outcome.",
 		fmt.Sprintf(`{status="done"} %d`, s.imports.Succeeded.Load()),
 		fmt.Sprintf(`{status="failed"} %d`, s.imports.Failed.Load()))

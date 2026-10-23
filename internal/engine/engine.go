@@ -427,7 +427,7 @@ func (c *Classifier) Eligible(ev *model.Event) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := c.settings
-	if !s.Enabled || c.client == nil || !ev.Severity.AtLeast(s.MinSeverity) {
+	if !s.Enabled || c.client == nil || ev.NoEngine || !ev.Severity.AtLeast(s.MinSeverity) {
 		return false
 	}
 	if s.OnlyUncategorized && ev.Category != model.Uncategorized {
