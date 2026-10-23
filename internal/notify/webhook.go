@@ -20,6 +20,7 @@ func init() {
 		Label: "Generic webhook",
 		Description: "Send an HTTP request to any endpoint (Opsgenie, ntfy, an internal service, …). " +
 			"The body is a Go text/template; leave it empty to send Laya's standard JSON payload.",
+		Audience: "The system at the URL.",
 		Fields: []Field{
 			{Key: "url", Label: "URL", Type: "text", Required: true, Placeholder: "https://example.com/hooks/laya"},
 			{Key: "method", Label: "Method", Type: "select", Options: []string{"POST", "PUT", "PATCH"}, Default: "POST"},

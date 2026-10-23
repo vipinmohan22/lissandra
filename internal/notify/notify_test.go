@@ -515,3 +515,29 @@ func TestNotifierErrorsHideSecrets(t *testing.T) {
 		t.Errorf("request error: %v", err)
 	}
 }
+
+func TestRecipientAndAudience(t *testing.T) {
+	recipients := map[string]string{"email": "to", "slack": "mention"}
+	for _, typ := range []string{"email", "slack", "teams", "discord", "googlechat", "pagerduty", "webhook"} {
+		p, ok := PluginFor(typ)
+		if !ok {
+			t.Fatalf("no plugin %s", typ)
+		}
+		if p.Audience == "" {
+			t.Errorf("%s has no audience", p.Type)
+		}
+		var keys []string
+		for _, f := range p.Fields {
+			if f.Recipient {
+				keys = append(keys, f.Key)
+			}
+		}
+		if want := recipients[p.Type]; strings.Join(keys, ",") != want {
+			t.Errorf("%s recipient fields = %v, want %q", p.Type, keys, want)
+		}
+	}
+	data, _ := json.Marshal(Plugins())
+	if !strings.Contains(string(data), `"recipient":true`) || !strings.Contains(string(data), `"audience":"The addresses in To."`) {
+		t.Errorf("JSON = %s", data)
+	}
+}

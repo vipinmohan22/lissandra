@@ -171,7 +171,35 @@ func Normalize(c *Config) error {
 	if len(cats) > MaxCategories {
 		return fmt.Errorf("settings: at most %d categories", MaxCategories)
 	}
+	if c.Onboarding != nil {
+		normalizeOnboarding(c.Onboarding)
+	}
 	return normalizeEngine(&st.Engine)
+}
+
+// normalizeOnboarding repairs setup state rather than rejecting it: it must
+// never stop Laya from starting. The API checks what clients send.
+func normalizeOnboarding(o *Onboarding) {
+	switch o.Status {
+	case "":
+		o.Status = OnboardingPending // a seed's "onboarding": {}
+	case OnboardingPending, OnboardingDeferred, OnboardingCompleted, OnboardingDismissed:
+	default:
+		o.Status = OnboardingDismissed // from a newer release, after a downgrade
+	}
+	for id, st := range o.Steps {
+		if !slices.Contains(OnboardingSteps, id) || !ValidOutcome(st.Outcome) {
+			delete(o.Steps, id)
+		}
+	}
+	if len(o.Steps) == 0 {
+		o.Steps = nil
+	}
+}
+
+// ValidOutcome reports whether s is a setup step outcome.
+func ValidOutcome(s string) bool {
+	return s == OutcomeDone || s == OutcomeDefaults || s == OutcomeSkipped
 }
 
 // MaxCategories bounds the category list: the engine answers a choice over

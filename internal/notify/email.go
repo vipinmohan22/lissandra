@@ -25,6 +25,7 @@ func init() {
 		Type:        "email",
 		Label:       "Email (SMTP)",
 		Description: "Send an HTML + plain-text email through any SMTP server (SES, SendGrid, Postfix, Office 365, Gmail, …).",
+		Audience:    "The addresses in To.",
 		Fields: []Field{
 			{Key: "smtp_host", Label: "SMTP host", Type: "text", Required: true, Placeholder: "smtp.example.com"},
 			{Key: "smtp_port", Label: "SMTP port", Type: "number", Default: "587"},
@@ -32,7 +33,7 @@ func init() {
 			{Key: "username", Label: "Username", Type: "text"},
 			{Key: "password", Label: "Password", Type: "password", Secret: true, Placeholder: "${env:SMTP_PASSWORD}"},
 			{Key: "from", Label: "From", Type: "text", Required: true, Placeholder: "Laya <laya@example.com>"},
-			{Key: "to", Label: "To", Type: "text", Required: true, Placeholder: "oncall@example.com, team@example.com", Help: "Comma-separated recipients."},
+			{Key: "to", Label: "To", Type: "text", Required: true, Placeholder: "oncall@example.com, team@example.com", Help: "Comma-separated recipients.", Recipient: true},
 			{Key: "subject_prefix", Label: "Subject prefix", Type: "text", Default: "[Laya]"},
 			{Key: "insecure_skip_verify", Label: "Skip TLS certificate verification", Type: "checkbox", Help: "Only for internal relays with self-signed certificates."},
 		},

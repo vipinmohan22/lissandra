@@ -50,6 +50,8 @@
 }
 
 * { box-sizing: border-box; }
+/* hidden must win over the display of buttons, fields and the like. */
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body { background: var(--bg); color: var(--text); font: 14px/1.5 var(--font); }
 a { color: var(--accent); text-decoration: none; }
@@ -127,6 +129,7 @@ td.nowrap, .nowrap { white-space: nowrap; }
 td.fname { max-width: 0; width: 40%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .empty { padding: 32px; text-align: center; color: var(--muted); }
 
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); white-space: nowrap; }
@@ -220,6 +223,63 @@ td.fname { max-width: 0; width: 40%; white-space: nowrap; overflow: hidden; text
 .login-back { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 16px; }
 .login { width: 100%; max-width: 380px; }
 .login .brand { padding: 0 0 12px; }
+.login-help { margin-top: 14px; }
+.login-help p { margin: 6px 0 0; }
+.login-help code { overflow-wrap: anywhere; }
+
+.callout.banner { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+
+/* Setup wizard: a full page in the same shell, without the sidebar. Step
+   numbers and marks come from counters and generated content. */
+body.setup-mode .sidebar { display: none; }
+body.setup-mode main { max-width: 920px; margin: 0 auto; width: 100%; }
+.setup-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.setup-head .brand { padding: 0; }
+.setup-head .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.stepper { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0 0 18px; counter-reset: step; }
+.stepper li.num { counter-increment: step; }
+.stepper a { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); background: var(--panel); }
+.stepper a:hover { text-decoration: none; background: var(--panel-2); }
+.stepper li.num a::before { content: counter(step); display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; font-size: 11px; font-weight: 600; }
+.stepper .st-done a::before, .stepper .st-defaults a::before { content: "✓"; color: var(--ok); }
+.stepper .st-skipped a::before { content: "–"; }
+.stepper .st-na a { opacity: .6; }
+.stepper a[aria-current="step"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.setup-compact { display: none; margin-bottom: 14px; }
+.stepper-all summary { cursor: pointer; font-size: 13px; }
+.stepper-all .stepper { margin: 8px 0 0; }
+.setup-page > h1 { margin-bottom: 14px; }
+#setup-title:focus { outline: none; }
+.setup-foot { position: sticky; bottom: 0; z-index: 5; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 16px; margin-top: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.setup-foot .back { margin-right: auto; }
+.setup-foot .why, .setup-foot .setup-error { flex-basis: 100%; }
+.setup-foot .why { font-size: 12px; color: var(--muted); }
+.setup-foot .why:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.setup-error:empty { display: none; }
+.setup-error .callout { margin: 0; }
+button[aria-disabled="true"] { opacity: .55; cursor: default; }
+.lead { font-size: 15px; margin: 0; }
+.tile-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.tile { flex-direction: column; align-items: flex-start; gap: 4px; white-space: normal; text-align: left; padding: 12px; }
+div.tile { display: flex; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2); }
+.flow { margin: 14px 0 4px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.checklist { list-style: none; padding: 0; margin: 8px 0 14px; }
+.checklist li { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; }
+.checklist .badge { min-width: 80px; text-align: center; margin-top: 2px; }
+.token-box { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; min-width: 0; background: var(--code-bg); padding: 6px 8px; border-radius: 6px; }
+.token-part { margin: 6px 0 12px 22px; }
+.token-part > .help { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.token-panel .callout { margin: 12px 0 0; }
+.listening, .arrived { margin: 6px 0; }
+.listening::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .listening::before { animation: none; } }
+.arrived { overflow-wrap: anywhere; }
+.try-it { margin-top: 12px; }
+.try-it summary { cursor: pointer; font-weight: 600; }
+.try-it > .card { position: static; box-shadow: none; border: none; padding: 12px 0 0; }
+.notify-card .row h2 { margin: 0; }
+.table-wrap { overflow-x: auto; }
 
 @media (max-width: 860px) {
   #app { flex-direction: column; }
@@ -236,6 +296,21 @@ td.fname { max-width: 0; width: 40%; white-space: nowrap; overflow: hidden; text
   .grid.cols-2 { grid-template-columns: 1fr; }
   .hbar { grid-template-columns: 90px 1fr 44px; }
   td.msg { width: auto; }
+  /* The wizard: a compact stepper, and the footer's buttons in two
+     columns in DOM order, so the visual order is the tab order. */
+  .setup-steps { display: none; }
+  .setup-compact { display: block; }
+  .stepper-all .stepper { flex-direction: column; align-items: flex-start; }
+  .setup-foot { position: static; display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; }
+  .setup-foot button { justify-content: center; white-space: normal; }
+  .setup-foot .back { margin-right: 0; }
+  .setup-foot .why, .setup-foot .setup-error { grid-column: 1 / -1; }
+  .tile-grid { grid-template-columns: 1fr 1fr; }
+  /* Who gets what: wrap long addresses and badges so the last column
+     stays on screen instead of scrolling out of view. */
+  .table-wrap th, .table-wrap td { padding: 8px 6px; }
+  .table-wrap td { overflow-wrap: anywhere; }
+  .table-wrap td .badge { white-space: normal; border-radius: 6px; }
 }
 
 .dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 28px 16px; text-align: center; cursor: pointer; background: var(--panel-2); }

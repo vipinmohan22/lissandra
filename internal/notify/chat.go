@@ -16,12 +16,13 @@ func init() {
 		Type:        "slack",
 		Label:       "Slack",
 		Description: "Post to a Slack channel through an Incoming Webhook. Also works with Slack-compatible webhooks (Mattermost, Rocket.Chat).",
+		Audience:    "Everyone in the channel the webhook posts to. Mention on critical can ping people.",
 		Fields: []Field{
 			{Key: "webhook_url", Label: "Webhook URL", Type: "password", Required: true, Secret: true, Placeholder: "https://hooks.slack.com/services/…", Help: "Create one under Slack app → Incoming Webhooks. ${env:NAME} reads it from the environment."},
 			{Key: "username", Label: "Username", Type: "text", Placeholder: "Laya", Help: "Optional display name (ignored by newer Slack apps)."},
 			{Key: "icon_emoji", Label: "Icon emoji", Type: "text", Placeholder: ":rotating_light:"},
 			{Key: "channel", Label: "Channel override", Type: "text", Placeholder: "#alerts", Help: "Only honoured by legacy webhooks and Mattermost."},
-			{Key: "mention", Label: "Mention on critical", Type: "text", Placeholder: "<!here>", Help: "Text prepended to critical alerts, e.g. <!channel> or <@U012AB3CD>."},
+			{Key: "mention", Label: "Mention on critical", Type: "text", Placeholder: "<!here>", Help: "Text prepended to critical alerts, e.g. <!channel> or <@U012AB3CD>.", Recipient: true},
 		},
 		New: func(s map[string]string) (Sender, error) {
 			if err := checkURL(s["webhook_url"]); err != nil {
@@ -34,6 +35,7 @@ func init() {
 		Type:        "teams",
 		Label:       "Microsoft Teams",
 		Description: "Post an Adaptive Card to a Teams channel through a Workflows (Power Automate) webhook or a legacy Incoming Webhook.",
+		Audience:    "Everyone in the Teams channel the workflow posts to.",
 		Fields: []Field{
 			{Key: "webhook_url", Label: "Webhook URL", Type: "password", Required: true, Secret: true, Placeholder: "https://…logic.azure.com/workflows/…", Help: "In Teams: channel → Workflows → \"Post to a channel when a webhook request is received\"."},
 		},
@@ -48,6 +50,7 @@ func init() {
 		Type:        "discord",
 		Label:       "Discord",
 		Description: "Post an embed to a Discord channel webhook.",
+		Audience:    "Everyone in the channel the webhook posts to.",
 		Fields: []Field{
 			{Key: "webhook_url", Label: "Webhook URL", Type: "password", Required: true, Secret: true, Placeholder: "https://discord.com/api/webhooks/…"},
 			{Key: "username", Label: "Username", Type: "text", Placeholder: "Laya"},
@@ -63,6 +66,7 @@ func init() {
 		Type:        "googlechat",
 		Label:       "Google Chat",
 		Description: "Post to a Google Chat space through an incoming webhook.",
+		Audience:    "Everyone in the space the webhook posts to.",
 		Fields: []Field{
 			{Key: "webhook_url", Label: "Webhook URL", Type: "password", Required: true, Secret: true, Placeholder: "https://chat.googleapis.com/v1/spaces/…/messages?key=…"},
 		},
@@ -77,6 +81,7 @@ func init() {
 		Type:        "pagerduty",
 		Label:       "PagerDuty",
 		Description: "Trigger PagerDuty incidents through the Events API v2. Repeats of the same problem share a dedup key.",
+		Audience:    "Whoever is on call for the PagerDuty service this routing key belongs to.",
 		Fields: []Field{
 			{Key: "routing_key", Label: "Integration (routing) key", Type: "password", Required: true, Secret: true},
 			{Key: "api_url", Label: "Events API URL", Type: "text", Default: "https://events.pagerduty.com/v2/enqueue", Help: "Use https://events.eu.pagerduty.com/v2/enqueue for EU accounts."},

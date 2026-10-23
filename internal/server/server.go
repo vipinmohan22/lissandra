@@ -4,7 +4,6 @@ package server
 
 import (
 	"bytes"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/vipinmohan22/layalogs/internal/auth"
 	"github.com/vipinmohan22/layalogs/internal/config"
 	"github.com/vipinmohan22/layalogs/internal/engine"
 	"github.com/vipinmohan22/layalogs/internal/events"
@@ -27,7 +27,9 @@ import (
 // Options configures the server.
 type Options struct {
 	Version        string
+	Auth           *auth.Store // the admin token; nil accepts AdminToken alone (tests)
 	AdminToken     string
+	OnNomad        bool   // running as a Nomad allocation, for the UI's hints
 	PublicURL      string // fallback when Settings.PublicURL is empty
 	MaxIngestBytes int64
 	MaxImportBytes int64 // upload cap for log file analysis
@@ -47,6 +49,7 @@ type Server struct {
 	laya       *engine.Classifier
 	pollers    *poller.Manager
 	imports    *importer.Registry
+	auth       *auth.Store
 	started    time.Time
 
 	// sources is a cheap snapshot for the hot ingest path.
@@ -65,7 +68,11 @@ func New(opts Options, log *slog.Logger, cfg *config.Store, store *events.Store,
 	if opts.MaxImportDecompressed <= 0 {
 		opts.MaxImportDecompressed = 512 << 20
 	}
-	s := &Server{opts: opts, log: log, cfg: cfg, store: store, pipeline: p, dispatcher: d, laya: laya, pollers: pm, imports: imports, started: time.Now()}
+	if opts.Auth == nil {
+		opts.Auth = auth.Static(opts.AdminToken)
+	}
+	s := &Server{opts: opts, log: log, cfg: cfg, store: store, pipeline: p, dispatcher: d, laya: laya, pollers: pm, imports: imports,
+		auth: opts.Auth, started: time.Now()}
 	cfg.Subscribe(func(c *config.Config) {
 		m := make(map[string]config.Source, len(c.Sources))
 		for _, src := range c.Sources {
@@ -116,18 +123,27 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// requireAdmin checks the admin token on every request, against the token
+// active now, so a change applies from the next request.
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
-	want := []byte(s.opts.AdminToken)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(got)), want) != 1 {
+		if !s.auth.Check(bearer(r)) {
 			writeError(w, http.StatusUnauthorized, "admin token required")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// bearer returns the request's bearer token, or "".
+func bearer(r *http.Request) string {
+	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(got)
 }
 
 type statusRecorder struct {
@@ -195,6 +211,20 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// writeErrorCode adds a machine-readable code for the UI to act on.
+func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
+}
+
+// apiError is an error a config update returns to be answered with its own
+// status and code rather than a 400.
+type apiError struct {
+	status    int
+	code, msg string
+}
+
+func (e *apiError) Error() string { return e.msg }
+
 // readBody reads a JSON request body (up to 2 MiB) for decoding later.
 func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
@@ -210,6 +240,30 @@ func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 		return data, true
 	}
 	return nil, false
+}
+
+// readStrictJSON decodes a JSON body (up to 2 MiB) into v, refusing
+// unknown fields and anything after the value, for the endpoints that
+// change the admin token and setup state.
+func readStrictJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(v)
+	if err == nil && dec.Decode(&json.RawMessage{}) != io.EOF {
+		err = errors.New("unexpected data after the JSON value")
+	}
+	var mbe *http.MaxBytesError
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &mbe):
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+	case errors.Is(err, io.EOF):
+		writeErrorCode(w, http.StatusBadRequest, "invalid_json", "request body is empty")
+	default:
+		writeErrorCode(w, http.StatusBadRequest, "invalid_json", "invalid JSON: "+err.Error())
+	}
+	return false
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {

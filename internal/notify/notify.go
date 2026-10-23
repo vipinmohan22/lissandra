@@ -50,6 +50,7 @@ type Field struct {
 	Help        string   `json:"help,omitempty"`
 	Options     []string `json:"options,omitempty"`
 	Default     string   `json:"default,omitempty"`
+	Recipient   bool     `json:"recipient,omitempty"` // who receives alerts; the setup wizard edits these inline
 }
 
 // Plugin is a notifier type.
@@ -57,6 +58,7 @@ type Plugin struct {
 	Type        string  `json:"type"`
 	Label       string  `json:"label"`
 	Description string  `json:"description"`
+	Audience    string  `json:"audience,omitempty"` // one line: who receives this channel's alerts
 	Fields      []Field `json:"fields"`
 	// New builds a Sender. settings have defaults applied and ${env:...}
 	// references expanded.

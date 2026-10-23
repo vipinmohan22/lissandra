@@ -36,9 +36,11 @@ docker buildx build -t laya --load .
 docker run -p 8080:8080 -e LAYA_ADMIN_TOKEN=change-me-to-something-long -v laya-data:/data laya
 ```
 
+Without `LAYA_ADMIN_TOKEN`, Laya generates an admin token for each run and logs it as `admin_token`; sign in with it and the [setup wizard](#first-run) lets you set a permanent one. In production, set `LAYA_ADMIN_TOKEN` from your secret store (on Nomad, a Variable) instead.
+
 The image builds with `docker buildx build` (the legacy `docker build` can't read its Dockerfile), and `docker` needs a running daemon. Docker Desktop has both. On a Mac without it: `brew install colima docker docker-buildx`, add `"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]` to `~/.docker/config.json` so the CLI finds the plugin, then `colima start`. `make docker` builds `ghcr.io/vipinmohan22/laya:<version>` for your machine's platform; `make docker PLATFORM=linux/amd64` builds for x86 servers from an Apple Silicon Mac (Go cross-compiles, so it is as fast as a native build). The container runs as UID 65532: a named volume works as is, a host directory must be writable by that user.
 
-A fresh install has one push source called `default`. Open **Sources → Setup instructions** to copy its ingest URL and token, then send something:
+A fresh install has one push source called `default`, and the first sign-in opens the [setup wizard](#first-run). The wizard's Sources step, or **Sources → Setup instructions**, shows the source's ingest URL and token. Send something:
 
 ```sh
 curl -X POST http://localhost:8080/ingest/default \
@@ -50,6 +52,25 @@ curl -X POST http://localhost:8080/ingest/default \
 It appears on **Events** classified as `error / network`. Add a notifier under **Notifiers**, use **Send test** to check it, then create an **Alert route** to connect them.
 
 To deploy on Nomad, see [deploy/nomad/README.md](deploy/nomad/README.md). It includes a second, optional job for the [Laya engine](#laya-engine-optional).
+
+## First run
+
+The first time you sign in to a fresh data directory, Laya opens a setup wizard: a welcome page, five steps, and a review of what you set up.
+
+| Step | What you set | Use defaults |
+| --- | --- | --- |
+| Access | A permanent admin token, generated in your browser and shown before it is saved | Saves the generated token |
+| Sources | Laya's public URL, and the sources; it shows when the first event arrives | Adds a push source if none is enabled |
+| Classification | Categories and which rules are on, with a tester for your choices | Adds the built-in categories that are missing; rules are never changed |
+| Alert channels | Email, Slack, Teams, Discord, Google Chat, PagerDuty or a webhook | No alerts for now |
+| Who gets notified | Each channel's recipients (email To, Slack mention) and its route: minimum severity, categories, throttle | A route for each channel nothing routes to yet: error and above (critical for PagerDuty), 15-minute throttle |
+
+Every step can be skipped or set to Laya's defaults. Defaults only add what is missing, and the button says what it will add. **Use defaults for everything** on the welcome page does every step at once but never changes the admin token. Laya has no user accounts: people get alerts through channels, and the review page shows who gets what.
+
+- **Signing in the first time.** Without `LAYA_ADMIN_TOKEN`, use the token Laya logged as `admin_token`, for example `docker logs <container> 2>&1 | grep admin_token`. It changes on every restart until you set a permanent one in the Access step or under **Settings → Access**.
+- **Finish later** leaves setup for now, and the dashboard offers to resume it. **Skip setup** ends it and keeps the configuration as it is.
+- **Running it again.** Start it from **Settings → Setup guide**. What the wizard saves is ordinary configuration, which the other pages edit too.
+- **Which installs get it.** Only a configuration Laya creates from its defaults opens the wizard by itself. An existing install that is upgraded doesn't, and neither does one started from `LAYA_CONFIG_SEED`, unless the seed has an `"onboarding": {}` key. A seed can also mark steps as done: `"onboarding": {"steps": {"sources": {"outcome": "done"}}}`.
 
 ## Concepts
 
@@ -316,15 +337,15 @@ Then copy `./laya-logs` to the engine, register it with `LAYA_EXTRA_MODELS='{"lo
 
 ## Configuration
 
-Runtime configuration (sources, rules, notifiers, routes, settings) is edited in the UI and stored in `$LAYA_DATA_DIR/config.json`, which is written atomically with mode 0600. **Settings → Backup** exports and imports it as JSON.
+Runtime configuration (sources, rules, notifiers, routes, settings) is edited in the UI and stored in `$LAYA_DATA_DIR/config.json`, which is written atomically with mode 0600. **Settings → Backup** exports and imports it as JSON. Exports carry neither the admin token nor the setup wizard's progress, and an import keeps this instance's own.
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
-| `LAYA_ADMIN_TOKEN` | random per run (logged) | Bearer token for the UI and API. Set it to a long random value. |
+| `LAYA_ADMIN_TOKEN` | the token set in Laya (`admin-token.json`), else random per run (logged) | Bearer token for the UI and API. Set it to a long random value. When set, it is the only admin token; see [Admin token](#admin-token). |
 | `LAYA_LISTEN` | `:8080` | HTTP listen address. |
-| `LAYA_DATA_DIR` | `./data` | Where `config.json` lives. |
+| `LAYA_DATA_DIR` | `./data` | Holds `config.json` and `admin-token.json`. |
 | `LAYA_PUBLIC_URL` | derived from requests | External URL for ingest instructions and notification links (the UI setting takes precedence). |
-| `LAYA_CONFIG_SEED` | — | JSON config file used on first start only, when `config.json` doesn't exist yet. |
+| `LAYA_CONFIG_SEED` | — | JSON config file used on first start only, when `config.json` doesn't exist yet. Add `"onboarding": {}` to it to offer the [setup wizard](#first-run). |
 | `LAYA_EVENT_BUFFER` | `5000` | Recent events kept in memory for the UI. |
 | `LAYA_QUEUE_SIZE` | `10000` | Pipeline queue. When it's full, ingest returns 503 with `Retry-After`. |
 | `LAYA_WORKERS` / `LAYA_ENGINE_WORKERS` / `LAYA_NOTIFY_WORKERS` | `4` / `16` / `4` | Concurrency. Engine workers hold events waiting for the Laya engine; requests to it are capped by `max_in_flight` per engine instance. |
@@ -342,8 +363,10 @@ Endpoints:
 - `GET /healthz` returns liveness (used by the Nomad check).
 - `GET /metrics` serves Prometheus metrics: events received, processed, dropped and rejected; queue depths; last-hour events by severity; notification outcomes; log file analyses; pull-source health; and the Laya engine (below).
 - `POST /ingest/{source}` accepts logs.
-- `/api/*` is the REST API the UI uses. Everything requires `Authorization: Bearer $LAYA_ADMIN_TOKEN`. Besides the configuration (`/api/sources`, `/api/rules`, `/api/notifiers`, `/api/routes`, `/api/settings`, `/api/config/export` and `/import`):
+- `/api/*` is the REST API the UI uses. Everything requires the [admin token](#admin-token) (`Authorization: Bearer …`). Besides the configuration (`/api/sources`, `/api/rules`, `/api/notifiers`, `/api/routes`, `/api/settings`, `/api/config/export` and `/import`):
   - `GET /api/stats` (counters and engine status) and `GET /api/events`;
+  - `GET /api/auth` says where the admin token comes from, `PUT /api/auth/token` sets a new one (`{"token": "…"}`, sent with the current one) and `DELETE /api/auth/token` deletes a stored token that `LAYA_ADMIN_TOKEN` overrides;
+  - `GET /api/onboarding` is the setup wizard's progress, and `POST /api/onboarding/start`, `/steps/{step}`, `/defaults`, `/defer`, `/complete` and `/dismiss` change it;
   - `POST /api/imports` analyzes a log file (`?engine=1` to ask the Laya engine), and `GET /api/imports/{id}` (with `/events`, `/patterns` and `/training-data`) returns the results;
   - `GET /api/engine/health` checks the Laya engine, `POST /api/engine/classify` asks it about one message or event, and `GET /api/engine/training-data` exports laya-train data (see [Laya engine](#laya-engine-optional)).
 
@@ -365,12 +388,28 @@ The Laya engine's metrics:
 | `laya_engine_paused` | 1 while all calls are paused after errors. |
 | `laya_engine_checkpoints_paused` | Checkpoints paused alone because the engine answered with another. |
 
+### Admin token
+
+The UI and the API share one admin bearer token. Laya picks it at startup:
+
+| `LAYA_ADMIN_TOKEN` | Token set in Laya | Admin token |
+| --- | --- | --- |
+| set | either | `LAYA_ADMIN_TOKEN`, and only it. A token set in Laya is ignored, with a warning at startup; delete it under **Settings → Access** so that removing the variable later can't bring it back. |
+| unset | yes | The token set in Laya. Nothing is logged. |
+| unset | no | A random token for this run, logged as `admin_token`. |
+
+A token set in the UI (the setup wizard's Access step, or **Settings → Access**) is generated in the browser and shown, and is saved only once you confirm you have kept it. Laya stores it in `$LAYA_DATA_DIR/admin-token.json` (mode 0600) as an HMAC-SHA256 digest under a random key, never in plain text and never in `config.json`, so exports, imports and seeds don't carry it. A change applies at once: the tab that made it stays signed in, other tabs and API scripts need the new token, and the old one, a logged one included, stops working. If `admin-token.json` can't be read or parsed, Laya refuses to start rather than fall back to a logged token; fix or delete the file, or set `LAYA_ADMIN_TOKEN`. Releases before the setup wizard ignore the file, so after a downgrade sign in with `LAYA_ADMIN_TOKEN` or the logged token.
+
+The token is an API key, not a password: use the generated one, a password manager's generator or `openssl rand -hex 24`, never a password you use elsewhere. A token set in Laya must be 32 to 256 printable ASCII characters without spaces, with at least 10 different characters and none making up more than a quarter of it. These rules catch mistakes; the strength comes from the token being random. `LAYA_ADMIN_TOKEN` isn't checked against them.
+
+**Lost the admin token?** Set `LAYA_ADMIN_TOKEN` (on Nomad, `nomad var put nomad/jobs/laya LAYA_ADMIN_TOKEN=…`) and restart: it takes precedence. Or delete `admin-token.json` from the data directory and restart, and Laya logs a new token for the run.
+
 ## Operational notes
 
 - **Single instance.** Configuration is one file on one volume, so the Nomad job runs `count = 1` and Nomad reschedules it if the node fails. Recent events and delivery history live in memory and reset on restart. Laya is a classifier and alerter, not long-term log storage; keep shipping logs to your log store as well (a webhook notifier can forward classified events).
 - **Laya engine.** The engine is a separate service with its own needs: about 3.5 GB of memory and 4 CPU cores per instance on CPU, roughly 1–2 new message patterns per second each, or an NVIDIA GPU for far more. Laya never depends on it: without it, or while it's down, classification is the rules' alone. On Nomad, Laya re-reads the engine addresses from a file, so engine instances coming and going don't restart it; see [deploy/nomad/README.md](deploy/nomad/README.md#6-run-the-laya-engine-optional).
 - **Shutdown.** On SIGTERM or Ctrl-C, Laya stops accepting requests and stops polling, finishes the events it already accepted (engine requests are cancelled, so those events keep the rules' result unless the engine already answered their pattern), then delivers the notifications still queued, without retrying failed ones. Requests in progress get 8 s (then they are cut off) and events 8 s; notifications get whatever is left of 26 s from the signal, and stopping 2 s more: 28 s at most, within Nomad's 30 s `kill_timeout`. Laya logs what was left if time runs out.
-- **Security.** The UI sends a strict Content-Security-Policy and renders all log content as text, never HTML. Ingest and admin tokens are compared in constant time. Pull sources and webhooks can reach any URL the admin enters, so treat the admin token like infrastructure credentials and put Laya behind TLS (for example Traefik or another load balancer).
+- **Security.** The UI sends a strict Content-Security-Policy and renders all log content as text, never HTML. Ingest tokens are compared in constant time. The admin token is checked through an HMAC-SHA256 digest, which is also all Laya stores of a token set in the UI; it is an API key, so the fast hash is enough (a generated one has 192 random bits). Pull sources and webhooks can reach any URL the admin enters, so treat the admin token like infrastructure credentials and put Laya behind TLS (for example Traefik or another load balancer).
 
 ## Development
 
@@ -386,7 +425,9 @@ The layout:
 
 ```
 cmd/laya            entrypoint, env configuration, `laya analyze`
-internal/config     config model, validation, JSON store, secret masking
+internal/config     config model, validation, JSON store, secret masking, setup defaults
+internal/auth       admin token: precedence, storage as a keyed hash, rotation
+internal/atomicfile atomic file replacement, for config.json and admin-token.json
 internal/ingest     payload parsing (JSON / NDJSON / text / CSV), streaming file reader
 internal/poller     pull-source polling
 internal/classify   severity heuristics, rule engine, fingerprints

@@ -76,6 +76,8 @@ To read your admin token back:
 nomad var get -item=LAYA_ADMIN_TOKEN nomad/jobs/laya
 ```
 
+With `LAYA_ADMIN_TOKEN` in the Variable, the setup wizard's Access step and **Settings → Access** only say where the token comes from, which is the recommended setup. A token set in the UI instead lives in `admin-token.json` on Laya's volume and is lost with it; while the variable is set, such a token is ignored (see [Admin token](../../README.md#admin-token)).
+
 **Vault instead of Nomad Variables:** give the task a `vault {}` block and swap the template body, for example:
 
 ```hcl
@@ -93,6 +95,8 @@ $EDITOR deploy/nomad/laya.vars.hcl
 nomad job plan -var-file=deploy/nomad/laya.vars.hcl deploy/nomad/laya.nomad.hcl
 nomad job run  -var-file=deploy/nomad/laya.vars.hcl deploy/nomad/laya.nomad.hcl
 ```
+
+On a fresh volume Laya starts from its defaults, and the first visit to the UI (step 5) opens the [setup wizard](../../README.md#first-run). A volume that already holds a `config.json` keeps it, and the wizard doesn't open by itself.
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -117,6 +121,8 @@ nomad job run  -var-file=deploy/nomad/laya.vars.hcl deploy/nomad/laya.nomad.hcl
 - **Behind Traefik** (or another load balancer that reads Nomad or Consul services): set `service_tags` as shown in `laya.vars.example.hcl`, and set `public_url` to the external URL.
 - **Pinned port:** set `http_port = 8080` and browse to `http://<client>:8080`.
 - **Quick look:** `nomad service info laya` shows the address and port.
+
+Sign in with the admin token from step 3. On a fresh volume the [setup wizard](../../README.md#first-run) opens: it walks through sources, classification, alert channels and who gets notified, and each step can be skipped or set to Laya's defaults.
 
 Senders inside the cluster can discover Laya through service discovery. For example, a Fluent Bit or Vector job can template the address with `{{ range nomadService "laya" }}{{ .Address }}:{{ .Port }}{{ end }}`. Each source's **Setup instructions** dialog shows ready-made curl, Fluent Bit and Vector snippets with its URL and token filled in.
 
@@ -281,8 +287,8 @@ The job sets `GOMEMLIMIT` to 80% of `memory`, so Go reclaims memory before Docke
 ## Upgrades and backups
 
 - **Upgrade:** change `image` and re-run the job. The config file on the volume is kept; settings it doesn't have yet (the engine's, when upgrading from a release before it) start at their defaults. If the new version doesn't pass its health check, Nomad reverts to the old one. When the old one stops, it finishes the events it accepted and delivers queued notifications first (up to 28 s, within the job's 30 s `kill_timeout`). To upgrade the engine, see [Upgrades](#upgrades) in step 6.
-- **Backup:** use **Settings → Backup → Export** (masked) in the UI, or copy `config.json` from the volume. Secrets referenced as `${env:…}` live in the Nomad Variable, so back that up too (`nomad var get -out=json nomad/jobs/laya`). The engine's cache volume needs no backup: it's downloaded again.
-- **Seeding a new cluster:** render a known config into the task and set `LAYA_CONFIG_SEED` to its path. It's used only when `config.json` doesn't exist yet.
+- **Backup:** use **Settings → Backup → Export** (masked) in the UI, or copy `config.json` from the volume. Exports carry neither the admin token nor the setup wizard's progress; a token set in the UI is in `admin-token.json` next to `config.json`, so a copy of the volume restores both. Secrets referenced as `${env:…}` live in the Nomad Variable, so back that up too (`nomad var get -out=json nomad/jobs/laya`). The engine's cache volume needs no backup: it's downloaded again.
+- **Seeding a new cluster:** render a known config into the task and set `LAYA_CONFIG_SEED` to its path. It's used only when `config.json` doesn't exist yet. A seed doesn't open the setup wizard unless it has an `"onboarding": {}` key.
 
 ## Troubleshooting
 
@@ -291,7 +297,7 @@ The job sets `GOMEMLIMIT` to 80% of `memory`, so Go reclaims memory before Docke
 | Allocation stuck pending with `Missing: nomad.var.block(nomad/jobs/laya…)` | The variable doesn't exist yet. Create it (step 3). |
 | `permission denied` writing `/data/config.json` | Volume ownership. Static volumes must be owned by `65532:65532`. |
 | Placement fails with `missing compatible host volumes` | The volume name or node doesn't match. Run `nomad volume status -type host` or check the client's `host_volume` config. |
-| UI rejects the token | `nomad var get -item=LAYA_ADMIN_TOKEN nomad/jobs/laya`. The task restarts after the variable changes. |
+| UI rejects the token | `nomad var get -item=LAYA_ADMIN_TOKEN nomad/jobs/laya`. The task restarts after the variable changes. Without the variable, the token is the one set in the UI (`admin-token.json` on the volume) or, if none was, the one Laya logged as `admin_token`: `nomad alloc logs <alloc> \| grep admin_token`. |
 | Notifications fail | **Deliveries** in the UI shows the HTTP status or SMTP error from the last attempt, and `nomad alloc logs -stderr <alloc>` has details. |
 | Laya restarts by itself now and then | Check `nomad alloc status <alloc>` for `Template with change_mode restart re-rendered`: the variable `nomad/jobs/laya` changed. Engine instances coming and going don't restart Laya. |
 | Events never show an engine answer | `/api/engine/health` and the `engine` part of `/api/stats` show the URLs Laya uses, the last error, warnings and whether calls are paused. The address file is empty while no `laya-engine` instance is registered: `nomad service info laya-engine`, and `nomad alloc fs <alloc> laya/local/engine_urls`. Only events at or above `min_severity` that no rule categorized are sent. See also [Engine troubleshooting](#engine-troubleshooting). |

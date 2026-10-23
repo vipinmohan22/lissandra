@@ -243,6 +243,50 @@ type Settings struct {
 	Engine     EngineSettings `json:"engine"`
 }
 
+// Setup wizard statuses.
+const (
+	OnboardingPending   = "pending"   // offered: the UI opens it, the dashboard shows a banner
+	OnboardingDeferred  = "deferred"  // "Finish later": the banner only
+	OnboardingCompleted = "completed" // finished
+	OnboardingDismissed = "dismissed" // skipped as a whole
+)
+
+// Setup wizard steps, in the order the wizard shows them.
+const (
+	StepAccess   = "access"
+	StepSources  = "sources"
+	StepClassify = "classify"
+	StepChannels = "channels"
+	StepNotify   = "notify"
+)
+
+// OnboardingSteps lists the setup steps in order.
+var OnboardingSteps = []string{StepAccess, StepSources, StepClassify, StepChannels, StepNotify}
+
+// Outcomes of a setup step.
+const (
+	OutcomeDone     = "done"     // saved what the user chose
+	OutcomeDefaults = "defaults" // applied Laya's defaults
+	OutcomeSkipped  = "skipped"  // changed nothing; the step still counts as left to do
+)
+
+// Onboarding is the setup wizard's progress on this instance. nil (a config
+// written before the wizard, or a seed that doesn't ask for it) means it is
+// never offered on its own; Settings can still start it. Export leaves it
+// out and import keeps the current one.
+type Onboarding struct {
+	Status     string                    `json:"status"`
+	Steps      map[string]OnboardingStep `json:"steps,omitempty"`
+	StartedAt  *time.Time                `json:"started_at,omitempty"`
+	FinishedAt *time.Time                `json:"finished_at,omitempty"`
+}
+
+// OnboardingStep records how a setup step ended.
+type OnboardingStep struct {
+	Outcome string    `json:"outcome"`
+	At      time.Time `json:"at"`
+}
+
 // Config is the complete persisted configuration.
 type Config struct {
 	Version   int        `json:"version"`
@@ -251,4 +295,7 @@ type Config struct {
 	Notifiers []Notifier `json:"notifiers"`
 	Routes    []Route    `json:"routes"`
 	Settings  Settings   `json:"settings"`
+	// Onboarding is top level, not in Settings, so a stale Settings page
+	// saving its copy can't roll setup progress back.
+	Onboarding *Onboarding `json:"onboarding,omitempty"`
 }

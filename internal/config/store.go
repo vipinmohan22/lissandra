@@ -1,12 +1,15 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/vipinmohan22/layalogs/internal/atomicfile"
 )
 
 // Store owns the configuration and persists every change atomically to a
@@ -42,7 +45,11 @@ func Open(path, seedPath string) (*Store, error) {
 	}
 }
 
+// initial is the config a first start writes. Only one built from the
+// defaults offers the setup wizard: a seed's operator configured Laya as
+// code, so a seed gets it only by asking with its own "onboarding" key.
 func initial(seedPath string) (*Config, error) {
+	now := time.Now().UTC().Truncate(time.Second)
 	if seedPath != "" {
 		data, err := os.ReadFile(seedPath)
 		if err == nil {
@@ -53,6 +60,18 @@ func initial(seedPath string) (*Config, error) {
 			if err := Normalize(&c); err != nil {
 				return nil, fmt.Errorf("invalid seed %s: %w", seedPath, err)
 			}
+			if o := c.Onboarding; o != nil {
+				// A seed gives steps without dates.
+				if o.StartedAt == nil {
+					o.StartedAt = &now
+				}
+				for id, st := range o.Steps {
+					if st.At.IsZero() {
+						st.At = now
+						o.Steps[id] = st
+					}
+				}
+			}
 			return &c, nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
@@ -60,6 +79,7 @@ func initial(seedPath string) (*Config, error) {
 		}
 	}
 	c := Defaults()
+	c.Onboarding = &Onboarding{Status: OnboardingPending, StartedAt: &now}
 	if err := Normalize(c); err != nil {
 		return nil, err
 	}
@@ -113,7 +133,9 @@ func (s *Store) Get() *Config {
 
 // Update applies fn to a copy of the configuration, validates and persists
 // the result, then notifies subscribers. If fn or validation fails nothing
-// changes.
+// changes. An update that changes only the setup state is saved quietly:
+// the version stays and subscribers aren't called, so recording a wizard
+// step doesn't reconfigure the pipeline, notifiers, engine and pollers.
 func (s *Store) Update(fn func(c *Config) error) error {
 	s.mu.Lock()
 	next := clone(s.cfg)
@@ -129,12 +151,19 @@ func (s *Store) Update(fn func(c *Config) error) error {
 		s.mu.Unlock()
 		return err
 	}
-	next.Version = s.cfg.Version + 1
+	onboardingOnly := !jsonEqual(next.Onboarding, s.cfg.Onboarding) && jsonEqual(withoutOnboarding(next), withoutOnboarding(s.cfg))
+	if !onboardingOnly {
+		next.Version = s.cfg.Version + 1
+	}
 	if err := s.save(next); err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: %v", ErrSave, err)
 	}
 	s.cfg = next
+	if onboardingOnly {
+		s.mu.Unlock()
+		return nil
+	}
 	subs := append([]func(*Config){}, s.subs...)
 	s.mu.Unlock()
 
@@ -159,30 +188,24 @@ func (s *Store) save(c *Config) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".config-*.json")
+	return atomicfile.Write(s.path, data, 0o600)
+}
+
+// withoutOnboarding is c without its setup state, to tell whether an
+// update changed anything else.
+func withoutOnboarding(c *Config) *Config {
+	cc := *c
+	cc.Onboarding = nil
+	return &cc
+}
+
+func jsonEqual(a, b any) bool {
+	x, err := json.Marshal(a)
 	if err != nil {
-		return err
+		return false
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), s.path)
+	y, err := json.Marshal(b)
+	return err == nil && bytes.Equal(x, y)
 }
 
 func clone(c *Config) *Config {
