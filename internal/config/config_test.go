@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 func TestOpenSeedsDefaultsAndPersists(t *testing.T) {
@@ -33,7 +33,7 @@ func TestOpenSeedsDefaultsAndPersists(t *testing.T) {
 	var notified int
 	s.Subscribe(func(*Config) { notified++ })
 	if err := s.Update(func(c *Config) error {
-		c.Settings.PublicURL = "https://laya.example.com/"
+		c.Settings.PublicURL = "https://lissandra.example.com/"
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestOpenSeedsDefaultsAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s2.Get().Settings.PublicURL; got != "https://laya.example.com" {
+	if got := s2.Get().Settings.PublicURL; got != "https://lissandra.example.com" {
 		t.Errorf("public url not persisted/normalized: %q", got)
 	}
 	if s2.Get().Version != 1 {
@@ -119,8 +119,8 @@ func TestNormalizePullDefaultsAndRouteRefs(t *testing.T) {
 }
 
 func TestSecrets(t *testing.T) {
-	t.Setenv("LAYA_TEST_SECRET", "s3cret")
-	if got := ExpandEnv("Bearer ${env:LAYA_TEST_SECRET}"); got != "Bearer s3cret" {
+	t.Setenv("LISSANDRA_TEST_SECRET", "s3cret")
+	if got := ExpandEnv("Bearer ${env:LISSANDRA_TEST_SECRET}"); got != "Bearer s3cret" {
 		t.Errorf("ExpandEnv = %q", got)
 	}
 	if MaskValue("${env:X}") != "${env:X}" || MaskValue("plain") != Mask || MaskValue("") != "" {
@@ -158,16 +158,16 @@ func TestFileRefsAndURLMasking(t *testing.T) {
 	if got := ExpandEnv("${file:/does/not/exist}"); got != "" {
 		t.Errorf("missing file: %q", got)
 	}
-	t.Setenv("LAYA_TEST_URLS_FILE", path)
-	if got := ExpandEnv("${env:LAYA_TEST_URLS}"); got != "http://10.0.0.1:8000,http://10.0.0.2:8000" {
+	t.Setenv("LISSANDRA_TEST_URLS_FILE", path)
+	if got := ExpandEnv("${env:LISSANDRA_TEST_URLS}"); got != "http://10.0.0.1:8000,http://10.0.0.2:8000" {
 		t.Errorf("NAME_FILE fallback: %q", got)
 	}
-	t.Setenv("LAYA_TEST_URLS", "")
-	if got := ExpandEnv("${env:LAYA_TEST_URLS}"); got != "http://10.0.0.1:8000,http://10.0.0.2:8000" {
+	t.Setenv("LISSANDRA_TEST_URLS", "")
+	if got := ExpandEnv("${env:LISSANDRA_TEST_URLS}"); got != "http://10.0.0.1:8000,http://10.0.0.2:8000" {
 		t.Errorf("an empty NAME should fall back to NAME_FILE: %q", got)
 	}
-	t.Setenv("LAYA_TEST_URLS", "http://set")
-	if got := ExpandEnv("${env:LAYA_TEST_URLS}"); got != "http://set" {
+	t.Setenv("LISSANDRA_TEST_URLS", "http://set")
+	if got := ExpandEnv("${env:LISSANDRA_TEST_URLS}"); got != "http://set" {
 		t.Errorf("NAME wins over NAME_FILE: %q", got)
 	}
 	if MaskValue("${file:/run/secrets/key}") != "${file:/run/secrets/key}" {

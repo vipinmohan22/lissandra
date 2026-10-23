@@ -1,4 +1,4 @@
-// Package server exposes Laya's HTTP surface: the admin UI and REST API,
+// Package server exposes Lissandra's HTTP surface: the admin UI and REST API,
 // the push ingest endpoint, health checks and Prometheus metrics.
 package server
 
@@ -14,15 +14,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/auth"
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine"
-	"github.com/vipinmohan22/layalogs/internal/events"
-	"github.com/vipinmohan22/layalogs/internal/importer"
-	"github.com/vipinmohan22/layalogs/internal/learn"
-	"github.com/vipinmohan22/layalogs/internal/notify"
-	"github.com/vipinmohan22/layalogs/internal/pipeline"
-	"github.com/vipinmohan22/layalogs/internal/poller"
+	"github.com/vipinmohan22/lissandra/internal/auth"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine"
+	"github.com/vipinmohan22/lissandra/internal/events"
+	"github.com/vipinmohan22/lissandra/internal/importer"
+	"github.com/vipinmohan22/lissandra/internal/learn"
+	"github.com/vipinmohan22/lissandra/internal/notify"
+	"github.com/vipinmohan22/lissandra/internal/pipeline"
+	"github.com/vipinmohan22/lissandra/internal/poller"
 )
 
 // Options configures the server.
@@ -39,7 +39,7 @@ type Options struct {
 	UI                    fs.FS // contents served at /
 }
 
-// Server wires HTTP handlers to Laya's components.
+// Server wires HTTP handlers to Lissandra's components.
 type Server struct {
 	opts       Options
 	log        *slog.Logger

@@ -22,7 +22,7 @@ func TestAdminTokenStartupLog(t *testing.T) {
 	if !strings.Contains(logged, `"admin_token":"`) || !strings.Contains(logged, "setup wizard") {
 		t.Fatalf("generated: %s", logged)
 	}
-	// The token Laya logged signs in, and the wizard replaces it.
+	// The token Lissandra logged signs in, and the wizard replaces it.
 	var line struct {
 		Token string `json:"admin_token"`
 	}
@@ -38,7 +38,7 @@ func TestAdminTokenStartupLog(t *testing.T) {
 	if _, err := openAdmin(log, path, ""); err != nil {
 		t.Fatal(err)
 	}
-	if logged := buf.String(); strings.Contains(logged, "admin_token") || strings.Contains(logged, next) || !strings.Contains(logged, "admin token: set in Laya") {
+	if logged := buf.String(); strings.Contains(logged, "admin_token") || strings.Contains(logged, next) || !strings.Contains(logged, "admin token: set in Lissandra") {
 		t.Errorf("stored: %s", logged)
 	}
 
@@ -46,7 +46,7 @@ func TestAdminTokenStartupLog(t *testing.T) {
 	if _, err := openAdmin(log, path, "env-0x7f3a"); err != nil {
 		t.Fatal(err)
 	}
-	if logged := buf.String(); !strings.Contains(logged, "shorter than 16") || !strings.Contains(logged, "is ignored while LAYA_ADMIN_TOKEN is set") || strings.Contains(logged, "env-0x7f3a") {
+	if logged := buf.String(); !strings.Contains(logged, "shorter than 16") || !strings.Contains(logged, "is ignored while LISSANDRA_ADMIN_TOKEN is set") || strings.Contains(logged, "env-0x7f3a") {
 		t.Errorf("env with a stored token: %s", logged)
 	}
 }

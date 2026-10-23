@@ -1,16 +1,16 @@
-# Laya: log ingestion, classification and alerting on Nomad.
+# Lissandra: log ingestion, classification and alerting on Nomad.
 #
-#   nomad volume create deploy/nomad/laya-volume.hcl          # once
-#   nomad var put nomad/jobs/laya LAYA_ADMIN_TOKEN="$(openssl rand -hex 24)" \
-#     LAYA_ENGINE_API_KEY="<the engine's LAYA_API_KEY>"       # if you run laya-engine
-#   nomad job run -var-file=deploy/nomad/laya.vars.hcl deploy/nomad/laya.nomad.hcl
+#   nomad volume create deploy/nomad/lissandra-volume.hcl       # once
+#   nomad var put nomad/jobs/lissandra LISSANDRA_ADMIN_TOKEN="$(openssl rand -hex 24)" \
+#     LISSANDRA_ENGINE_API_KEY="<the engine's LAYA_API_KEY>"    # if you run laya-engine
+#   nomad job run -var-file=deploy/nomad/lissandra.vars.hcl deploy/nomad/lissandra.nomad.hcl
 #
 # Classification by the Laya engine is optional: run laya-engine.nomad.hcl
-# and this job finds it through service discovery. Without it, Laya
+# and this job finds it through service discovery. Without it, Lissandra
 # classifies with its rules alone. See deploy/nomad/README.md for details.
 
 variable "datacenters" {
-  description = "Datacenters Laya may run in."
+  description = "Datacenters Lissandra may run in."
   type        = list(string)
   default     = ["*"]
 }
@@ -22,19 +22,19 @@ variable "namespace" {
 }
 
 variable "image" {
-  description = "Laya container image."
+  description = "Lissandra container image."
   type        = string
-  default     = "ghcr.io/vipinmohan22/laya:latest"
+  default     = "ghcr.io/vipinmohan22/lissandra:latest"
 }
 
 variable "volume_name" {
-  description = "Host volume holding Laya's config (dynamic volume from laya-volume.hcl, or a static host_volume in the client config)."
+  description = "Host volume holding Lissandra's config (dynamic volume from lissandra-volume.hcl, or a static host_volume in the client config)."
   type        = string
-  default     = "laya-data"
+  default     = "lissandra-data"
 }
 
 variable "public_url" {
-  description = "External base URL of Laya (e.g. https://laya.example.com). Used for ingest URLs in the UI and links in notifications."
+  description = "External base URL of Lissandra (e.g. https://lissandra.example.com). Used for ingest URLs in the UI and links in notifications."
   type        = string
   default     = ""
 }
@@ -70,7 +70,7 @@ variable "memory" {
 }
 
 variable "event_buffer" {
-  description = "How many recent events Laya keeps in memory for the UI."
+  description = "How many recent events Lissandra keeps in memory for the UI."
   type        = number
   default     = 5000
 }
@@ -107,9 +107,9 @@ variable "engine_url" {
 
 locals {
   # The engine's address list for the task: every instance of the engine
-  # service as http://address:port, comma-separated (Laya spreads requests
-  # over them and fails over), or nothing when no instance is registered,
-  # in which case Laya classifies with its rules alone.
+  # service as http://address:port, comma-separated (Lissandra spreads
+  # requests over them and fails over), or nothing when no instance is
+  # registered, in which case Lissandra classifies with its rules alone.
   engine_lookup = var.service_provider == "consul" ? "service" : "nomadService"
   engine_urls = (
     var.engine_url != "" ? "${var.engine_url}\n" :
@@ -120,14 +120,14 @@ locals {
   )
 }
 
-job "laya" {
+job "lissandra" {
   datacenters = var.datacenters
   namespace   = var.namespace
   type        = "service"
 
-  group "laya" {
-    # Laya keeps its configuration in a single file on the volume, so it runs
-    # as exactly one instance. Nomad reschedules it if the node fails.
+  group "lissandra" {
+    # Lissandra keeps its configuration in a single file on the volume, so it
+    # runs as exactly one instance. Nomad reschedules it if the node fails.
     count = 1
 
     network {
@@ -146,13 +146,13 @@ job "laya" {
     }
 
     service {
-      name     = "laya"
+      name     = "lissandra"
       port     = "http"
       provider = var.service_provider
-      tags     = concat(["laya", "logs", "metrics"], var.service_tags)
+      tags     = concat(["lissandra", "logs", "metrics"], var.service_tags)
 
       check {
-        name     = "laya-http"
+        name     = "lissandra-http"
         type     = "http"
         path     = "/healthz"
         interval = "10s"
@@ -183,7 +183,7 @@ job "laya" {
       unlimited      = true
     }
 
-    task "laya" {
+    task "lissandra" {
       driver = "docker"
 
       config {
@@ -197,33 +197,33 @@ job "laya" {
       }
 
       env {
-        LAYA_LISTEN           = ":8080"
-        LAYA_DATA_DIR         = "/data"
-        LAYA_PUBLIC_URL       = var.public_url
-        LAYA_EVENT_BUFFER     = var.event_buffer
-        LAYA_LOG_LEVEL        = var.log_level
-        LAYA_LOG_FORMAT       = "json"
-        LAYA_MAX_IMPORT_BYTES = var.max_import_mb * 1048576
-        LAYA_IMPORT_MEMORY_MB = var.import_memory_mb
+        LISSANDRA_LISTEN           = ":8080"
+        LISSANDRA_DATA_DIR         = "/data"
+        LISSANDRA_PUBLIC_URL       = var.public_url
+        LISSANDRA_EVENT_BUFFER     = var.event_buffer
+        LISSANDRA_LOG_LEVEL        = var.log_level
+        LISSANDRA_LOG_FORMAT       = "json"
+        LISSANDRA_MAX_IMPORT_BYTES = var.max_import_mb * 1048576
+        LISSANDRA_IMPORT_MEMORY_MB = var.import_memory_mb
         # Let the Go runtime collect garbage before the task hits its limit.
         GOMEMLIMIT = "${floor(var.memory * 0.8)}MiB"
         # Engine addresses, rendered by the template below.
-        LAYA_ENGINE_URL_FILE = "$${NOMAD_TASK_DIR}/engine_urls"
+        LISSANDRA_ENGINE_URL_FILE = "$${NOMAD_TASK_DIR}/engine_urls"
       }
 
-      # Secrets come from the Nomad Variable at nomad/jobs/laya, which this
-      # job can read through its workload identity. Every key becomes an
-      # environment variable, so besides LAYA_ADMIN_TOKEN you can add e.g.
-      # LAYA_ENGINE_API_KEY (the engine's bearer key, which the default
-      # engine settings read), SMTP_PASSWORD or SLACK_WEBHOOK_URL and refer
-      # to them in the UI as ${env:SMTP_PASSWORD}. Changing the variable
-      # restarts the task with the new values.
+      # Secrets come from the Nomad Variable at nomad/jobs/lissandra, which
+      # this job can read through its workload identity. Every key becomes an
+      # environment variable, so besides LISSANDRA_ADMIN_TOKEN you can add
+      # e.g. LISSANDRA_ENGINE_API_KEY (the engine's bearer key, which the
+      # default engine settings read), SMTP_PASSWORD or SLACK_WEBHOOK_URL and
+      # refer to them in the UI as ${env:SMTP_PASSWORD}. Changing the
+      # variable restarts the task with the new values.
       template {
-        destination = "${NOMAD_SECRETS_DIR}/laya.env"
+        destination = "${NOMAD_SECRETS_DIR}/lissandra.env"
         env         = true
         change_mode = "restart"
         data        = <<-EOT
-          {{- with nomadVar "nomad/jobs/laya" -}}
+          {{- with nomadVar "nomad/jobs/lissandra" -}}
           {{- range $k, $v := . }}
           {{ $k }}={{ $v | toJSON }}
           {{- end }}
@@ -232,12 +232,12 @@ job "laya" {
       }
 
       # Where the Laya engine is. The default engine settings read
-      # ${env:LAYA_ENGINE_URL}; it is unset here (don't add it to the
-      # variable above, it would win), so Laya reads the file named by
-      # LAYA_ENGINE_URL_FILE instead, and re-reads it every 30 s. Engine
-      # instances coming and going therefore never restart Laya (which
+      # ${env:LISSANDRA_ENGINE_URL}; it is unset here (don't add it to the
+      # variable above, it would win), so Lissandra reads the file named by
+      # LISSANDRA_ENGINE_URL_FILE instead, and re-reads it every 30 s. Engine
+      # instances coming and going therefore never restart Lissandra (which
       # would empty its in-memory events). While no instance is registered,
-      # Laya runs on rules alone.
+      # Lissandra runs on rules alone.
       template {
         destination = "local/engine_urls"
         change_mode = "noop"
@@ -250,8 +250,8 @@ job "laya" {
       }
 
       # Let service discovery drop the instance before it stops. On SIGTERM
-      # Laya drains for up to 28 s: it finishes the events it accepted and
-      # delivers queued notifications. kill_timeout covers that; Nomad
+      # Lissandra drains for up to 28 s: it finishes the events it accepted
+      # and delivers queued notifications. kill_timeout covers that; Nomad
       # clients cap it at their max_kill_timeout (30 s by default).
       shutdown_delay = "5s"
       kill_timeout   = "30s"

@@ -1,39 +1,40 @@
-# Laya with its local model: Laya itself and the Laya engine (laya-serve from
-# github.com/NandhaKishorM/laya, the decision model Laya asks about what its
-# rules leave uncategorized). Log text never leaves the machine.
+# Lissandra with its local model: Lissandra itself and the Laya engine
+# (laya-serve from github.com/NandhaKishorM/laya, the decision model Lissandra
+# asks about what its rules leave uncategorized). Log text never leaves the
+# machine.
 #
 #   make up        # writes .env with fresh tokens on the first run, then starts both
 #   make down
 #
 # The first start builds the engine image (PyTorch, a few minutes) and
 # downloads the english checkpoint (about 0.85 GB) into the laya-model-cache
-# volume; later starts load it from there in seconds. Laya classifies with its
-# rules until the engine reports the checkpoint loaded, then uses it.
+# volume; later starts load it from there in seconds. Lissandra classifies
+# with its rules until the engine reports the checkpoint loaded, then uses it.
 #
 # The engine needs about 3 GB of memory while loading: give Docker Desktop's
 # VM (or Colima's) at least 6 GB.
 
-name: laya
+name: lissandra
 
 services:
-  laya:
+  lissandra:
     build:
       context: .
       args:
-        VERSION: "${LAYA_VERSION:-dev}"
-    image: "${LAYA_IMAGE:-laya:local}"
+        VERSION: "${LISSANDRA_VERSION:-dev}"
+    image: "${LISSANDRA_IMAGE:-lissandra:local}"
     ports:
-      - "${LAYA_BIND_ADDRESS:-127.0.0.1}:${LAYA_HTTP_PORT:-8080}:8080"
+      - "${LISSANDRA_BIND_ADDRESS:-127.0.0.1}:${LISSANDRA_HTTP_PORT:-8080}:8080"
     environment:
-      LAYA_ADMIN_TOKEN: "${LAYA_ADMIN_TOKEN:?run make up, or set LAYA_ADMIN_TOKEN in .env}"
-      # Laya's default engine settings read these two, so nothing is set in the UI.
-      LAYA_ENGINE_URL: "http://laya-engine:8000"
-      LAYA_ENGINE_API_KEY: "${LAYA_ENGINE_API_KEY:?run make up, or set LAYA_ENGINE_API_KEY in .env}"
+      LISSANDRA_ADMIN_TOKEN: "${LISSANDRA_ADMIN_TOKEN:?run make up, or set LISSANDRA_ADMIN_TOKEN in .env}"
+      # Lissandra's default engine settings read these two, so nothing is set in the UI.
+      LISSANDRA_ENGINE_URL: "http://laya-engine:8000"
+      LISSANDRA_ENGINE_API_KEY: "${LISSANDRA_ENGINE_API_KEY:?run make up, or set LISSANDRA_ENGINE_API_KEY in .env}"
     volumes:
-      - laya-data:/data
-    # Not service_healthy: Laya runs on its rules while the engine downloads
-    # and loads its checkpoint, and checks the engine's health every 5 s
-    # until it has reported it.
+      - lissandra-data:/data
+    # Not service_healthy: Lissandra runs on its rules while the engine
+    # downloads and loads its checkpoint, and checks the engine's health
+    # every 5 s until it has reported it.
     depends_on:
       - laya-engine
     restart: unless-stopped
@@ -44,31 +45,32 @@ services:
       # in step with deploy/nomad/laya-engine.nomad.hcl.
       context: "https://github.com/NandhaKishorM/laya.git#v0.4.2"
       args:
-        TORCH_INDEX: "${LAYA_TORCH_INDEX:-cpu}"
-    image: "${LAYA_ENGINE_IMAGE:-laya-engine:0.4.2}"
+        TORCH_INDEX: "${LISSANDRA_TORCH_INDEX:-cpu}"
+    image: "${LISSANDRA_ENGINE_IMAGE:-laya-engine:0.4.2}"
     # The image's default command is a one-shot quickstart, not the server.
     command: ["laya-serve"]
-    # On loopback only, for laya analyze -engine and make run on the host.
-    # Laya itself reaches the engine over the compose network.
+    # On loopback only, for lissandra analyze -engine and make run on the host.
+    # Lissandra itself reaches the engine over the compose network.
     ports:
-      - "127.0.0.1:${LAYA_ENGINE_PORT:-8000}:8000"
+      - "127.0.0.1:${LISSANDRA_ENGINE_PORT:-8000}:8000"
     environment:
       LAYA_HOST: "0.0.0.0"
       LAYA_PORT: "8000"
-      LAYA_API_KEY: "${LAYA_ENGINE_API_KEY:?run make up, or set LAYA_ENGINE_API_KEY in .env}"
-      # Load every checkpoint Laya uses before listening, and keep them
-      # resident: Laya never asks for a checkpoint the engine hasn't loaded.
+      LAYA_API_KEY: "${LISSANDRA_ENGINE_API_KEY:?run make up, or set LISSANDRA_ENGINE_API_KEY in .env}"
+      # Load every checkpoint Lissandra uses before listening, and keep them
+      # resident: Lissandra never asks for a checkpoint the engine hasn't
+      # loaded.
       LAYA_PRELOAD: "1"
-      LAYA_MODELS: "${LAYA_ENGINE_MODELS:-english}"
+      LAYA_MODELS: "${LISSANDRA_ENGINE_MODELS:-english}"
       LAYA_DEFAULT_MODEL: "english"
       # Hub commit of convaiinnovations/laya the weights load at, as in the
       # Nomad job.
-      LAYA_REVISION: "${LAYA_ENGINE_REVISION:-7b928d828b7b0e022f929d9bd2e44165aa270148}"
+      LAYA_REVISION: "${LISSANDRA_ENGINE_REVISION:-7b928d828b7b0e022f929d9bd2e44165aa270148}"
       LAYA_DEVICE: "cpu"
-      LAYA_THREADS: "${LAYA_ENGINE_THREADS:-4}"
-      OMP_NUM_THREADS: "${LAYA_ENGINE_THREADS:-4}"
+      LAYA_THREADS: "${LISSANDRA_ENGINE_THREADS:-4}"
+      OMP_NUM_THREADS: "${LISSANDRA_ENGINE_THREADS:-4}"
       LAYA_LOG_LEVEL: "warning"
-      HF_HUB_OFFLINE: "${LAYA_ENGINE_OFFLINE:-0}"
+      HF_HUB_OFFLINE: "${LISSANDRA_ENGINE_OFFLINE:-0}"
       HF_HUB_DISABLE_TELEMETRY: "1"
     volumes:
       - laya-model-cache:/home/laya/.cache/huggingface
@@ -81,11 +83,11 @@ services:
       retries: 3
       start_period: 10m
       start_interval: 2s
-    mem_limit: "${LAYA_ENGINE_MEMORY:-4500m}"
+    mem_limit: "${LISSANDRA_ENGINE_MEMORY:-4500m}"
     init: true
     stop_grace_period: 60s
     restart: unless-stopped
 
 volumes:
-  laya-data:
+  lissandra-data:
   laya-model-cache:

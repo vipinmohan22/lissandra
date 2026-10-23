@@ -1,9 +1,9 @@
-// Package auth holds Laya's admin credential: one bearer token for the UI
-// and API. It comes from LAYA_ADMIN_TOKEN, or from a token set in Laya and
-// stored as a keyed hash in admin-token.json, or else is generated for one
-// run. The token is an API key, not a password: it is checked on every
-// request, so the hash is fast (HMAC-SHA256) and the token's strength comes
-// from it being random.
+// Package auth holds Lissandra's admin credential: one bearer token for the
+// UI and API. It comes from LISSANDRA_ADMIN_TOKEN, or from a token set in
+// Lissandra and stored as a keyed hash in admin-token.json, or else is
+// generated for one run. The token is an API key, not a password: it is
+// checked on every request, so the hash is fast (HMAC-SHA256) and the
+// token's strength comes from it being random.
 package auth
 
 import (
@@ -20,8 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/atomicfile"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/atomicfile"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Source is where the active admin token comes from.
@@ -29,20 +29,20 @@ type Source string
 
 // Token sources, in order of precedence.
 const (
-	SourceEnv       Source = "env"       // LAYA_ADMIN_TOKEN; nothing else is accepted
-	SourceStored    Source = "stored"    // set in Laya, kept in admin-token.json
+	SourceEnv       Source = "env"       // LISSANDRA_ADMIN_TOKEN; nothing else is accepted
+	SourceStored    Source = "stored"    // set in Lissandra, kept in admin-token.json
 	SourceGenerated Source = "generated" // random, for this run only (logged)
 )
 
 // Errors from Rotate and DeleteStored.
 var (
-	ErrEnvManaged  = errors.New("the admin token is set by LAYA_ADMIN_TOKEN; change it there")
+	ErrEnvManaged  = errors.New("the admin token is set by LISSANDRA_ADMIN_TOKEN; change it there")
 	ErrWeakToken   = errors.New("the admin token is too weak") // wrapped with the rule that failed
 	ErrSameToken   = errors.New("the new admin token is the one in use")
-	ErrLoggedToken = errors.New("that is the token Laya printed in its log; use a new one")
+	ErrLoggedToken = errors.New("that is the token Lissandra printed in its log; use a new one")
 	ErrStale       = errors.New("the admin token was changed by another request")
-	ErrNotEnv      = errors.New("a stored token can only be deleted while LAYA_ADMIN_TOKEN is set")
-	ErrNoStored    = errors.New("no admin token is stored in Laya")
+	ErrNotEnv      = errors.New("a stored token can only be deleted while LISSANDRA_ADMIN_TOKEN is set")
+	ErrNoStored    = errors.New("no admin token is stored in Lissandra")
 )
 
 // Status describes the active admin token, never the token itself.
@@ -122,7 +122,7 @@ type Store struct {
 	logged *verifier // the generated token, refused by Rotate for the whole run
 }
 
-// Open picks the credential: LAYA_ADMIN_TOKEN (envToken) if set, else the
+// Open picks the credential: LISSANDRA_ADMIN_TOKEN (envToken) if set, else the
 // token stored at path, else a token generated for this run, which it
 // returns for the caller to log. A stored file that can't be used fails
 // Open unless envToken is set: falling back to a generated token would let
@@ -134,7 +134,7 @@ func Open(path, envToken string, log *slog.Logger) (s *Store, generated string, 
 		st := &state{v: newVerifier(envToken), source: SourceEnv}
 		switch {
 		case err != nil:
-			log.Warn("admin-token.json can't be used; it is ignored while LAYA_ADMIN_TOKEN is set", "file", path, "err", err)
+			log.Warn("admin-token.json can't be used; it is ignored while LISSANDRA_ADMIN_TOKEN is set", "file", path, "err", err)
 			st.storedIgnored, st.storedError = true, err.Error()
 		case stored != nil:
 			st.storedIgnored, st.storedSetAt = true, &stored.SetAt
@@ -143,14 +143,14 @@ func Open(path, envToken string, log *slog.Logger) (s *Store, generated string, 
 		return s, "", nil
 	}
 	if err != nil {
-		return nil, "", fmt.Errorf("%s: %w; fix or delete it, or set LAYA_ADMIN_TOKEN", path, err)
+		return nil, "", fmt.Errorf("%s: %w; fix or delete it, or set LISSANDRA_ADMIN_TOKEN", path, err)
 	}
 	if stored != nil {
 		// Anyone who can write the data directory controls config.json too,
 		// and volumes (fsGroup, NFS, SMB, Docker Desktop) may report modes
 		// chmod can't change: warn, don't refuse.
 		if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {
-			log.Warn(fmt.Sprintf("admin-token.json is accessible to other users (mode %#o); Laya writes it with mode 0600", fi.Mode().Perm()), "file", path)
+			log.Warn(fmt.Sprintf("admin-token.json is accessible to other users (mode %#o); Lissandra writes it with mode 0600", fi.Mode().Perm()), "file", path)
 		}
 		v := verifier{key: stored.Key}
 		copy(v.digest[:], stored.Digest)
@@ -193,7 +193,7 @@ func readFile(path string) (*file, error) {
 	return &f, nil
 }
 
-// Static is a store for one token, as if set by LAYA_ADMIN_TOKEN, with no
+// Static is a store for one token, as if set by LISSANDRA_ADMIN_TOKEN, with no
 // file: for tests, and for a server built without a store.
 func Static(token string) *Store {
 	s := &Store{maxLen: max(256, len(token))}
@@ -268,7 +268,7 @@ func (s *Store) Rotate(presented, next string) (Status, error) {
 	return s.Status(), nil
 }
 
-// DeleteStored removes a stored token that LAYA_ADMIN_TOKEN overrides, so
+// DeleteStored removes a stored token that LISSANDRA_ADMIN_TOKEN overrides, so
 // removing the variable later can't bring an old token back to life.
 func (s *Store) DeleteStored() error {
 	s.mu.Lock()
@@ -296,7 +296,7 @@ func (s *Store) DeleteStored() error {
 
 // ValidateToken checks a token about to be stored. The rules catch
 // mistakes such as a short or repetitive value; they can't make a guessable
-// token strong, which is why the UI generates one. LAYA_ADMIN_TOKEN is not
+// token strong, which is why the UI generates one. LISSANDRA_ADMIN_TOKEN is not
 // checked, so existing deployments keep working.
 func ValidateToken(t string) error {
 	weak := func(rule string) error { return fmt.Errorf("%w: %s", ErrWeakToken, rule) }

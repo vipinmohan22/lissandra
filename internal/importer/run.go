@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/ingest"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/ingest"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Options configures one import.

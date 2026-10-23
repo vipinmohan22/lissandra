@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 func TestCompactMarksCutEvents(t *testing.T) {

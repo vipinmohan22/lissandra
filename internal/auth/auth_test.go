@@ -102,7 +102,7 @@ func TestCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !env.Check(envToken) || env.Check(newToken) {
-		t.Error("only LAYA_ADMIN_TOKEN is accepted while it is set")
+		t.Error("only LISSANDRA_ADMIN_TOKEN is accepted while it is set")
 	}
 }
 
@@ -256,7 +256,7 @@ func TestOpenBadFile(t *testing.T) {
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := Open(path, "", discard()); err == nil || !strings.Contains(err.Error(), "fix or delete it, or set LAYA_ADMIN_TOKEN") {
+		if _, _, err := Open(path, "", discard()); err == nil || !strings.Contains(err.Error(), "fix or delete it, or set LISSANDRA_ADMIN_TOKEN") {
 			t.Errorf("%s without env: %v", name, err)
 		}
 		log, buf := capture()
@@ -290,7 +290,7 @@ func TestOpenLoosePermissions(t *testing.T) {
 	log, buf := capture()
 	s, _, err := Open(path, "", log)
 	if err != nil || !s.Check(newToken) {
-		t.Fatalf("a loose mode must not stop Laya: %v", err)
+		t.Fatalf("a loose mode must not stop Lissandra: %v", err)
 	}
 	if !strings.Contains(buf.String(), "level=WARN") || !strings.Contains(buf.String(), "mode 0666") {
 		t.Errorf("log = %s", buf)

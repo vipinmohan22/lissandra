@@ -16,16 +16,16 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine"
-	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
-	"github.com/vipinmohan22/layalogs/internal/events"
-	"github.com/vipinmohan22/layalogs/internal/importer"
-	"github.com/vipinmohan22/layalogs/internal/learn"
-	"github.com/vipinmohan22/layalogs/internal/model"
-	"github.com/vipinmohan22/layalogs/internal/notify"
-	"github.com/vipinmohan22/layalogs/internal/pipeline"
-	"github.com/vipinmohan22/layalogs/internal/poller"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine"
+	"github.com/vipinmohan22/lissandra/internal/engine/enginetest"
+	"github.com/vipinmohan22/lissandra/internal/events"
+	"github.com/vipinmohan22/lissandra/internal/importer"
+	"github.com/vipinmohan22/lissandra/internal/learn"
+	"github.com/vipinmohan22/lissandra/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/notify"
+	"github.com/vipinmohan22/lissandra/internal/pipeline"
+	"github.com/vipinmohan22/lissandra/internal/poller"
 )
 
 const adminToken = "test-admin-token-0123456789"
@@ -89,7 +89,7 @@ func newEnvFrom(t *testing.T, ec envConfig) *env {
 	go d.Run(ctx, 1)
 	go l.Run(ctx)
 	go p.Run(ctx, 1, 1)
-	ui := fstest.MapFS{"index.html": {Data: []byte("<html>laya</html>")}}
+	ui := fstest.MapFS{"index.html": {Data: []byte("<html>lissandra</html>")}}
 	opts := Options{Version: "test", AdminToken: adminToken, UI: ui}
 	if ec.mutate != nil {
 		ec.mutate(&opts)
@@ -161,7 +161,7 @@ func TestAuthAndUI(t *testing.T) {
 	if code, _ := e.do("GET", "/healthz", nil, nil); code != 200 {
 		t.Errorf("healthz: %d", code)
 	}
-	if code, body := e.do("GET", "/metrics", nil, nil); code != 200 || !bytes.Contains(body, []byte("laya_events_received_total")) {
+	if code, body := e.do("GET", "/metrics", nil, nil); code != 200 || !bytes.Contains(body, []byte("lissandra_events_received_total")) {
 		t.Errorf("metrics: %d", code)
 	}
 }
@@ -203,7 +203,7 @@ func TestIngestClassifyAndNotify(t *testing.T) {
 	gz := gzip.NewWriter(&buf)
 	gz.Write([]byte("panic: runtime error: nil map\nall fine here\n"))
 	gz.Close()
-	code, body := e.do("POST", "/ingest/default", buf.Bytes(), map[string]string{"X-Laya-Token": src.IngestToken, "Content-Encoding": "gzip", "Content-Type": "text/plain"})
+	code, body := e.do("POST", "/ingest/default", buf.Bytes(), map[string]string{"X-Lissandra-Token": src.IngestToken, "Content-Encoding": "gzip", "Content-Type": "text/plain"})
 	if code != 202 || !bytes.Contains(body, []byte(`"accepted":2`)) {
 		t.Fatalf("ingest: %d %s", code, body)
 	}
@@ -385,7 +385,7 @@ func TestEngineEndpoints(t *testing.T) {
 		t.Errorf("test calls must not count as live calls: %+v", stats.Engine)
 	}
 	_, metrics := e.do("GET", "/metrics", nil, map[string]string{"Authorization": "Bearer " + adminToken})
-	if !bytes.Contains(metrics, []byte("laya_engine_calls_total 0")) || !bytes.Contains(metrics, []byte("laya_engine_paused 0")) {
+	if !bytes.Contains(metrics, []byte("lissandra_engine_calls_total 0")) || !bytes.Contains(metrics, []byte("lissandra_engine_paused 0")) {
 		t.Errorf("metrics missing engine counters")
 	}
 }

@@ -9,8 +9,8 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 var streamNow = time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)

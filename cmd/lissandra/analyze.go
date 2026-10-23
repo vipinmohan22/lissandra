@@ -20,16 +20,16 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/vipinmohan22/layalogs/internal/classify"
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine"
-	"github.com/vipinmohan22/layalogs/internal/importer"
-	"github.com/vipinmohan22/layalogs/internal/ingest"
-	"github.com/vipinmohan22/layalogs/internal/model"
-	"github.com/vipinmohan22/layalogs/internal/notify"
+	"github.com/vipinmohan22/lissandra/internal/classify"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine"
+	"github.com/vipinmohan22/lissandra/internal/importer"
+	"github.com/vipinmohan22/lissandra/internal/ingest"
+	"github.com/vipinmohan22/lissandra/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/notify"
 )
 
-const analyzeUsage = `Usage: laya analyze [flags] FILE...
+const analyzeUsage = `Usage: lissandra analyze [flags] FILE...
 
 Parse and classify log files locally with the same parsing and rules as the
 server, and print a report. FILE may be "-" for standard input; gzip files are
@@ -40,15 +40,15 @@ With -engine URL, the Laya engine (laya-serve) classifies what the rules
 leave, once per message pattern, using the config's categories and engine
 settings; only the log text of those patterns is sent to that URL.
 
-Rules come from -config, else $LAYA_CONFIG, else $LAYA_DATA_DIR/config.json
-(./data/config.json) if it exists, else the built-in defaults. A config
-exported from Settings → Backup works too.
+Rules come from -config, else $LISSANDRA_CONFIG, else
+$LISSANDRA_DATA_DIR/config.json (./data/config.json) if it exists, else the
+built-in defaults. A config exported from Settings → Backup works too.
 
 Flags:
 `
 
-// runAnalyze implements "laya analyze". It returns the process exit code:
-// 0 on success, 1 on errors, 2 when -fail-on matched an event.
+// runAnalyze implements "lissandra analyze". It returns the process exit
+// code: 0 on success, 1 on errors, 2 when -fail-on matched an event.
 func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// The command runs as its user, on their files: -engine-key
 	// ${file:~/key} may name any of them.
@@ -59,7 +59,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, analyzeUsage)
 		fs.PrintDefaults()
 	}
-	cfgPath := fs.String("config", "", "Laya config.json with rules, routes and sources")
+	cfgPath := fs.String("config", "", "Lissandra config.json with rules, routes and sources")
 	sourceKey := fs.String("source", "", "name or id of a source in the config whose parse settings and tags to use")
 	format := fs.String("format", "", "parse format: auto, text, ndjson, json or csv (default: the source's, else auto)")
 	tz := fs.String("tz", "UTC", "time zone for timestamps that don't include one, e.g. Europe/Berlin or Local")
@@ -68,7 +68,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	failOn := fs.String("fail-on", "", "exit with status 2 if any event is at or above this severity")
 	engineURL := fs.String("engine", "", "laya-serve URL(s), comma-separated: classify what the rules leave with the Laya engine")
 	engineModel := fs.String("engine-model", "", "engine checkpoint (default: the config's, else english)")
-	engineKey := fs.String("engine-key", "", "engine API key (default $LAYA_ENGINE_API_KEY)")
+	engineKey := fs.String("engine-key", "", "engine API key (default $LISSANDRA_ENGINE_API_KEY)")
 	files, err := parseInterspersed(fs, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -81,7 +81,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fail := func(format string, a ...any) int {
-		fmt.Fprintf(stderr, "laya analyze: "+format+"\n", a...)
+		fmt.Fprintf(stderr, "lissandra analyze: "+format+"\n", a...)
 		return 1
 	}
 	switch *output {
@@ -167,7 +167,7 @@ func runAnalyze(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	for _, path := range files {
 		rep, err := analyzeOne(path, stdin, source, *format, loc, classifyFn, routes, *output, min, enc, workers)
 		if err != nil {
-			fmt.Fprintf(stderr, "laya analyze: %s: %s\n", terminalSafe(path), terminalSafe(err.Error()))
+			fmt.Fprintf(stderr, "lissandra analyze: %s: %s\n", terminalSafe(path), terminalSafe(err.Error()))
 			code = 1
 			if rep == nil {
 				continue
@@ -195,7 +195,7 @@ func analyzeEngine(cfg *config.Config, source *config.Source, urls, checkpoint, 
 	e.Enabled, e.URL = true, urls
 	e.APIKey = key
 	if key == "" {
-		e.APIKey = "${env:LAYA_ENGINE_API_KEY}"
+		e.APIKey = "${env:LISSANDRA_ENGINE_API_KEY}"
 	}
 	if checkpoint != "" {
 		e.Model = checkpoint
@@ -256,7 +256,7 @@ func loadAnalyzeConfig(flagPath string) (*config.Config, string, error) {
 	candidates := []struct {
 		path     string
 		explicit bool
-	}{{flagPath, true}, {os.Getenv("LAYA_CONFIG"), true}, {filepath.Join(env("LAYA_DATA_DIR", "./data"), "config.json"), false}}
+	}{{flagPath, true}, {os.Getenv("LISSANDRA_CONFIG"), true}, {filepath.Join(env("LISSANDRA_DATA_DIR", "./data"), "config.json"), false}}
 	for _, c := range candidates {
 		if c.path == "" {
 			continue

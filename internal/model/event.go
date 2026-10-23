@@ -1,4 +1,4 @@
-// Package model holds the types shared across Laya's pipeline stages.
+// Package model holds the types shared across Lissandra's pipeline stages.
 package model
 
 import (
@@ -62,7 +62,7 @@ func ParseSeverity(v string) (Severity, bool) {
 // Uncategorized is the category assigned when no rule or classifier matched.
 const Uncategorized = "uncategorized"
 
-// Event is a single log record flowing through Laya, before and after
+// Event is a single log record flowing through Lissandra, before and after
 // classification.
 type Event struct {
 	ID         string         `json:"id"`

@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/classify"
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine"
-	"github.com/vipinmohan22/layalogs/internal/events"
-	"github.com/vipinmohan22/layalogs/internal/ingest"
-	"github.com/vipinmohan22/layalogs/internal/model"
-	"github.com/vipinmohan22/layalogs/internal/notify"
-	"github.com/vipinmohan22/layalogs/internal/poller"
+	"github.com/vipinmohan22/lissandra/internal/classify"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine"
+	"github.com/vipinmohan22/lissandra/internal/events"
+	"github.com/vipinmohan22/lissandra/internal/ingest"
+	"github.com/vipinmohan22/lissandra/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/notify"
+	"github.com/vipinmohan22/lissandra/internal/poller"
 )
 
 var errNotFound = errors.New("not found")
@@ -85,7 +85,7 @@ func (s *Server) update(w http.ResponseWriter, fn func(c *config.Config) error) 
 		writeError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, config.ErrSave):
 		s.log.Error("saving the configuration failed", "err", err)
-		writeErrorCode(w, http.StatusInternalServerError, "save_failed", "saving the configuration failed; see Laya's log")
+		writeErrorCode(w, http.StatusInternalServerError, "save_failed", "saving the configuration failed; see Lissandra's log")
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}
@@ -740,7 +740,7 @@ func (s *Server) addSourceTags(ev *model.Event) {
 
 // engineTrainingData downloads laya-train JSONL from live events the rules
 // categorized: one record per message pattern, with the state and category
-// question Laya sends the engine, so a checkpoint can be fine-tuned on
+// question Lissandra sends the engine, so a checkpoint can be fine-tuned on
 // exactly what it will be asked.
 func (s *Server) engineTrainingData(w http.ResponseWriter, r *http.Request) {
 	writeTrainingData(w, s.laya, s.store.All(), "live")
@@ -759,7 +759,7 @@ func writeTrainingData(w http.ResponseWriter, laya *engine.Classifier, evs []mod
 	if len(name) > 100 { // ASCII by now: cut by bytes, without an ellipsis
 		name = name[:100]
 	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="laya-training-%s-%s.jsonl"`, name, time.Now().UTC().Format("20060102-150405")))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="lissandra-training-%s-%s.jsonl"`, name, time.Now().UTC().Format("20060102-150405")))
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	seen := map[string]bool{}
@@ -818,7 +818,7 @@ func (s *Server) exportConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		c.Settings = maskSettings(c.Settings)
 	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="laya-config-%s.json"`, time.Now().UTC().Format("20060102-150405")))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="lissandra-config-%s.json"`, time.Now().UTC().Format("20060102-150405")))
 	writeJSON(w, http.StatusOK, c)
 }
 

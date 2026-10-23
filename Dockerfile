@@ -12,18 +12,18 @@ ARG VERSION=dev
 ARG TARGETOS TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/laya ./cmd/laya
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/lissandra ./cmd/lissandra
 # An empty /data owned by nonroot: Docker gives a new named volume the
-# image directory's owner, so Laya can write its config there.
+# image directory's owner, so Lissandra can write its config there.
 RUN mkdir -p /out/data
 
 # Static binary on distroless: CA certificates and tzdata included, no shell.
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /out/laya /usr/local/bin/laya
+COPY --from=build /out/lissandra /usr/local/bin/lissandra
 COPY --from=build --chown=65532:65532 /out/data /data
-ENV LAYA_LISTEN=:8080 \
-    LAYA_DATA_DIR=/data
+ENV LISSANDRA_LISTEN=:8080 \
+    LISSANDRA_DATA_DIR=/data
 EXPOSE 8080
 VOLUME ["/data"]
 USER nonroot:nonroot
-ENTRYPOINT ["/usr/local/bin/laya"]
+ENTRYPOINT ["/usr/local/bin/lissandra"]

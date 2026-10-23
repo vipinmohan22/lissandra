@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 func init() {
@@ -32,9 +32,9 @@ func init() {
 			{Key: "security", Label: "Security", Type: "select", Options: []string{"starttls", "tls", "none"}, Default: "starttls", Help: "starttls = port 587, tls = implicit TLS on port 465, none = plaintext (local relays only)."},
 			{Key: "username", Label: "Username", Type: "text"},
 			{Key: "password", Label: "Password", Type: "password", Secret: true, Placeholder: "${env:SMTP_PASSWORD}"},
-			{Key: "from", Label: "From", Type: "text", Required: true, Placeholder: "Laya <laya@example.com>"},
+			{Key: "from", Label: "From", Type: "text", Required: true, Placeholder: "Lissandra <lissandra@example.com>"},
 			{Key: "to", Label: "To", Type: "text", Required: true, Placeholder: "oncall@example.com, team@example.com", Help: "Comma-separated recipients.", Recipient: true},
-			{Key: "subject_prefix", Label: "Subject prefix", Type: "text", Default: "[Laya]"},
+			{Key: "subject_prefix", Label: "Subject prefix", Type: "text", Default: "[Lissandra]"},
 			{Key: "insecure_skip_verify", Label: "Skip TLS certificate verification", Type: "checkbox", Help: "Only for internal relays with self-signed certificates."},
 		},
 		New: newEmail,
@@ -143,9 +143,9 @@ var emailHTML = template.Must(template.New("email").Parse(`<!doctype html>
 <table role="presentation" style="font-size:13px;border-collapse:collapse">
 {{range .Facts}}<tr><td style="padding:3px 16px 3px 0;color:#5b6475;white-space:nowrap;vertical-align:top">{{.Name}}</td><td style="padding:3px 0">{{.Value}}</td></tr>{{end}}
 </table>
-{{if .Link}}<p style="margin:20px 0 0"><a href="{{.Link}}" style="background:#1d2330;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:13px">Open in Laya</a></p>{{end}}
+{{if .Link}}<p style="margin:20px 0 0"><a href="{{.Link}}" style="background:#1d2330;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:13px">Open in Lissandra</a></p>{{end}}
 </td></tr></table>
-<p style="text-align:center;font-size:11px;color:#8a8f98">Sent by Laya</p>
+<p style="text-align:center;font-size:11px;color:#8a8f98">Sent by Lissandra</p>
 </body></html>`))
 
 func (e *email) compose(m *Message) ([]byte, error) {
@@ -170,11 +170,11 @@ func (e *email) compose(m *Message) ([]byte, error) {
 		"To: " + strings.Join(toList, ", "),
 		"Subject: " + mime.QEncoding.Encode("utf-8", subject),
 		"Date: " + time.Now().Format(time.RFC1123Z),
-		fmt.Sprintf("Message-ID: <%s@laya>", model.NewID()),
+		fmt.Sprintf("Message-ID: <%s@lissandra>", model.NewID()),
 		"MIME-Version: 1.0",
 		"Content-Type: multipart/alternative; boundary=" + mw.Boundary(),
-		"X-Laya-Severity: " + string(m.Event.Severity),
-		"X-Laya-Fingerprint: " + m.Event.Fingerprint,
+		"X-Lissandra-Severity: " + string(m.Event.Severity),
+		"X-Lissandra-Fingerprint: " + m.Event.Fingerprint,
 	}
 	head := strings.Join(hdr, "\r\n") + "\r\n\r\n"
 

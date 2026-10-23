@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine/enginetest"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -152,8 +152,8 @@ func TestEligibility(t *testing.T) {
 	if off.Eligible(&ev) || none.Eligible(&ev) {
 		t.Error("disabled or unconfigured engine: nothing is eligible")
 	}
-	t.Setenv("LAYA_TEST_ENGINE_URL", "")
-	envOnly, _, _ := setup(t, func(c *config.Config) { c.Settings.Engine.URL = "${env:LAYA_TEST_ENGINE_URL}" })
+	t.Setenv("LISSANDRA_TEST_ENGINE_URL", "")
+	envOnly, _, _ := setup(t, func(c *config.Config) { c.Settings.Engine.URL = "${env:LISSANDRA_TEST_ENGINE_URL}" })
 	if envOnly.Eligible(&ev) || envOnly.Status().Configured {
 		t.Error("empty env URL means not configured")
 	}
@@ -409,7 +409,7 @@ func TestRetriesAndFailover(t *testing.T) {
 			t.Fatalf("failover: %v", err)
 		}
 	}
-	// Capacity is max_in_flight per instance Laya can ask: one of the two
+	// Capacity is max_in_flight per instance Lissandra can ask: one of the two
 	// is down.
 	if st := cl.Status(); st.Capacity != 1 {
 		t.Errorf("capacity should be max_in_flight per usable instance: %d", st.Capacity)

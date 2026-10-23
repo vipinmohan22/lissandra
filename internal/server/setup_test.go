@@ -13,8 +13,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vipinmohan22/layalogs/internal/auth"
-	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/auth"
+	"github.com/vipinmohan22/lissandra/internal/config"
 )
 
 const permanentToken = "9b2e7f41c08a3d65e1f4a7c2b90d3e58f6a1c4b7d2e09f38"
@@ -55,7 +55,7 @@ func withAuth(t *testing.T, envToken string) *authEnv {
 	log := slog.New(slog.NewTextHandler(logs, nil))
 	file := filepath.Join(t.TempDir(), "admin-token.json")
 	if envToken != "" {
-		// A token set in Laya earlier, which the env token overrides.
+		// A token set in Lissandra earlier, which the env token overrides.
 		s, gen, err := auth.Open(file, "", log)
 		if err != nil {
 			t.Fatal(err)
@@ -192,7 +192,7 @@ func TestAdminTokenChange(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(e.logs.String(), "admin token changed in Laya") {
+	if !strings.Contains(e.logs.String(), "admin token changed in Lissandra") {
 		t.Error("the change was not logged")
 	}
 
@@ -203,7 +203,7 @@ func TestAdminTokenChange(t *testing.T) {
 	}
 
 	if code, c := newEnv(t).apiErr(adminToken, "PUT", "/api/auth/token", map[string]string{"token": permanentToken}); code != 409 || c != "env_managed" {
-		t.Errorf("with LAYA_ADMIN_TOKEN: %d %s", code, c)
+		t.Errorf("with LISSANDRA_ADMIN_TOKEN: %d %s", code, c)
 	}
 }
 
@@ -244,7 +244,7 @@ func btoi(b bool) int {
 func TestDeleteStoredAdminToken(t *testing.T) {
 	gen := withAuth(t, "")
 	if code, c := gen.apiErr(gen.token, "DELETE", "/api/auth/token", nil); code != 409 || c != "not_env_managed" {
-		t.Errorf("without LAYA_ADMIN_TOKEN: %d %s", code, c)
+		t.Errorf("without LISSANDRA_ADMIN_TOKEN: %d %s", code, c)
 	}
 
 	e := withAuth(t, "env-token-0123456789abcdef")
@@ -253,7 +253,7 @@ func TestDeleteStoredAdminToken(t *testing.T) {
 		t.Fatalf("status = %+v", st)
 	}
 	if code, _ := e.as(permanentToken, "GET", "/api/info", nil, nil); code != 401 {
-		t.Errorf("the stored token works while LAYA_ADMIN_TOKEN is set: %d", code)
+		t.Errorf("the stored token works while LISSANDRA_ADMIN_TOKEN is set: %d", code)
 	}
 	if code, _ := e.as(e.token, "DELETE", "/api/auth/token", nil, nil); code != 204 {
 		t.Fatalf("DELETE: %d", code)
@@ -276,7 +276,7 @@ func TestOnboardingLifecycle(t *testing.T) {
 		!slices.Equal(v.Order, config.OnboardingSteps) || len(v.Steps) != 0 || v.StartedAt == nil || v.FinishedAt != nil {
 		t.Fatalf("fresh: %+v", v)
 	}
-	// LAYA_ADMIN_TOKEN is permanent: access isn't left to do.
+	// LISSANDRA_ADMIN_TOKEN is permanent: access isn't left to do.
 	if !slices.Equal(v.Remaining, []string{"sources", "classify", "channels"}) || v.Auth.Source != auth.SourceEnv {
 		t.Errorf("remaining = %v", v.Remaining)
 	}
@@ -338,7 +338,7 @@ func TestOnboardingLifecycle(t *testing.T) {
 
 	// A channel makes notify needed, and its defaults route to it.
 	var n config.Notifier
-	e.admin("POST", "/api/notifiers", map[string]any{"name": "Ops", "type": "webhook", "enabled": true, "settings": map[string]string{"url": "https://hooks.example.com/laya"}}, &n)
+	e.admin("POST", "/api/notifiers", map[string]any{"name": "Ops", "type": "webhook", "enabled": true, "settings": map[string]string{"url": "https://hooks.example.com/lissandra"}}, &n)
 	if v := e.onboarding(); len(v.NotNeeded) != 0 || v.Resume != "channels" || !slices.Contains(v.Remaining, "notify") {
 		t.Errorf("with a channel: %+v", v)
 	}
@@ -535,7 +535,7 @@ func TestInfoCarriesSetupSummary(t *testing.T) {
 	}
 	env.admin("GET", "/api/info", nil, &info)
 	if o := info.Onboarding; o.Resume != pageReview || o.Remaining != 0 || o.Total != 4 {
-		t.Errorf("with LAYA_ADMIN_TOKEN: %+v", o)
+		t.Errorf("with LISSANDRA_ADMIN_TOKEN: %+v", o)
 	}
 }
 
@@ -597,11 +597,11 @@ func TestExportStripsAndImportKeepsSetupState(t *testing.T) {
 func TestSettingsCannotTouchOnboarding(t *testing.T) {
 	e := newEnv(t)
 	before := e.onboarding()
-	body := `{"public_url":"https://laya.example.com","onboarding":{"status":"completed"}}`
+	body := `{"public_url":"https://lissandra.example.com","onboarding":{"status":"completed"}}`
 	if code := e.admin("PUT", "/api/settings", body, nil); code != 200 {
 		t.Fatal(code)
 	}
-	if after := e.onboarding(); after.Status != before.Status || e.cfg.Get().Settings.PublicURL != "https://laya.example.com" {
+	if after := e.onboarding(); after.Status != before.Status || e.cfg.Get().Settings.PublicURL != "https://lissandra.example.com" {
 		t.Errorf("setup state = %+v", after)
 	}
 }

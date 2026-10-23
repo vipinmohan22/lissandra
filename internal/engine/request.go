@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // stateBudget caps the text sent per event. The english checkpoint reads
@@ -211,7 +211,7 @@ func clip(s string, n int) string {
 }
 
 // TrainingRecord is one line of laya-train JSONL: the state and question
-// Laya sends for an event, and the answer to learn.
+// Lissandra sends for an event, and the answer to learn.
 type TrainingRecord struct {
 	State     string              `json:"state"`
 	Questions map[string]Question `json:"questions"`
@@ -219,7 +219,7 @@ type TrainingRecord struct {
 }
 
 // TrainingRecord builds a laya-train record from a categorized event,
-// with the same state and category question Laya asks the engine. ok is
+// with the same state and category question Lissandra asks the engine. ok is
 // false when ev's category is not one of the configured categories.
 func (c *Classifier) TrainingRecord(ev *model.Event) (TrainingRecord, bool) {
 	c.mu.Lock()

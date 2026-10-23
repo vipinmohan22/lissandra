@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/config"
 )
 
 func src(p config.Parse) *config.Source {

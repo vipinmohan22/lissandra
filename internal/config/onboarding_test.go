@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 func TestFreshConfigStartsOnboarding(t *testing.T) {
@@ -31,7 +31,7 @@ func TestFreshConfigStartsOnboarding(t *testing.T) {
 		t.Errorf("not persisted: %+v", c.Onboarding)
 	}
 	if Defaults().Onboarding != nil {
-		t.Error("Defaults() must not offer setup: laya analyze and the engine-defaults probe use it")
+		t.Error("Defaults() must not offer setup: lissandra analyze and the engine-defaults probe use it")
 	}
 }
 
@@ -49,7 +49,7 @@ func TestExistingConfigHasNoOnboarding(t *testing.T) {
 		t.Fatalf("an existing config was offered setup: %+v", o)
 	}
 	if err := s.Update(func(c *Config) error {
-		c.Settings.PublicURL = "https://laya.example.com"
+		c.Settings.PublicURL = "https://lissandra.example.com"
 		return nil
 	}); err != nil {
 		t.Fatal(err)

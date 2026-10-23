@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine/enginetest"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Regression: fixing a wrong URL (404 => 5-minute config pause) does not lift the
@@ -369,7 +369,7 @@ func TestDialTimeoutFailsOver(t *testing.T) {
 	t.Logf("fake calls=%d timeouts=%d", fake.Calls.Load(), cl.timeouts)
 }
 
-// Rotating the key: Laya gets the new key first, the engine later. Once the
+// Rotating the key: Lissandra gets the new key first, the engine later. Once the
 // engine accepts the new key (it lists its checkpoints to it), calls resume
 // at the next health check, not 5 minutes after the first 401.
 func TestKeyRotationLiftsAuthPause(t *testing.T) {

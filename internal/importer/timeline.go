@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 const (

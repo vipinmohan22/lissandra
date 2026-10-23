@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/ingest"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/ingest"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Import statuses.
@@ -36,7 +36,7 @@ const (
 	StopUnsupported       = "unsupported"
 	StopInvalid           = "invalid_request"
 	StopInternal          = "internal"
-	StopOutput            = "output_error" // laya analyze could not write its output
+	StopOutput            = "output_error" // lissandra analyze could not write its output
 )
 
 const (

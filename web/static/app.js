@@ -1,6 +1,6 @@
 'use strict';
 
-// Laya admin UI. No framework and no build step: the DOM is built with the
+// Lissandra admin UI. No framework and no build step: the DOM is built with the
 // h() helper, which only ever inserts text nodes for content, so log data
 // can never be interpreted as HTML.
 
@@ -190,12 +190,12 @@ function textToHeaders(text) {
 // windows, site data policies): the session then lasts while the page is
 // open.
 let token = '';
-try { token = sessionStorage.getItem('laya.token') || ''; } catch { /* storage blocked */ }
+try { token = sessionStorage.getItem('lissandra.token') || ''; } catch { /* storage blocked */ }
 
 function setToken(t) {
   token = t;
   try {
-    if (t) sessionStorage.setItem('laya.token', t); else sessionStorage.removeItem('laya.token');
+    if (t) sessionStorage.setItem('lissandra.token', t); else sessionStorage.removeItem('lissandra.token');
   } catch { /* storage blocked: kept in memory only */ }
 }
 
@@ -204,7 +204,7 @@ function setToken(t) {
 // the new token, so this tab stays signed in.
 let tokenChange = null;
 
-const TOKEN_REJECTED = 'That token is no longer accepted. Laya may have restarted with a new generated token, or the admin token was changed. Sign in again.';
+const TOKEN_REJECTED = 'That token is no longer accepted. Lissandra may have restarted with a new generated token, or the admin token was changed. Sign in again.';
 const TOKEN_CHANGED_ELSEWHERE = 'The admin token was changed in another session. Sign in with the new one.';
 
 class AuthError extends Error {}
@@ -449,7 +449,7 @@ function engineAnswer(r) {
 // unloadedCheckpoint returns the checkpoint a test request for sourceId
 // would use when the engine has said it hasn't loaded it, else ''. Asking
 // anyway would make laya-serve load it (about 2 GB more memory), which
-// Laya itself never does, so the UI doesn't ask.
+// Lissandra itself never does, so the UI doesn't ask.
 async function unloadedCheckpoint(sourceId) {
   const e = (await GET('/api/stats')).engine || {};
   if (!e.loaded) return '';
@@ -568,7 +568,7 @@ function confirmDialog(message, label = 'Delete') {
 // ---------- Login ----------
 
 // showLogin asks for the admin token. message says why a session ended.
-// The help needs no request: nothing is asked of Laya before sign-in.
+// The help needs no request: nothing is asked of Lissandra before sign-in.
 function showLogin(message) {
   if (document.querySelector('.login-back')) return;
   const input = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Admin token' });
@@ -590,20 +590,20 @@ function showLogin(message) {
   },
   brandMark(),
   message ? h('div', { class: 'callout warn', role: 'alert' }, message) : null,
-  field('Admin token', input, 'LAYA_ADMIN_TOKEN (in Nomad, from the nomad/jobs/laya variable), or the permanent token set in Laya.'),
+  field('Admin token', input, 'LISSANDRA_ADMIN_TOKEN (in Nomad, from the nomad/jobs/lissandra variable), or the permanent token set in Lissandra.'),
   err,
   h('button', { type: 'submit', class: 'primary' }, 'Sign in'),
   h('div', { class: 'login-help small muted' },
-    h('p', null, 'First start without LAYA_ADMIN_TOKEN? Laya printed a token for this run in its log: look for ', h('code', null, 'admin_token'),
+    h('p', null, 'First start without LISSANDRA_ADMIN_TOKEN? Lissandra printed a token for this run in its log: look for ', h('code', null, 'admin_token'),
       ' (for example ', h('code', null, 'docker logs <container> 2>&1 | grep admin_token'), ').'),
-    h('p', null, 'Lost the token? Set LAYA_ADMIN_TOKEN, or delete admin-token.json in Laya\'s data directory, then restart Laya.')));
+    h('p', null, 'Lost the token? Set LISSANDRA_ADMIN_TOKEN, or delete admin-token.json in Lissandra\'s data directory, then restart Lissandra.')));
   const back = h('div', { class: 'login-back' }, h('div', { class: 'card login' }, form));
   document.body.append(back);
   input.focus();
 }
 
 function brandMark() {
-  return h('div', { class: 'brand' }, h('img', { src: 'favicon.svg', alt: '', width: 26, height: 26 }), h('span', null, 'Laya'));
+  return h('div', { class: 'brand' }, h('img', { src: 'favicon.svg', alt: '', width: 26, height: 26 }), h('span', null, 'Lissandra'));
 }
 
 // signOut forgets the token, and the setup wizard's unsaved edits (they
@@ -637,7 +637,7 @@ async function route() {
   // The setup wizard is a full page. The class stays on while it moves
   // between its steps.
   document.body.classList.toggle('setup-mode', page === 'setup');
-  document.title = 'Laya';
+  document.title = 'Lissandra';
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
   // Each render gets its own element, so a slow page that finishes late
   // never adds to the next one.
@@ -687,7 +687,7 @@ function setupBanner(info) {
   const next = SETUP_PAGES.find((p) => p.id === ob.resume);
   const left = ob.remaining ? `${plural(ob.remaining, 'step')} left` : 'every step is done';
   const el = h('div', { class: 'callout banner' },
-    h('span', null, `Finish setting up Laya: ${left}.${next && next.id !== 'welcome' ? ` Next: ${next.label}.` : ''}`),
+    h('span', null, `Finish setting up Lissandra: ${left}.${next && next.id !== 'welcome' ? ` Next: ${next.label}.` : ''}`),
     h('span', { class: 'row' },
       h('button', {
         type: 'button', class: 'small primary',
@@ -699,7 +699,7 @@ function setupBanner(info) {
       h('button', {
         type: 'button', class: 'small',
         onclick: (e) => busy(e.currentTarget, async () => {
-          if (!(await confirmDialog('Dismiss setup? Laya keeps its current configuration. You can run it again from Settings.', 'Dismiss'))) return;
+          if (!(await confirmDialog('Dismiss setup? Lissandra keeps its current configuration. You can run it again from Settings.', 'Dismiss'))) return;
           await setupApi('POST', '/api/onboarding/dismiss');
           el.remove();
         }),
@@ -712,14 +712,14 @@ function setupBanner(info) {
 function tokenWarning(info) {
   if (!info.auth || info.auth.source !== 'generated') return null;
   try {
-    if (sessionStorage.getItem('laya.tokenWarnDismissed')) return null;
+    if (sessionStorage.getItem('lissandra.tokenWarnDismissed')) return null;
   } catch { /* storage blocked */ }
   const el = h('div', { class: 'callout warn banner' },
-    h('span', null, 'Your admin token changes every time Laya restarts. ', h('a', { href: '#/settings' }, 'Set a permanent token'), ', or set LAYA_ADMIN_TOKEN.'),
+    h('span', null, 'Your admin token changes every time Lissandra restarts. ', h('a', { href: '#/settings' }, 'Set a permanent token'), ', or set LISSANDRA_ADMIN_TOKEN.'),
     h('button', {
       type: 'button', class: 'small', 'aria-label': 'Dismiss this warning for this tab',
       onclick: () => {
-        try { sessionStorage.setItem('laya.tokenWarnDismissed', '1'); } catch { /* not remembered */ }
+        try { sessionStorage.setItem('lissandra.tokenWarnDismissed', '1'); } catch { /* not remembered */ }
         el.remove();
       },
     }, 'Dismiss'));
@@ -827,7 +827,7 @@ function learningKpi(l, kpi) {
   const card = kpi('Rules to review', num(l.review),
     full ? `limit reached: nothing new is learned until some are reviewed` : `${num(l.learned)} learned since start`, full);
   const link = h('a', { class: 'kpi-link', href: '#/rules?status=review' }, card);
-  link.title = `Rules Laya learned from the engine's answers (at ${pct(l.min_confidence)} confidence or more). They classify and alert already; approve, edit or reject them.`;
+  link.title = `Rules Lissandra learned from the engine's answers (at ${pct(l.min_confidence)} confidence or more). They classify and alert already; approve, edit or reject them.`;
   return link;
 }
 
@@ -1027,7 +1027,7 @@ async function showEvent(target, opts = {}) {
 pages.sources = async (main) => {
   await load('sources', 'info', 'settings', 'groups');
   const list = h('div', { class: 'card flush' });
-  append(main, pageHead('Sources', 'Where logs come from: Laya can receive them on an ingest endpoint (push) or poll an API (pull).',
+  append(main, pageHead('Sources', 'Where logs come from: Lissandra can receive them on an ingest endpoint (push) or poll an API (pull).',
     h('button', { type: 'button', class: 'primary', onclick: () => editSource(null) }, 'Add source')), list);
   const refresh = async () => {
     const [sources, stats] = await Promise.all([GET('/api/sources'), GET('/api/stats')]);
@@ -1081,7 +1081,7 @@ function renderSources(root, sources, status) {
 function showIngest(src, { onRotated } = {}) {
   const base = cache.info.public_url;
   const url = `${base}/ingest/${src.id}`;
-  let host = 'laya.service.consul', port = '8080', tls = 'Off';
+  let host = 'lissandra.service.consul', port = '8080', tls = 'Off';
   try {
     const u = new URL(base);
     host = u.hostname;
@@ -1109,13 +1109,13 @@ function showIngest(src, { onRotated } = {}) {
             if (onRotated) onRotated(upd); else route();
           },
         }, 'Rotate'))),
-    h('p', { class: 'small muted' }, 'The token can be sent as "Authorization: Bearer <token>", an "X-Laya-Token" header, or a ?token= query parameter.'),
+    h('p', { class: 'small muted' }, 'The token can be sent as "Authorization: Bearer <token>", an "X-Lissandra-Token" header, or a ?token= query parameter.'),
     h('h3', null, 'curl'),
     codeBox(`curl -X POST '${url}' \\\n  -H 'Authorization: Bearer ${src.ingest_token}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"level":"error","service":"checkout","message":"payment failed: connection refused to db:5432"}'`),
     h('h3', null, 'Fluent Bit'),
     codeBox(`[OUTPUT]\n    Name    http\n    Match   *\n    Host    ${host}\n    Port    ${port}\n    URI     /ingest/${src.id}\n    Format  json\n    tls     ${tls}\n    Header  Authorization Bearer ${src.ingest_token}`),
     h('h3', null, 'Vector'),
-    codeBox(`[sinks.laya]\ntype = "http"\ninputs = ["app_logs"]\nuri = "${url}"\nencoding.codec = "json"\nframing.method = "newline_delimited"\nrequest.headers.Authorization = "Bearer ${src.ingest_token}"`));
+    codeBox(`[sinks.lissandra]\ntype = "http"\ninputs = ["app_logs"]\nuri = "${url}"\nencoding.codec = "json"\nframing.method = "newline_delimited"\nrequest.headers.Authorization = "Bearer ${src.ingest_token}"`));
   modal = openModal({ title: `Send logs to "${src.name}"`, body, wide: true, actions: [{ label: 'Done', primary: true, onClick: (c) => c() }] });
 }
 
@@ -1132,7 +1132,7 @@ function editSource(src, { onSaved } = {}) {
     description: h('input', { value: src.description || '' }),
     tags: h('input', { value: (src.tags || []).join(', '), placeholder: 'prod, payments' }),
     enabled: checkbox('Enabled', src.enabled),
-    type: select([['push', 'Push — senders POST logs to Laya'], ['pull', 'Pull — Laya polls an HTTP API']], src.type, { disabled: !isNew }),
+    type: select([['push', 'Push — senders POST logs to Lissandra'], ['pull', 'Pull — Lissandra polls an HTTP API']], src.type, { disabled: !isNew }),
     url: h('input', { value: pull.url, placeholder: 'https://logs.example.com/api/v1/logs?since={since_rfc3339}' }),
     method: select(['GET', 'POST'], pull.method),
     interval: h('input', { type: 'number', min: 5, value: pull.interval_seconds }),
@@ -1193,7 +1193,7 @@ function editSource(src, { onSaved } = {}) {
       h('div', { class: 'fields-2' }, field('Format', f.format), field('Records path', f.recordsPath, 'Dot path to the array of log records in a JSON response.')),
       h('div', { class: 'fields-3' }, field('Message field', f.messageField), field('Level field', f.levelField), field('Timestamp field', f.tsField))),
     h('fieldset', null, h('legend', null, 'Classification'),
-      field('Laya engine checkpoint', f.engineModel.el, 'The checkpoint that classifies this source\'s events when no rule does. Pick multilingual for logs that are not in English. The engine must have it loaded (its LAYA_MODELS): Laya never asks for one it hasn\'t, and those events keep the rules\' result.')),
+      field('Laya engine checkpoint', f.engineModel.el, 'The checkpoint that classifies this source\'s events when no rule does. Pick multilingual for logs that are not in English. The engine must have it loaded (its LAYA_MODELS): Lissandra never asks for one it hasn\'t, and those events keep the rules\' result.')),
     h('fieldset', null, h('legend', null, 'Alerts'),
       f.groups.length
         ? h('div', { class: 'field' }, h('label', null, 'Alert groups'), h('div', { class: 'chips' }, f.groups.map((x) => x.box.el)),
@@ -1306,7 +1306,7 @@ pages.rules = async (main, _arg, params) => {
   const list = h('div', { class: 'card flush' });
   const tester = ruleTester();
   append(main,
-    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation. When no rule categorizes an event, the Laya engine does, and Laya learns a rule from its answer for you to review.',
+    pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation. When no rule categorizes an event, the Laya engine does, and Lissandra learns a rule from its answer for you to review.',
       h('button', { type: 'button', class: 'primary', onclick: () => editRule(null) }, 'Add rule')),
     tabs,
     h('div', { class: 'grid cols-2 top' }, list, tester));
@@ -1354,7 +1354,7 @@ function renderRules(root, tab = 'all', rerender = () => renderRules(root, tab))
     const ids = rules.map((r) => r.id);
     root.append(h('div', { class: 'list-item review-bar' },
       h('div', { class: 'main' }, h('div', { class: 'meta' },
-        'Laya learned these from the engine\'s answers. They already classify and alert. Approve the ones that are right, edit the ones that are close, and reject the rest: a rejected rule keeps the engine away from its pattern.')),
+        'Lissandra learned these from the engine\'s answers. They already classify and alert. Approve the ones that are right, edit the ones that are close, and reject the rest: a rejected rule keeps the engine away from its pattern.')),
       h('div', { class: 'actions' },
         h('button', { type: 'button', class: 'small', onclick: () => reviewRules('approve', ids, rerender) }, `Approve all ${num(ids.length)}`),
         h('button', {
@@ -1371,7 +1371,7 @@ function renderRules(root, tab = 'all', rerender = () => renderRules(root, tab))
       active: 'No active rules.',
       review: engineSettings().learn_rules === false
         ? 'Nothing to review. Rule learning is off (Settings → Laya engine).'
-        : 'Nothing to review. When the Laya engine categorizes a pattern no rule covers, the rule Laya learns from it appears here.',
+        : 'Nothing to review. When the Laya engine categorizes a pattern no rule covers, the rule Lissandra learns from it appears here.',
       rejected: 'No rejected rules.',
     };
     root.append(h('div', { class: 'empty' }, empty[tab]));
@@ -1420,7 +1420,7 @@ function renderRules(root, tab = 'all', rerender = () => renderRules(root, tab))
         h('button', {
           type: 'button', class: 'small danger',
           onclick: async () => {
-            const relearn = r.learned ? ' Laya may learn its pattern again when the engine next answers it; reject it instead to keep the engine away.' : '';
+            const relearn = r.learned ? ' Lissandra may learn its pattern again when the engine next answers it; reject it instead to keep the engine away.' : '';
             if (!(await confirmDialog(`Delete rule "${r.name}"?${relearn}`))) return;
             await api('DELETE', `/api/rules/${r.id}`).catch(reportError);
             await load('rules');
@@ -1591,7 +1591,7 @@ pages.notifiers = async (main) => {
   await load('notifiers', 'types');
   const list = h('div', { class: 'card flush' });
   append(main,
-    pageHead('Notifiers', 'Channels Laya can alert through. Alert routes decide which events go where.',
+    pageHead('Notifiers', 'Channels Lissandra can alert through. Alert routes decide which events go where.',
       h('button', { type: 'button', class: 'primary', onclick: () => editNotifier(null) }, 'Add notifier')),
     list);
   clear(list);
@@ -1685,7 +1685,7 @@ function editNotifier(n, { type, onSaved } = {}) {
   const body = h('div', null,
     h('div', { class: 'fields-2' }, field('Name', name), field('Type', typeSel)),
     desc, fieldsWrap, enabled.el,
-    h('p', { class: 'small muted' }, 'Tip: any value can be written as ${env:NAME} to read it from Laya\'s environment, so secrets can live in Nomad Variables or Vault instead of Laya\'s config file.'));
+    h('p', { class: 'small muted' }, 'Tip: any value can be written as ${env:NAME} to read it from Lissandra\'s environment, so secrets can live in Nomad Variables or Vault instead of Lissandra\'s config file.'));
   openModal({
     title: isNew ? 'Add notifier' : `Edit notifier "${n.name}"`, body,
     left: h('button', { type: 'button', onclick: (e) => sendTest(collect(), e.currentTarget) }, 'Send test'),
@@ -1960,8 +1960,8 @@ pages.settings = async (main) => {
   const e = st.engine || {};
   const f = {
     enabled: checkbox('Classify events with the Laya engine', e.enabled),
-    url: h('input', { placeholder: 'http://127.0.0.1:8000 or ${env:LAYA_ENGINE_URL}', autocomplete: 'off', spellcheck: 'false' }),
-    apiKey: secretInput('', { placeholder: '${env:LAYA_ENGINE_API_KEY}' }),
+    url: h('input', { placeholder: 'http://127.0.0.1:8000 or ${env:LISSANDRA_ENGINE_URL}', autocomplete: 'off', spellcheck: 'false' }),
+    apiKey: secretInput('', { placeholder: '${env:LISSANDRA_ENGINE_API_KEY}' }),
     model: modelPicker(''),
     minConf: h('input', { type: 'number', min: 0, max: 1, step: 0.05 }),
     minSev: select(SEVERITIES, ''),
@@ -2042,7 +2042,7 @@ pages.settings = async (main) => {
     clear(statusBox).append(h('div', { class: 'kv' },
       h('div', null, 'Status'), h('div', null, status,
         a.config_error ? h('div', { class: 'small' }, a.config_error)
-          : a.enabled && !a.configured ? h('div', { class: 'small muted' }, 'Set the engine URL above (or LAYA_ENGINE_URL in Laya\'s environment) and save.') : null),
+          : a.enabled && !a.configured ? h('div', { class: 'small muted' }, 'Set the engine URL above (or LISSANDRA_ENGINE_URL in Lissandra\'s environment) and save.') : null),
       warnings.length ? [h('div', null, warnings.length > 1 ? 'Warnings' : 'Warning'),
         h('div', { class: 'warnings' }, warnings.map((w) => h('div', null, h('span', { class: 'badge warn' }, 'warning'), ' ', w)))] : null,
       urls.length ? [h('div', null, urls.length > 1 ? 'Engines' : 'Engine'), h('div', { class: 'mono' }, urls.join(', '))] : null,
@@ -2135,7 +2135,7 @@ pages.settings = async (main) => {
 
   const trainBtn = h('button', {
     type: 'button',
-    onclick: () => busy(trainBtn, () => download('/api/engine/training-data', 'laya-training-live.jsonl',
+    onclick: () => busy(trainBtn, () => download('/api/engine/training-data', 'lissandra-training-live.jsonl',
       'No training data yet: no live event in memory was categorized by a rule.')),
   }, 'Download training data (JSONL)');
 
@@ -2147,7 +2147,7 @@ pages.settings = async (main) => {
   });
 
   const exportCfg = (secrets) => download(`/api/config/export${secrets ? '?include_secrets=true' : ''}`,
-    `laya-config-${new Date().toISOString().slice(0, 10)}.json`);
+    `lissandra-config-${new Date().toISOString().slice(0, 10)}.json`);
 
   const saveBtn = () => h('button', { type: 'button', class: 'primary', onclick: (ev) => busy(ev.currentTarget, save) }, 'Save settings');
 
@@ -2158,7 +2158,7 @@ pages.settings = async (main) => {
         accessCard(),
         h('div', { class: 'card mt' },
           h('h2', null, 'General'),
-          field('Public URL', publicURL, 'How users and senders reach Laya (e.g. https://laya.example.com). Used for ingest URLs and links in notifications. Defaults to LAYA_PUBLIC_URL or the address you are using now.'),
+          field('Public URL', publicURL, 'How users and senders reach Lissandra (e.g. https://lissandra.example.com). Used for ingest URLs and links in notifications. Defaults to LISSANDRA_PUBLIC_URL or the address you are using now.'),
           generalErr,
           h('h3', null, 'Backup'),
           h('p', { class: 'small muted' }, 'Export the configuration as JSON (secrets masked unless included), or import a file to replace it — useful for promoting config between environments.'),
@@ -2176,9 +2176,9 @@ pages.settings = async (main) => {
         h('p', { class: 'small muted' }, 'Rules run first. The Laya engine (laya-serve) classifies what they leave: it picks one of the category names, or none, and when the record states no level it judges the severity (a stated severity is never replaced). It is asked once per message pattern and repeats reuse the answer. If it is down, slow or unsure, events go on with the rules\' result.'),
         f.enabled.el,
         h('div', { class: 'mt' }),
-        field('Engine URL', f.url, 'Base URL of laya-serve. Several URLs, comma-separated, share the load and fail over. ${env:NAME} reads Laya\'s environment (or the file NAME_FILE names) and ${file:/path} a file in Laya\'s secrets or task directory (or LAYA_FILE_REF_DIRS); both are re-read while Laya runs. Credentials in a URL are shown masked: leave them as they are to keep them, also when adding instances or changing a port.'),
-        field('API key', f.apiKey, 'The engine\'s LAYA_API_KEY, if it has one. Prefer ${env:LAYA_ENGINE_API_KEY} and keep the key in a Nomad Variable.'),
-        field('Checkpoint', f.model.el, 'english reads English logs and is the best calibrated; multilingual handles other languages and is faster on CPU. The engine must have it loaded (its LAYA_MODELS): Laya never asks for one it hasn\'t. Sources can pick their own.'),
+        field('Engine URL', f.url, 'Base URL of laya-serve. Several URLs, comma-separated, share the load and fail over. ${env:NAME} reads Lissandra\'s environment (or the file NAME_FILE names) and ${file:/path} a file in Lissandra\'s secrets or task directory (or LISSANDRA_FILE_REF_DIRS); both are re-read while Lissandra runs. Credentials in a URL are shown masked: leave them as they are to keep them, also when adding instances or changing a port.'),
+        field('API key', f.apiKey, 'The engine\'s LAYA_API_KEY, if it has one. Prefer ${env:LISSANDRA_ENGINE_API_KEY} and keep the key in a Nomad Variable.'),
+        field('Checkpoint', f.model.el, 'english reads English logs and is the best calibrated; multilingual handles other languages and is faster on CPU. The engine must have it loaded (its LAYA_MODELS): Lissandra never asks for one it hasn\'t. Sources can pick their own.'),
         h('div', { class: 'fields-2' },
           field('Minimum confidence', f.minConf, 'How sure the engine must be (0–1) before its category or severity is used. Below it, the rules\' result stands.'),
           field('Minimum severity', f.minSev, 'Less severe events are not sent to the engine.')),
@@ -2202,7 +2202,7 @@ pages.settings = async (main) => {
         testOut,
         h('h3', null, 'Training data'),
         h('div', { class: 'row' }, trainBtn),
-        h('p', { class: 'small muted' }, 'Message patterns your rules categorized in live events, in laya-train JSONL with the exact question Laya asks: for fine-tuning a checkpoint on your logs.'))),
+        h('p', { class: 'small muted' }, 'Message patterns your rules categorized in live events, in laya-train JSONL with the exact question Lissandra asks: for fine-tuning a checkpoint on your logs.'))),
     h('div', { class: 'row mt' }, h('span', { class: 'spacer' }), saveBtn()));
   await renderStatus();
 };
@@ -2224,25 +2224,25 @@ async function importConfigFile(file, { after } = {}) {
 }
 
 // accessCard says where the admin token comes from, and sets, rotates or
-// deletes the one stored in Laya.
+// deletes the one stored in Lissandra.
 function accessCard() {
   const card = h('div', { class: 'card' });
   const render = () => {
     const a = cache.auth;
     const parts = [];
     if (a.source === 'generated') {
-      parts.push(h('div', { class: 'callout warn' }, 'Laya generated this token at startup and printed it in its log. It changes every time Laya restarts.'),
+      parts.push(h('div', { class: 'callout warn' }, 'Lissandra generated this token at startup and printed it in its log. It changes every time Lissandra restarts.'),
         h('button', { type: 'button', class: 'primary', onclick: () => tokenModal('Set a permanent admin token', render) }, 'Set a permanent token…'));
     } else if (a.source === 'stored') {
-      parts.push(h('p', { class: 'wrap-anywhere' }, `Set in Laya on ${fmtDate(a.set_at)}. Stored as a keyed hash in ${a.file}.`),
+      parts.push(h('p', { class: 'wrap-anywhere' }, `Set in Lissandra on ${fmtDate(a.set_at)}. Stored as a keyed hash in ${a.file}.`),
         h('button', { type: 'button', onclick: () => tokenModal('Rotate the admin token', render) }, 'Rotate token…'),
-        h('p', { class: 'small muted wrap-anywhere' }, `Lost it? Set LAYA_ADMIN_TOKEN, or delete ${a.file}, and restart Laya.`));
+        h('p', { class: 'small muted wrap-anywhere' }, `Lost it? Set LISSANDRA_ADMIN_TOKEN, or delete ${a.file}, and restart Lissandra.`));
     } else {
-      parts.push(h('p', null, 'Set by LAYA_ADMIN_TOKEN. Change it where it is set (on Nomad: the nomad/jobs/laya Variable), then restart.'));
+      parts.push(h('p', null, 'Set by LISSANDRA_ADMIN_TOKEN. Change it where it is set (on Nomad: the nomad/jobs/lissandra Variable), then restart.'));
       if (a.stored_ignored) {
         const note = a.stored_error
           ? storedTokenUnusable(a)
-          : h('div', { class: 'callout warn' }, `A token set in Laya${storedOn(a)} is ignored while the variable is set. It becomes active again if the variable is removed.`);
+          : h('div', { class: 'callout warn' }, `A token set in Lissandra${storedOn(a)} is ignored while the variable is set. It becomes active again if the variable is removed.`);
         parts.push(note, deleteStoredButton(render));
       }
     }
@@ -2270,9 +2270,9 @@ function storedOn(a) {
 }
 
 // storedTokenUnusable says why admin-token.json can't be used, and what
-// that means while LAYA_ADMIN_TOKEN is set.
+// that means while LISSANDRA_ADMIN_TOKEN is set.
 function storedTokenUnusable(a) {
-  return h('div', { class: 'callout warn' }, `${a.file} can't be used (${a.stored_error}). While it is there, Laya won't start without LAYA_ADMIN_TOKEN: delete it.`);
+  return h('div', { class: 'callout warn' }, `${a.file} can't be used (${a.stored_error}). While it is there, Lissandra won't start without LISSANDRA_ADMIN_TOKEN: delete it.`);
 }
 
 // deleteStoredButton deletes admin-token.json, once confirmed, then runs
@@ -2281,7 +2281,7 @@ function deleteStoredButton(after) {
   return h('button', {
     type: 'button', class: 'danger',
     onclick: (e) => busy(e.currentTarget, async () => {
-      if (!(await confirmDialog('Delete the admin token stored in Laya? LAYA_ADMIN_TOKEN stays the admin token.'))) return;
+      if (!(await confirmDialog('Delete the admin token stored in Lissandra? LISSANDRA_ADMIN_TOKEN stays the admin token.'))) return;
       await api('DELETE', '/api/auth/token');
       await load('auth');
       toast('Stored admin token deleted');
@@ -2462,7 +2462,7 @@ function renderHealth(out, r, inUse) {
   if (r.ok && !missing.length) {
     summary = h('div', { class: 'callout ok mt' }, `Connected: ${many ? 'every engine has' : 'the engine has'} ${inUse.join(', ')} loaded.`);
   } else if (missing.length && r.endpoints.every((ep) => ep.ok)) {
-    summary = h('div', { class: 'callout warn mt' }, `Connected, but ${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} not loaded${many ? ' everywhere' : ''}. Laya won't ask for ${them} there, so events that need ${them} keep the rules' result: add ${them} to the engine's LAYA_MODELS.`);
+    summary = h('div', { class: 'callout warn mt' }, `Connected, but ${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} not loaded${many ? ' everywhere' : ''}. Lissandra won't ask for ${them} there, so events that need ${them} keep the rules' result: add ${them} to the engine's LAYA_MODELS.`);
   } else {
     summary = h('div', { class: 'callout bad mt' }, 'Not ready: see below.');
   }
@@ -2582,10 +2582,10 @@ function fmtIn(iso, tz, withDate = true) {
 }
 
 const STOP_REASONS = {
-  upload_limit: 'The file is larger than the upload limit, so only its first part was analyzed. Gzip it, or run `laya analyze` locally for the whole file.',
-  decompressed_limit: 'The decompressed file is larger than the analysis limit; only the first part was analyzed. Use `laya analyze` for the whole file.',
+  upload_limit: 'The file is larger than the upload limit, so only its first part was analyzed. Gzip it, or run `lissandra analyze` locally for the whole file.',
+  decompressed_limit: 'The decompressed file is larger than the analysis limit; only the first part was analyzed. Use `lissandra analyze` for the whole file.',
   ratio_limit: 'The file decompresses to far more than real logs do, so analysis stopped as a precaution.',
-  deadline: 'The analysis took too long and was stopped. Use `laya analyze` for very large files.',
+  deadline: 'The analysis took too long and was stopped. Use `lissandra analyze` for very large files.',
   client_aborted: 'The upload was interrupted; results cover the part that arrived.',
   gzip_truncated: 'The gzip data ended early (truncated file?); results cover the part that decompressed.',
   syntax_error: 'The file has malformed data part-way through; results cover everything before it.',
@@ -2622,7 +2622,7 @@ pages.files = async (main, arg, params) => {
     if (!files.length) return;
     const tooBig = files.filter((f) => lim.max_upload_bytes && f.size > lim.max_upload_bytes);
     if (tooBig.length) {
-      msg.append(h('div', { class: 'callout bad' }, `${tooBig.map((f) => f.name).join(', ')}: larger than the ${fmtBytes(lim.max_upload_bytes)} upload limit. Gzip the file (logs shrink 5–30×) or run \`laya analyze\` locally.`));
+      msg.append(h('div', { class: 'callout bad' }, `${tooBig.map((f) => f.name).join(', ')}: larger than the ${fmtBytes(lim.max_upload_bytes)} upload limit. Gzip the file (logs shrink 5–30×) or run \`lissandra analyze\` locally.`));
     }
     const ok = files.filter((f) => !tooBig.includes(f));
     if (!ok.length) return;
@@ -2654,14 +2654,14 @@ pages.files = async (main, arg, params) => {
         h('div', { class: 'field' }, h('label', null, 'Time zone'), tzIn, tzList, h('div', { class: 'help' }, 'For timestamps without a zone. ', tzBrowser))),
       engineSettings().enabled ? h('div', { class: 'field' }, useEngine.el,
         h('div', { class: 'help' }, `One request per pattern, at most ${num(lim.engine_calls_per_file || 100)} per file and only while no live event is waiting for the engine, so it is slower. Without it, only answers the engine already gave for live events are used.`)) : null,
-      h('p', { class: 'small muted' }, 'Very large files are faster with the command line: ', h('code', null, 'laya analyze -config config.json app.log'), '.')),
+      h('p', { class: 'small muted' }, 'Very large files are faster with the command line: ', h('code', null, 'lissandra analyze -config config.json app.log'), '.')),
     list);
 
   const refresh = async () => {
     const reports = await GET('/api/imports');
     clear(list);
     list.append(h('div', { class: 'list-item' }, h('div', { class: 'main' }, h('h2', null, 'Recent analyses'),
-      h('div', { class: 'meta' }, `The last ${lim.keep || 5} are kept in memory and cleared when Laya restarts.`))));
+      h('div', { class: 'meta' }, `The last ${lim.keep || 5} are kept in memory and cleared when Lissandra restarts.`))));
     if (!reports.length) { list.append(h('div', { class: 'empty' }, 'No files analyzed yet.')); return; }
     const tbl = h('table', null, h('tr', null, h('th', null, 'File'), h('th', null, 'Status'), h('th', null, 'Events'), h('th', null, 'Errors'), h('th', null, 'Lines'), h('th', null, 'Size'), h('th', null, 'Analyzed')));
     for (const r of reports) {
@@ -2763,21 +2763,21 @@ function renderReport(root, rep, filter) {
 
   const downloadReport = () => {
     const blob = new Blob([JSON.stringify(rep, null, 2)], { type: 'application/json' });
-    saveBlob(blob, `laya-${rep.id}-report.json`);
+    saveBlob(blob, `lissandra-${rep.id}-report.json`);
   };
   const downloadEvents = () => {
     const p = new URLSearchParams({ format: 'ndjson' });
     for (const [k, v] of Object.entries(filter)) if (v) p.set(k, v);
-    return download(`/api/imports/${encodeURIComponent(rep.id)}/events?${p}`, `laya-${rep.id}-events.ndjson`);
+    return download(`/api/imports/${encodeURIComponent(rep.id)}/events?${p}`, `lissandra-${rep.id}-events.ndjson`);
   };
-  const downloadTraining = () => download(`/api/imports/${encodeURIComponent(rep.id)}/training-data`, `laya-${rep.id}-training.jsonl`,
+  const downloadTraining = () => download(`/api/imports/${encodeURIComponent(rep.id)}/training-data`, `lissandra-${rep.id}-training.jsonl`,
     'No training data: no event kept from this file was categorized by a rule.');
   const actions = [
     h('button', { type: 'button', onclick: downloadReport }, 'Download report'),
     rep.retained ? h('button', { type: 'button', onclick: () => downloadEvents().catch(reportError) }, 'Download events') : null,
     rep.retained ? h('button', {
       type: 'button',
-      title: 'laya-train JSONL: one record per message pattern a rule categorized in the events kept from this file, with the question Laya asks the engine. For fine-tuning a checkpoint.',
+      title: 'laya-train JSONL: one record per message pattern a rule categorized in the events kept from this file, with the question Lissandra asks the engine. For fine-tuning a checkpoint.',
       onclick: (e) => {
         const btn = e.currentTarget;
         btn.disabled = true;
@@ -2865,7 +2865,7 @@ function renderReport(root, rep, filter) {
   drow('Kept to browse', `${num(rep.retained)} events (${fmtBytes(rep.retained_bytes)})`);
   if (rep.yielded_ms) drow('Paused for live ingest', fmtSpan(rep.yielded_ms));
   root.append(h('div', { class: 'card mt' }, h('h2', null, 'How the file was read'), diag,
-    h('p', { class: 'small muted' }, 'This analysis lives in memory and is cleared when Laya restarts.')));
+    h('p', { class: 'small muted' }, 'This analysis lives in memory and is cleared when Lissandra restarts.')));
 }
 
 function saveBlob(blob, name) {
@@ -2997,7 +2997,7 @@ function checkTokenLocally(t) {
 }
 
 // newAdminToken returns 24 random bytes as hex, the format of the tokens
-// Laya generates. The rare draw that fails the variety rules is redrawn.
+// Lissandra generates. The rare draw that fails the variety rules is redrawn.
 function newAdminToken() {
   let t;
   do { t = randomHex(24); } while (checkTokenLocally(t));
@@ -3047,13 +3047,13 @@ function tokenPanel({ current = '', source = '', draft = {}, onChange } = {}) {
   }
 
   const gen = secretBox(() => draft.generated,
-    h('button', { type: 'button', class: 'small', onclick: () => saveBlob(new Blob([`${draft.generated}\n`], { type: 'text/plain' }), 'laya-admin-token.txt') }, 'Download'),
+    h('button', { type: 'button', class: 'small', onclick: () => saveBlob(new Blob([`${draft.generated}\n`], { type: 'text/plain' }), 'lissandra-admin-token.txt') }, 'Download'),
     h('button', { type: 'button', class: 'small', onclick: () => { draft.generated = newAdminToken(); setAck(false); clearError(); gen.paint(); changed(); } }, 'New token'));
   const genPart = h('div', { class: 'token-part' }, gen.el,
     h('div', { class: 'help' }, 'If you download it, delete the file once the token is in your password manager.'));
   const ownPart = h('div', { class: 'token-part' },
     field('Token', own, ['Use a random value from a password manager\'s generator, or ', h('code', null, 'openssl rand -hex 24'),
-      '. Don\'t use a password you use elsewhere: Laya stores a fast keyed hash meant for random tokens.']),
+      '. Don\'t use a password you use elsewhere: Lissandra stores a fast keyed hash meant for random tokens.']),
     field('Repeat it', repeat));
   const group = `token-mode-${++fieldSeq}`;
   const radios = {};
@@ -3073,7 +3073,7 @@ function tokenPanel({ current = '', source = '', draft = {}, onChange } = {}) {
       radio('generate', 'Generate a token (recommended)'), genPart,
       radio('own', 'Use my own token'), ownPart),
     ack.el,
-    h('p', { class: 'small muted' }, `This tab stays signed in. Other tabs and API scripts will need the new token, and ${source === 'generated' ? 'the token in Laya\'s log' : 'the current one'} stops working.`),
+    h('p', { class: 'small muted' }, `This tab stays signed in. Other tabs and API scripts will need the new token, and ${source === 'generated' ? 'the token in Lissandra\'s log' : 'the current one'} stops working.`),
     errBox);
   toggle();
 
@@ -3097,7 +3097,7 @@ function tokenPanel({ current = '', source = '', draft = {}, onChange } = {}) {
       const t = own.value;
       if (!t) fail('Enter your token, or choose "Generate a token".', own);
       if (t === current) {
-        fail(source === 'generated' ? 'That\'s the token you signed in with, which is in Laya\'s log. Use a new one.' : 'That\'s the token in use now. Use a new one.', own);
+        fail(source === 'generated' ? 'That\'s the token you signed in with, which is in Lissandra\'s log. Use a new one.' : 'That\'s the token in use now. Use a new one.', own);
       }
       const problem = checkTokenLocally(t);
       if (problem) fail(problem, own);
@@ -3148,7 +3148,7 @@ async function commitToken(panel, { generatedOnly } = {}) {
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 // probeToken returns the status of GET /api/auth signed in with t, or 0
-// when Laya can't be reached.
+// when Lissandra can't be reached.
 async function probeToken(t) {
   try {
     return (await fetch('/api/auth', { headers: { Authorization: `Bearer ${t}` } })).status;
@@ -3192,11 +3192,11 @@ async function changeAdminToken(next) {
   }
   // The token is changed whatever this refresh does.
   await load('auth', 'info').catch(reportError);
-  toast(`Admin token saved. This tab stays signed in. Other tabs and API scripts need the new token, and ${wasGenerated ? 'the token in Laya\'s log' : 'the old one'} no longer works.`);
+  toast(`Admin token saved. This tab stays signed in. Other tabs and API scripts need the new token, and ${wasGenerated ? 'the token in Lissandra\'s log' : 'the old one'} no longer works.`);
 }
 
 // settleChange finds out whether a token change that got no answer was
-// applied: it returns once Laya accepts next, and throws while it still
+// applied: it returns once Lissandra accepts next, and throws while it still
 // accepts sent, or after 30 seconds without reaching it. The new token is
 // never dropped while that is unknown.
 async function settleChange(sent, next) {
@@ -3212,7 +3212,7 @@ async function settleChange(sent, next) {
     }
     await sleep(3000);
   }
-  throw new Error('Laya couldn\'t be reached. If signing in with your old token fails later, use this one.');
+  throw new Error('Lissandra couldn\'t be reached. If signing in with your old token fails later, use this one.');
 }
 
 // ---------- Setup wizard ----------
@@ -3222,13 +3222,13 @@ async function settleChange(sent, next) {
 // step's line on the welcome page: for access, it depends on the token in
 // use (a, the /api/auth status).
 const SETUP_PAGES = [
-  { id: 'welcome', title: 'Welcome to Laya', label: 'Welcome', render: setupWelcome },
+  { id: 'welcome', title: 'Welcome to Lissandra', label: 'Welcome', render: setupWelcome },
   {
-    id: 'access', step: true, title: 'Secure access to Laya', label: 'Access', render: setupAccess,
+    id: 'access', step: true, title: 'Secure access to Lissandra', label: 'Access', render: setupAccess,
     summary: (a) => {
-      if (a.source === 'generated') return 'Replace the token Laya generated at startup with a permanent one.';
-      if (a.source === 'stored') return 'A permanent token is set in Laya; you can rotate it.';
-      return a.stored_error ? 'Set by LAYA_ADMIN_TOKEN. Delete admin-token.json, which Laya can\'t use.' : 'Set by LAYA_ADMIN_TOKEN; nothing to change here.';
+      if (a.source === 'generated') return 'Replace the token Lissandra generated at startup with a permanent one.';
+      if (a.source === 'stored') return 'A permanent token is set in Lissandra; you can rotate it.';
+      return a.stored_error ? 'Set by LISSANDRA_ADMIN_TOKEN. Delete admin-token.json, which Lissandra can\'t use.' : 'Set by LISSANDRA_ADMIN_TOKEN; nothing to change here.';
     },
   },
   {
@@ -3330,7 +3330,7 @@ async function finishLater() {
 }
 
 async function skipSetup() {
-  if (!(await confirmDialog('Skip setup? Laya keeps its current configuration. You can run setup again from Settings.', 'Skip setup'))) return;
+  if (!(await confirmDialog('Skip setup? Lissandra keeps its current configuration. You can run setup again from Settings.', 'Skip setup'))) return;
   await setupApi('POST', '/api/onboarding/dismiss');
   clearSetupDrafts();
   location.hash = '#/dashboard';
@@ -3376,7 +3376,7 @@ pages.setup = async (main, arg) => {
     history.replaceState(null, '', `#/setup/${page.id}`);
   }
   const n = SETUP_STEPS.indexOf(page) + 1;
-  document.title = `Set up Laya · ${n ? `Step ${n} of ${SETUP_STEPS.length}: ${page.label}` : page.label}`;
+  document.title = `Set up Lissandra · ${n ? `Step ${n} of ${SETUP_STEPS.length}: ${page.label}` : page.label}`;
   const ctx = {
     state, page,
     drafts: setupDrafts[page.id] || (setupDrafts[page.id] = {}),
@@ -3431,7 +3431,7 @@ function setupShell(state, page, view) {
 
 // setupHeader has its own Sign out: the sidebar is hidden in the wizard.
 function setupHeader() {
-  return h('header', { class: 'setup-head' }, brandMark(), h('span', { class: 'muted' }, 'Set up Laya'),
+  return h('header', { class: 'setup-head' }, brandMark(), h('span', { class: 'muted' }, 'Set up Lissandra'),
     h('div', { class: 'actions' },
       h('button', { type: 'button', class: 'small', onclick: (e) => busy(e.currentTarget, finishLater) }, 'Finish later'),
       h('button', { type: 'button', class: 'small', onclick: (e) => busy(e.currentTarget, skipSetup) }, 'Skip setup'),
@@ -3609,9 +3609,9 @@ async function setupWelcome(ctx) {
   const on = cache.rules.filter((r) => r.enabled).length;
   const cats = categories().length;
   const body = h('div', { class: 'card' },
-    h('p', { class: 'lead' }, 'Laya receives your logs, classifies them by severity and category, and alerts the right people when something needs attention.'),
+    h('p', { class: 'lead' }, 'Lissandra receives your logs, classifies them by severity and category, and alerts the right people when something needs attention.'),
     h('div', { class: 'tile-grid flow' },
-      tile('Ingest', 'Senders push logs to an ingest URL, or Laya polls an API for them.'),
+      tile('Ingest', 'Senders push logs to an ingest URL, or Lissandra polls an API for them.'),
       tile('Classify', 'Rules, and the Laya engine if you run it, give each event a severity and a category.'),
       tile('Alert', 'Routes send the events that matter to email, Slack, PagerDuty and other channels.')),
     h('h2', { class: 'mt' }, 'What setup covers'),
@@ -3688,11 +3688,11 @@ async function setupAccess(ctx) {
     openPanel();
     const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
     append(body,
-      h('div', { class: 'callout warn' }, 'You signed in with a token Laya generated when it started and printed in its log. It changes every time Laya restarts, and anyone who can read the log has it.'),
+      h('div', { class: 'callout warn' }, 'You signed in with a token Lissandra generated when it started and printed in its log. It changes every time Lissandra restarts, and anyone who can read the log has it.'),
       panelBox,
       location.protocol === 'http:' && !local ? h('div', { class: 'callout warn' }, 'This page isn\'t using HTTPS: the token crosses the network unencrypted.') : null,
-      a.on_nomad ? h('p', { class: 'small muted' }, 'On Nomad, prefer LAYA_ADMIN_TOKEN in the nomad/jobs/laya Variable. A token set here is stored on Laya\'s volume and is lost with it.') : null,
-      h('p', { class: 'small muted wrap-anywhere' }, `Stored as a keyed hash in ${a.file}. If that directory isn't on a persistent volume, set LAYA_ADMIN_TOKEN instead.`));
+      a.on_nomad ? h('p', { class: 'small muted' }, 'On Nomad, prefer LISSANDRA_ADMIN_TOKEN in the nomad/jobs/lissandra Variable. A token set here is stored on Lissandra\'s volume and is lost with it.') : null,
+      h('p', { class: 'small muted wrap-anywhere' }, `Stored as a keyed hash in ${a.file}. If that directory isn't on a persistent volume, set LISSANDRA_ADMIN_TOKEN instead.`));
     footer = stepFooter(ctx, {
       dirty: () => panel.dirty(),
       discard,
@@ -3720,7 +3720,7 @@ async function setupAccess(ctx) {
       },
     }, drafts.rotating ? 'Keep the current token' : 'Rotate token…');
     if (drafts.rotating) openPanel();
-    append(body, h('div', { class: 'callout ok' }, `A permanent admin token set in Laya on ${fmtDate(a.set_at)} is in use.`), toggle, panelBox);
+    append(body, h('div', { class: 'callout ok' }, `A permanent admin token set in Lissandra on ${fmtDate(a.set_at)} is in use.`), toggle, panelBox);
     footer = stepFooter(ctx, {
       dirty: () => Boolean(panel && panel.dirty()),
       discard,
@@ -3730,11 +3730,11 @@ async function setupAccess(ctx) {
     });
   } else {
     append(body,
-      h('div', { class: 'callout ok' }, 'The admin token comes from LAYA_ADMIN_TOKEN in Laya\'s environment. Change it where it is set (on Nomad: the nomad/jobs/laya Variable).'),
-      // A file Laya can't use is a startup failure waiting: it can be
+      h('div', { class: 'callout ok' }, 'The admin token comes from LISSANDRA_ADMIN_TOKEN in Lissandra\'s environment. Change it where it is set (on Nomad: the nomad/jobs/lissandra Variable).'),
+      // A file Lissandra can't use is a startup failure waiting: it can be
       // deleted from here.
       a.stored_error ? [storedTokenUnusable(a), deleteStoredButton(ctx.refresh)] : null,
-      a.stored_ignored && !a.stored_error ? h('p', null, `A token set in Laya${storedOn(a)} is ignored while that variable is set. Delete it in Settings → Access.`) : null);
+      a.stored_ignored && !a.stored_error ? h('p', null, `A token set in Lissandra${storedOn(a)} is ignored while that variable is set. Delete it in Settings → Access.`) : null);
     footer = stepFooter(ctx, { skip: { hidden: true }, defaults: { hidden: true }, saveBtn: { label: 'Continue' }, save: () => true });
   }
   sync();
@@ -3758,7 +3758,7 @@ async function setupSources(ctx) {
   const blocked = () => (hasEnabled() ? '' : 'Add a source, or use the default one');
 
   // Arrival is checked against the newest event seen, not the browser's
-  // clock, which can be off from Laya's.
+  // clock, which can be off from Lissandra's.
   let watched = null; // {src, baseline}
   const waiting = h('div', { class: 'listening' });
   const arrived = h('div', { class: 'arrived', role: 'status' });
@@ -3807,7 +3807,7 @@ async function setupSources(ctx) {
         h('div', { class: 'row mt' }, sendBtn, h('span', { class: 'small muted' }, 'Optional: one info event, as a sender would post it.')),
         sendOut);
     }
-    if (pulls.length) check.append(h('p', { class: 'small muted' }, 'Laya polls pull sources itself. See the Sources page for the last poll.'));
+    if (pulls.length) check.append(h('p', { class: 'small muted' }, 'Lissandra polls pull sources itself. See the Sources page for the last poll.'));
   };
 
   let footer = null;
@@ -3837,7 +3837,7 @@ async function setupSources(ctx) {
 
   const body = h('div', null,
     h('div', { class: 'card' },
-      h('h2', null, 'Laya\'s address'),
+      h('h2', null, 'Lissandra\'s address'),
       field('Public URL', url, 'Used in ingest URLs and in links in notifications.'),
       urlErr),
     h('h2', { class: 'mt' }, 'Sources'),
@@ -3872,7 +3872,7 @@ async function setupSources(ctx) {
 // judged by the engine, which at its default minimum severity never sees
 // it.
 async function sendTestEvent(src, out) {
-  const body = JSON.stringify({ level: 'info', message: 'Hello from the Laya setup wizard', laya_test: true });
+  const body = JSON.stringify({ level: 'info', message: 'Hello from the Lissandra setup wizard', lissandra_test: true });
   const preview = await api('POST', '/api/rules/test', { sample: body, source_id: src.id });
   const names = new Set();
   for (const row of preview.events || []) for (const name of row.routes || []) names.add(name);
@@ -3889,14 +3889,14 @@ async function sendTestEvent(src, out) {
       body,
     });
   } catch {
-    clear(out).append('Not sent: Laya couldn\'t be reached.');
+    clear(out).append('Not sent: Lissandra couldn\'t be reached.');
     return;
   }
   const outcomes = {
-    202: 'Sent. Waiting for Laya to classify it…',
+    202: 'Sent. Waiting for Lissandra to classify it…',
     403: 'This source is disabled.',
     401: 'The ingest token changed. Reload this page.',
-    503: 'Laya\'s queue is full. Retry in a few seconds.',
+    503: 'Lissandra\'s queue is full. Retry in a few seconds.',
   };
   clear(out).append(outcomes[res.status] || `Not sent: ${res.status} ${res.statusText}`);
 }
@@ -4061,11 +4061,11 @@ async function setupChannels(ctx) {
       h('div', { class: 'tile-grid' }, cache.types.map((t) => h('button', {
         type: 'button', class: 'tile', onclick: () => editNotifier(null, { type: t.type, onSaved: refresh }),
       }, h('strong', null, t.label), h('span', { class: 'small muted' }, t.description)))),
-      h('p', { class: 'small muted' }, 'Keep webhook URLs and passwords in Laya\'s environment: write ${env:NAME}.')),
+      h('p', { class: 'small muted' }, 'Keep webhook URLs and passwords in Lissandra\'s environment: write ${env:NAME}.')),
     h('h2', { class: 'mt' }, 'Your channels'),
     list);
   footer = stepFooter(ctx, {
-    defaults: { label: 'No alerts for now', help: 'Events are still classified and shown in Laya. Nobody is notified.', hidden: enabledAny() },
+    defaults: { label: 'No alerts for now', help: 'Events are still classified and shown in Lissandra. Nobody is notified.', hidden: enabledAny() },
     saveBtn: { blocked: enabledAny() ? '' : 'Add a channel, or choose No alerts for now' },
     save: () => true,
   });
@@ -4201,7 +4201,7 @@ async function setupNotify(ctx) {
       save: { label: 'Continue', onClick: () => ctx.go('review') },
     });
     return {
-      body: h('div', { class: 'callout' }, 'No alert channels yet. Go back to add one, or continue: Laya keeps events either way.'),
+      body: h('div', { class: 'callout' }, 'No alert channels yet. Go back to add one, or continue: Lissandra keeps events either way.'),
       footer: footer.el,
       dirty: () => false,
     };
@@ -4235,7 +4235,7 @@ async function setupNotify(ctx) {
   };
   paint();
   const body = h('div', null,
-    h('p', { class: 'muted' }, 'Laya has no user accounts: people get alerts through channels. For each channel, set who receives its alerts and which alerts go to it.'),
+    h('p', { class: 'muted' }, 'Lissandra has no user accounts: people get alerts through channels. For each channel, set who receives its alerts and which alerts go to it.'),
     cardsBox,
     h('h2', { class: 'mt' }, 'Teams'),
     h('p', { class: 'muted' }, 'Optional. An alert group alerts a team about its own sources only: through the team\'s channels, and by email to its members through an email channel\'s server, with its own minimum severity and categories.'),
@@ -4249,7 +4249,7 @@ async function setupNotify(ctx) {
     defaults: { help: 'Default: a route for each channel no route or alert group reaches, for error and above (critical for PagerDuty), any category, repeats throttled for 15 minutes.' },
     save: async () => {
       // A request that failed may still have been applied, only its answer
-      // lost. So after a failure the cards are painted again, from Laya's
+      // lost. So after a failure the cards are painted again, from Lissandra's
       // routes and their drafts: a route a lost create made is then its
       // card's own, and a retry edits it instead of making another. When
       // that reload fails too, the retry reloads first.
@@ -4339,9 +4339,9 @@ async function setupReview(ctx) {
   const cats = categories().length;
   const chans = cache.notifiers.filter((n) => n.enabled);
   const routesOn = cache.routes.filter((r) => r.enabled).length;
-  let access = 'Managed by LAYA_ADMIN_TOKEN';
-  if (a.source === 'stored') access = 'Permanent token set in Laya';
-  else if (a.source === 'generated') access = h('span', { class: 'badge warn' }, 'Changes every time Laya restarts');
+  let access = 'Managed by LISSANDRA_ADMIN_TOKEN';
+  if (a.source === 'stored') access = 'Permanent token set in Lissandra';
+  else if (a.source === 'generated') access = h('span', { class: 'badge warn' }, 'Changes every time Lissandra restarts');
 
   const body = h('div', null,
     h('div', { class: 'card flush' },
@@ -4365,7 +4365,7 @@ async function setupReview(ctx) {
       onClick: async () => {
         cache.onboarding = await setupApi('POST', '/api/onboarding/complete');
         clearSetupDrafts();
-        toast('Laya is set up');
+        toast('Lissandra is set up');
         location.hash = '#/dashboard';
       },
     },

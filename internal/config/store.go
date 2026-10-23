@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/atomicfile"
+	"github.com/vipinmohan22/lissandra/internal/atomicfile"
 )
 
 // Store owns the configuration and persists every change atomically to a
@@ -46,7 +46,7 @@ func Open(path, seedPath string) (*Store, error) {
 }
 
 // initial is the config a first start writes. Only one built from the
-// defaults offers the setup wizard: a seed's operator configured Laya as
+// defaults offers the setup wizard: a seed's operator configured Lissandra as
 // code, so a seed gets it only by asking with its own "onboarding" key.
 func initial(seedPath string) (*Config, error) {
 	now := time.Now().UTC().Truncate(time.Second)
@@ -113,7 +113,7 @@ func Decode(data []byte, c *Config) error {
 }
 
 // Load reads and validates the config at path without creating or
-// modifying anything. It is meant for offline tools such as `laya analyze`.
+// modifying anything. It is meant for offline tools such as `lissandra analyze`.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

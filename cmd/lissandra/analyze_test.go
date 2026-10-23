@@ -12,10 +12,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
-	"github.com/vipinmohan22/layalogs/internal/importer"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine/enginetest"
+	"github.com/vipinmohan22/lissandra/internal/importer"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 const cliLog = "2026-10-11 10:00:00 INFO started\n" +
@@ -35,8 +35,8 @@ func writeFile(t *testing.T, dir, name, content string) string {
 
 func analyze(t *testing.T, stdin string, args ...string) (int, string, string) {
 	t.Helper()
-	t.Setenv("LAYA_CONFIG", "")
-	t.Setenv("LAYA_DATA_DIR", t.TempDir())
+	t.Setenv("LISSANDRA_CONFIG", "")
+	t.Setenv("LISSANDRA_DATA_DIR", t.TempDir())
 	var out, errb bytes.Buffer
 	code := runAnalyze(args, strings.NewReader(stdin), &out, &errb)
 	return code, out.String(), errb.String()
@@ -149,11 +149,11 @@ func TestAnalyzeUsesConfigAndNeverCallsOut(t *testing.T) {
 		t.Errorf("analyze made %d network calls", n)
 	}
 
-	// $LAYA_DATA_DIR/config.json is picked up automatically.
-	t.Setenv("LAYA_CONFIG", "")
+	// $LISSANDRA_DATA_DIR/config.json is picked up automatically.
+	t.Setenv("LISSANDRA_CONFIG", "")
 	dataDir := t.TempDir()
 	writeFile(t, dataDir, "config.json", string(data))
-	t.Setenv("LAYA_DATA_DIR", dataDir)
+	t.Setenv("LISSANDRA_DATA_DIR", dataDir)
 	var o, e bytes.Buffer
 	runAnalyze([]string{f}, strings.NewReader(""), &o, &e)
 	if !strings.Contains(e.String(), filepath.Join(dataDir, "config.json")) {

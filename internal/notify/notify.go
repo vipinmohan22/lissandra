@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Message is what a Sender delivers: one classified event plus routing
@@ -29,7 +29,7 @@ type Message struct {
 	Event      model.Event
 	RouteName  string
 	Suppressed int    // similar events throttled since the previous notification
-	Link       string // link to the event in the Laya UI, when a public URL is set
+	Link       string // link to the event in the Lissandra UI, when a public URL is set
 	Test       bool
 }
 
@@ -202,7 +202,7 @@ func doRequest(ctx context.Context, method, url, contentType string, body []byte
 		return hideURL(err)
 	}
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("User-Agent", "laya-notifier/1")
+	req.Header.Set("User-Agent", "lissandra-notifier/1")
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

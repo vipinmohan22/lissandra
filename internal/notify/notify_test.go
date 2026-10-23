@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 type capture struct {
@@ -61,7 +61,7 @@ func testMessage() *Message {
 		},
 		RouteName:  "oncall",
 		Suppressed: 3,
-		Link:       "https://laya.example.com/#/events/e1",
+		Link:       "https://lissandra.example.com/#/events/e1",
 	}
 }
 
@@ -109,7 +109,7 @@ func TestChatPayloads(t *testing.T) {
 		t.Error("discord must disable mentions so log text can't ping @everyone")
 	}
 	pd := reqs[4].body
-	if pd["routing_key"] != "rk" || pd["dedup_key"] != "laya-abc" || pd["payload"].(map[string]any)["severity"] != "critical" {
+	if pd["routing_key"] != "rk" || pd["dedup_key"] != "lissandra-abc" || pd["payload"].(map[string]any)["severity"] != "critical" {
 		t.Errorf("pagerduty payload: %v", pd)
 	}
 }
@@ -166,8 +166,8 @@ func TestValidate(t *testing.T) {
 	if err := Validate(config.Notifier{Type: "nope"}); err == nil {
 		t.Error("unknown type should fail")
 	}
-	masked := Mask(config.Notifier{Type: "slack", Settings: map[string]string{"webhook_url": "https://hooks/x", "username": "laya"}})
-	if masked.Settings["webhook_url"] != config.Mask || masked.Settings["username"] != "laya" {
+	masked := Mask(config.Notifier{Type: "slack", Settings: map[string]string{"webhook_url": "https://hooks/x", "username": "lissandra"}})
+	if masked.Settings["webhook_url"] != config.Mask || masked.Settings["username"] != "lissandra" {
 		t.Errorf("mask: %v", masked.Settings)
 	}
 	Restore(&masked, config.Notifier{Type: "slack", Settings: map[string]string{"webhook_url": "https://hooks/x"}})
@@ -235,7 +235,7 @@ func TestEmailSend(t *testing.T) {
 	host, port, _ := net.SplitHostPort(addr)
 	s, err := Build(config.Notifier{Type: "email", Settings: map[string]string{
 		"smtp_host": host, "smtp_port": port, "security": "none", "username": "u", "password": "p",
-		"from": "Laya <laya@example.com>", "to": "a@example.com, b@example.com",
+		"from": "Lissandra <lissandra@example.com>", "to": "a@example.com, b@example.com",
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestEmailSend(t *testing.T) {
 		t.Fatal(err)
 	}
 	msg := <-got
-	for _, want := range []string{"Subject: ", "multipart/alternative", "text/html", "X-Laya-Severity: critical", "To: <a@example.com>, <b@example.com>"} {
+	for _, want := range []string{"Subject: ", "multipart/alternative", "text/html", "X-Lissandra-Severity: critical", "To: <a@example.com>, <b@example.com>"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("email missing %q:\n%s", want, msg)
 		}
@@ -300,7 +300,7 @@ func TestDispatcherRoutingAndThrottle(t *testing.T) {
 			{ID: "r1", Name: "db errors", Enabled: true, MinSeverity: model.SeverityError, Categories: []string{"database"}, NotifierIDs: []string{"n1"}, ThrottleSeconds: 3600},
 			{ID: "r2", Name: "disabled", Enabled: false, MinSeverity: model.SeverityDebug, NotifierIDs: []string{"n1"}},
 		},
-		Settings: config.Settings{PublicURL: "https://laya.test"},
+		Settings: config.Settings{PublicURL: "https://lissandra.test"},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -323,7 +323,7 @@ func TestDispatcherRoutingAndThrottle(t *testing.T) {
 	if d.Throttled.Load() != 1 {
 		t.Errorf("throttled = %d", d.Throttled.Load())
 	}
-	if got := fake.msgs[0].Link; got != "https://laya.test/#/events/1" && got != "https://laya.test/#/events/4" {
+	if got := fake.msgs[0].Link; got != "https://lissandra.test/#/events/1" && got != "https://lissandra.test/#/events/4" {
 		t.Errorf("link = %q", got)
 	}
 	dels := d.Deliveries(10)
@@ -548,7 +548,7 @@ func TestRecipientAndAudience(t *testing.T) {
 func TestAlertGroupRoutes(t *testing.T) {
 	c := config.Defaults()
 	c.Notifiers = []config.Notifier{
-		{ID: "mail", Name: "SMTP", Type: "email", Enabled: true, Settings: map[string]string{"smtp_host": "smtp.example.com", "from": "laya@example.com", "to": "everyone@example.com"}},
+		{ID: "mail", Name: "SMTP", Type: "email", Enabled: true, Settings: map[string]string{"smtp_host": "smtp.example.com", "from": "lissandra@example.com", "to": "everyone@example.com"}},
 		{ID: "chat", Name: "chat", Type: "slack", Enabled: true, Settings: map[string]string{"webhook_url": "https://hooks.example.com/x"}},
 	}
 	c.Sources = append(c.Sources, config.Source{ID: "pay", Name: "payments", Type: config.SourcePush, Enabled: true, AlertGroupIDs: []string{"team"}})

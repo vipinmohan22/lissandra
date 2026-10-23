@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine"
-	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine"
+	"github.com/vipinmohan22/lissandra/internal/engine/enginetest"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // The tester and "Ask the Laya engine" see the source's tags, as live

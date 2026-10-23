@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine"
-	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
-	"github.com/vipinmohan22/layalogs/internal/events"
-	"github.com/vipinmohan22/layalogs/internal/model"
-	"github.com/vipinmohan22/layalogs/internal/notify"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine"
+	"github.com/vipinmohan22/lissandra/internal/engine/enginetest"
+	"github.com/vipinmohan22/lissandra/internal/events"
+	"github.com/vipinmohan22/lissandra/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/notify"
 )
 
 // A storm of one new pattern: one request answers them all, yet WouldWait

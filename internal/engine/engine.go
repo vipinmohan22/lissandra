@@ -18,9 +18,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/classify"
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/classify"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 const (
@@ -94,7 +94,7 @@ type Status struct {
 	Model         string    `json:"model"`
 	ModelsInUse   []string  `json:"models_in_use"`  // the default and per-source checkpoints
 	Loaded        []string  `json:"loaded"`         // checkpoints the engine reported, if it said
-	Capacity      int       `json:"capacity"`       // concurrent requests: max_in_flight × instances Laya can ask
+	Capacity      int       `json:"capacity"`       // concurrent requests: max_in_flight × instances Lissandra can ask
 	Calls         uint64    `json:"calls_total"`    // requests made for live and file events
 	CacheHits     uint64    `json:"cache_hits"`     // live events answered without a request
 	Errors        uint64    `json:"errors"`         // failed requests
@@ -239,7 +239,7 @@ func (c *Classifier) rebuildLocked(x expanded) {
 		}
 		urls = nil
 	} else if len(urls) == 0 {
-		// A reference Laya may not read expands to nothing: say so, not "no URL".
+		// A reference Lissandra may not read expands to nothing: say so, not "no URL".
 		if rerr := config.CheckRefs(s.URL); rerr != nil {
 			c.configErr = "engine url: " + rerr.Error() + "; it reads as empty"
 		}
@@ -392,7 +392,7 @@ func (c *Classifier) checkHealth() {
 		c.lastErr, c.lastErrAt, c.healthErr = "", time.Time{}, false
 	}
 	if len(ready) > 0 {
-		// Capacity is max_in_flight per instance Laya can ask: one that is
+		// Capacity is max_in_flight per instance Lissandra can ask: one that is
 		// down, or hides its checkpoints while another lists them (another
 		// key), takes no requests, so the others must not get its share.
 		usable := 0
@@ -1102,7 +1102,7 @@ func (c *Classifier) Status() Status {
 	}
 	if c.client != nil {
 		for _, u := range c.client.Hidden() {
-			st.Warnings = append(st.Warnings, fmt.Sprintf("%s answers but doesn't list its checkpoints to Laya's key, as the other instances do: its key differs, so it isn't asked", redactURL(u)))
+			st.Warnings = append(st.Warnings, fmt.Sprintf("%s answers but doesn't list its checkpoints to Lissandra's key, as the other instances do: its key differs, so it isn't asked", redactURL(u)))
 		}
 	}
 	if now.Before(c.pausedUntil) {

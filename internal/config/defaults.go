@@ -1,6 +1,6 @@
 package config
 
-import "github.com/vipinmohan22/layalogs/internal/model"
+import "github.com/vipinmohan22/lissandra/internal/model"
 
 // DefaultEngineModel is the Laya engine checkpoint used unless the operator
 // picks another one.
@@ -10,7 +10,7 @@ const DefaultEngineModel = "english"
 // become a learned rule unless the operator sets another.
 const DefaultLearnMinConfidence = 0.8
 
-// MaxReviewRules bounds the learned rules awaiting review: past it, Laya
+// MaxReviewRules bounds the learned rules awaiting review: past it, Lissandra
 // learns nothing new until some are approved or rejected.
 const MaxReviewRules = 500
 
@@ -145,9 +145,9 @@ func Defaults() *Config {
 		Settings: Settings{
 			Categories: append([]Category{}, DefaultCategories...),
 			Engine: EngineSettings{
-				Enabled:            true, // idle until a URL is set (LAYA_ENGINE_URL in the Nomad job)
-				URL:                "${env:LAYA_ENGINE_URL}",
-				APIKey:             "${env:LAYA_ENGINE_API_KEY}",
+				Enabled:            true, // idle until a URL is set (LISSANDRA_ENGINE_URL in the Nomad job)
+				URL:                "${env:LISSANDRA_ENGINE_URL}",
+				APIKey:             "${env:LISSANDRA_ENGINE_API_KEY}",
 				Model:              DefaultEngineModel,
 				OnlyUncategorized:  true,
 				MinSeverity:        model.SeverityWarning,

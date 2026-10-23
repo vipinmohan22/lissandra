@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // The root cause of a multi-line record goes second in the state, where the

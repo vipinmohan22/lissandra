@@ -1,4 +1,4 @@
-// Command laya runs the Laya log classification service.
+// Command lissandra runs the Lissandra log classification service.
 package main
 
 import (
@@ -17,17 +17,17 @@ import (
 	"time"
 	_ "time/tzdata" // time zones for log file analysis, even on minimal images
 
-	"github.com/vipinmohan22/layalogs/internal/auth"
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine"
-	"github.com/vipinmohan22/layalogs/internal/events"
-	"github.com/vipinmohan22/layalogs/internal/importer"
-	"github.com/vipinmohan22/layalogs/internal/learn"
-	"github.com/vipinmohan22/layalogs/internal/notify"
-	"github.com/vipinmohan22/layalogs/internal/pipeline"
-	"github.com/vipinmohan22/layalogs/internal/poller"
-	"github.com/vipinmohan22/layalogs/internal/server"
-	"github.com/vipinmohan22/layalogs/web"
+	"github.com/vipinmohan22/lissandra/internal/auth"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine"
+	"github.com/vipinmohan22/lissandra/internal/events"
+	"github.com/vipinmohan22/lissandra/internal/importer"
+	"github.com/vipinmohan22/lissandra/internal/learn"
+	"github.com/vipinmohan22/lissandra/internal/notify"
+	"github.com/vipinmohan22/lissandra/internal/pipeline"
+	"github.com/vipinmohan22/lissandra/internal/poller"
+	"github.com/vipinmohan22/lissandra/internal/server"
+	"github.com/vipinmohan22/lissandra/web"
 )
 
 var version = "dev"
@@ -43,7 +43,7 @@ func main() {
 		return
 	}
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "laya:", err)
+		fmt.Fprintln(os.Stderr, "lissandra:", err)
 		os.Exit(1)
 	}
 }
@@ -64,19 +64,19 @@ func envInt(key string, def int) int {
 
 func newLogger() *slog.Logger {
 	var lvl slog.Level
-	if err := lvl.UnmarshalText([]byte(env("LAYA_LOG_LEVEL", "info"))); err != nil {
+	if err := lvl.UnmarshalText([]byte(env("LISSANDRA_LOG_LEVEL", "info"))); err != nil {
 		lvl = slog.LevelInfo
 	}
 	opts := &slog.HandlerOptions{Level: lvl}
-	if env("LAYA_LOG_FORMAT", "json") == "text" {
+	if env("LISSANDRA_LOG_FORMAT", "json") == "text" {
 		return slog.New(slog.NewTextHandler(os.Stdout, opts))
 	}
 	return slog.New(slog.NewJSONHandler(os.Stdout, opts))
 }
 
-// openAdmin picks the admin token (LAYA_ADMIN_TOKEN, else one set in Laya,
-// else one generated for this run) and logs where it comes from. Only a
-// generated token is logged, for the operator to sign in with.
+// openAdmin picks the admin token (LISSANDRA_ADMIN_TOKEN, else one set in
+// Lissandra, else one generated for this run) and logs where it comes from.
+// Only a generated token is logged, for the operator to sign in with.
 func openAdmin(log *slog.Logger, path, envToken string) (*auth.Store, error) {
 	admin, generated, err := auth.Open(path, envToken, log)
 	if err != nil {
@@ -84,18 +84,18 @@ func openAdmin(log *slog.Logger, path, envToken string) (*auth.Store, error) {
 	}
 	switch st := admin.Status(); st.Source {
 	case auth.SourceGenerated:
-		log.Warn("LAYA_ADMIN_TOKEN is not set and no admin token was set in Laya; generated a token for this run only. "+
-			"Sign in with it to run the setup wizard, which sets a permanent one, or set LAYA_ADMIN_TOKEN.", "admin_token", generated)
+		log.Warn("LISSANDRA_ADMIN_TOKEN is not set and no admin token was set in Lissandra; generated a token for this run only. "+
+			"Sign in with it to run the setup wizard, which sets a permanent one, or set LISSANDRA_ADMIN_TOKEN.", "admin_token", generated)
 	case auth.SourceStored:
-		log.Info("admin token: set in Laya", "set_at", *st.SetAt, "file", path)
+		log.Info("admin token: set in Lissandra", "set_at", *st.SetAt, "file", path)
 	default:
 		if len(envToken) < 16 {
-			log.Warn("LAYA_ADMIN_TOKEN is shorter than 16 characters; use a long random value")
+			log.Warn("LISSANDRA_ADMIN_TOKEN is shorter than 16 characters; use a long random value")
 		}
 		if st.StoredIgnored {
-			log.Warn("a token set in Laya is ignored while LAYA_ADMIN_TOKEN is set; delete it in Settings → Access", "file", path)
+			log.Warn("a token set in Lissandra is ignored while LISSANDRA_ADMIN_TOKEN is set; delete it in Settings → Access", "file", path)
 		} else {
-			log.Info("admin token: set by LAYA_ADMIN_TOKEN")
+			log.Info("admin token: set by LISSANDRA_ADMIN_TOKEN")
 		}
 	}
 	return admin, nil
@@ -103,30 +103,30 @@ func openAdmin(log *slog.Logger, path, envToken string) (*auth.Store, error) {
 
 func run() error {
 	log := newLogger()
-	listen := env("LAYA_LISTEN", ":8080")
-	dataDir := env("LAYA_DATA_DIR", "./data")
-	publicURL := env("LAYA_PUBLIC_URL", "")
+	listen := env("LISSANDRA_LISTEN", ":8080")
+	dataDir := env("LISSANDRA_DATA_DIR", "./data")
+	publicURL := env("LISSANDRA_PUBLIC_URL", "")
 
-	admin, err := openAdmin(log, filepath.Join(dataDir, "admin-token.json"), env("LAYA_ADMIN_TOKEN", ""))
+	admin, err := openAdmin(log, filepath.Join(dataDir, "admin-token.json"), env("LISSANDRA_ADMIN_TOKEN", ""))
 	if err != nil {
 		return err
 	}
 
-	cfg, err := config.Open(filepath.Join(dataDir, "config.json"), env("LAYA_CONFIG_SEED", ""))
+	cfg, err := config.Open(filepath.Join(dataDir, "config.json"), env("LISSANDRA_CONFIG_SEED", ""))
 	if err != nil {
 		return err
 	}
 	for _, w := range config.FileRefWarnings(cfg.Get()) {
-		log.Warn("config refers to a file Laya may not read", "detail", w)
+		log.Warn("config refers to a file Lissandra may not read", "detail", w)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	store := events.NewStore(envInt("LAYA_EVENT_BUFFER", 5000))
+	store := events.NewStore(envInt("LISSANDRA_EVENT_BUFFER", 5000))
 	dispatcher := notify.NewDispatcher(log)
 	laya := engine.New(log)
-	pipe := pipeline.New(envInt("LAYA_QUEUE_SIZE", 10000), store, dispatcher, laya)
+	pipe := pipeline.New(envInt("LISSANDRA_QUEUE_SIZE", 10000), store, dispatcher, laya)
 	learner := learn.New(log, cfg.Update)
 	pipe.Learn = learner.Observe
 	pollers := poller.NewManager(ctx, log, pipe.SubmitWait)
@@ -148,16 +148,16 @@ func run() error {
 	runCtx, stopRun := context.WithCancel(context.Background())
 	defer stopRun()
 	done := make(chan struct{}, 2)
-	go func() { dispatcher.Run(runCtx, envInt("LAYA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
+	go func() { dispatcher.Run(runCtx, envInt("LISSANDRA_NOTIFY_WORKERS", 4)); done <- struct{}{} }()
 	// Learned rules are written until the signal: rules proposed during the
 	// drain are learned again when the engine next answers their pattern.
 	go learner.Run(ctx)
 	go func() {
-		pipe.Run(runCtx, envInt("LAYA_WORKERS", 4), envInt("LAYA_ENGINE_WORKERS", 16))
+		pipe.Run(runCtx, envInt("LISSANDRA_WORKERS", 4), envInt("LISSANDRA_ENGINE_WORKERS", 16))
 		done <- struct{}{}
 	}()
 
-	importMemory := int64(envInt("LAYA_IMPORT_MEMORY_MB", 64)) << 20
+	importMemory := int64(envInt("LISSANDRA_IMPORT_MEMORY_MB", 64)) << 20
 	imports := importer.NewRegistry(importer.RegistryConfig{
 		Concurrency:   1,
 		Limits:        importer.Limits{Events: importer.DefaultLimits.Events, Bytes: min(importer.DefaultLimits.Bytes, importMemory)},
@@ -169,8 +169,8 @@ func run() error {
 		Auth:           admin,
 		OnNomad:        os.Getenv("NOMAD_ALLOC_ID") != "",
 		PublicURL:      publicURL,
-		MaxIngestBytes: int64(envInt("LAYA_MAX_INGEST_BYTES", 10<<20)),
-		MaxImportBytes: int64(envInt("LAYA_MAX_IMPORT_BYTES", 100<<20)),
+		MaxIngestBytes: int64(envInt("LISSANDRA_MAX_INGEST_BYTES", 10<<20)),
+		MaxImportBytes: int64(envInt("LISSANDRA_MAX_IMPORT_BYTES", 100<<20)),
 		UI:             web.FS(),
 	}, log, cfg, store, pipe, dispatcher, laya, learner, pollers, imports)
 
@@ -184,7 +184,7 @@ func run() error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("laya listening", "addr", listen, "data_dir", dataDir, "version", version)
+		log.Info("lissandra listening", "addr", listen, "data_dir", dataDir, "version", version)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}

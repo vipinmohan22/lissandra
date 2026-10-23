@@ -1,4 +1,4 @@
-// Package config defines Laya's runtime configuration (sources, rules,
+// Package config defines Lissandra's runtime configuration (sources, rules,
 // notifiers, routes, settings) and persists it to a JSON file.
 package config
 
@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Source types.
 const (
-	SourcePush = "push" // Laya exposes /ingest/{id} and the sender POSTs logs to it.
-	SourcePull = "pull" // Laya polls a remote HTTP API for logs.
+	SourcePush = "push" // Lissandra exposes /ingest/{id} and the sender POSTs logs to it.
+	SourcePull = "pull" // Lissandra polls a remote HTTP API for logs.
 )
 
 // Source is a place logs come from.
@@ -261,7 +261,7 @@ type EngineSettings struct {
 	// URL of laya-serve, e.g. http://127.0.0.1:8000. Several URLs may be
 	// given, comma-separated; requests go round-robin and fail over.
 	// ${env:NAME} and ${file:/path} references are expanded; a file is
-	// re-read while Laya runs (Nomad renders engine addresses into one).
+	// re-read while Lissandra runs (Nomad renders engine addresses into one).
 	URL    string `json:"url"`
 	APIKey string `json:"api_key,omitempty"` // bearer key (LAYA_API_KEY on the engine)
 	// Model is the checkpoint pinned on every request: english,
@@ -295,7 +295,7 @@ type EngineSettings struct {
 
 // Settings holds global options.
 type Settings struct {
-	// PublicURL is the externally reachable base URL of Laya, used for ingest
+	// PublicURL is the externally reachable base URL of Lissandra, used for ingest
 	// URLs shown in the UI and for links in notifications.
 	PublicURL  string         `json:"public_url,omitempty"`
 	Categories []Category     `json:"categories"`
@@ -325,7 +325,7 @@ var OnboardingSteps = []string{StepAccess, StepSources, StepClassify, StepChanne
 // Outcomes of a setup step.
 const (
 	OutcomeDone     = "done"     // saved what the user chose
-	OutcomeDefaults = "defaults" // applied Laya's defaults
+	OutcomeDefaults = "defaults" // applied Lissandra's defaults
 	OutcomeSkipped  = "skipped"  // changed nothing; the step still counts as left to do
 )
 

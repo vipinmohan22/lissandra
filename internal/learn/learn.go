@@ -1,5 +1,5 @@
 // Package learn turns the Laya engine's answers into classification rules.
-// When the engine categorizes a live event that no rule categorized, Laya
+// When the engine categorizes a live event that no rule categorized, Lissandra
 // adds a rule for the event's message pattern and source, marked for
 // review. From then on the rules classify that pattern (and alert on it)
 // without asking the engine, and an operator approves, edits or rejects
@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/classify"
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/classify"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 const (
@@ -52,7 +52,7 @@ type Learner struct {
 type Stats struct {
 	Enabled       bool    `json:"enabled"`
 	MinConfidence float64 `json:"min_confidence"` // the effective threshold
-	Learned       uint64  `json:"learned"`        // rules learned since Laya started
+	Learned       uint64  `json:"learned"`        // rules learned since Lissandra started
 	Review        int     `json:"review"`         // rules awaiting review
 	MaxReview     int     `json:"max_review"`
 	Dropped       uint64  `json:"dropped"` // answers not learned: too many rules awaiting review, or a backlog

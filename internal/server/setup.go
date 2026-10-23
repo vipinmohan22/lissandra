@@ -10,13 +10,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/auth"
-	"github.com/vipinmohan22/layalogs/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/auth"
+	"github.com/vipinmohan22/lissandra/internal/config"
 )
 
 // The setup wizard's API: the admin token (/api/auth) and the wizard's
 // progress (/api/onboarding). Like the rest of /api/, it needs the admin
-// token, which on a first start is the one Laya generated and logged.
+// token, which on a first start is the one Lissandra generated and logged.
 func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth", s.getAuth)
 	mux.HandleFunc("PUT /api/auth/token", s.putAuthToken)
@@ -32,7 +32,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 }
 
 // errUnchanged ends an update that would change nothing, so repeating a
-// request neither saves the config nor reconfigures Laya.
+// request neither saves the config nor reconfigures Lissandra.
 var errUnchanged = errors.New("unchanged")
 
 var (
@@ -65,7 +65,7 @@ func (s *Server) putAuthToken(w http.ResponseWriter, r *http.Request) {
 	st, err := s.auth.Rotate(bearer(r), body.Token)
 	switch {
 	case err == nil:
-		s.log.Warn("admin token changed in Laya", "remote", r.RemoteAddr)
+		s.log.Warn("admin token changed in Lissandra", "remote", r.RemoteAddr)
 		writeJSON(w, http.StatusOK, authView{st, s.opts.OnNomad})
 	case errors.Is(err, auth.ErrWeakToken):
 		writeErrorCode(w, http.StatusBadRequest, "weak_token", err.Error())
@@ -79,11 +79,11 @@ func (s *Server) putAuthToken(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusConflict, "env_managed", err.Error())
 	default:
 		s.log.Error("saving the admin token failed", "err", err)
-		writeErrorCode(w, http.StatusInternalServerError, "save_failed", "saving the admin token failed; see Laya's log")
+		writeErrorCode(w, http.StatusInternalServerError, "save_failed", "saving the admin token failed; see Lissandra's log")
 	}
 }
 
-// deleteAuthToken removes a stored token that LAYA_ADMIN_TOKEN overrides.
+// deleteAuthToken removes a stored token that LISSANDRA_ADMIN_TOKEN overrides.
 func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 	switch err := s.auth.DeleteStored(); {
 	case err == nil:
@@ -95,7 +95,7 @@ func (s *Server) deleteAuthToken(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusNotFound, "no_stored_token", err.Error())
 	default:
 		s.log.Error("deleting the stored admin token failed", "err", err)
-		writeErrorCode(w, http.StatusInternalServerError, "save_failed", "deleting the stored admin token failed; see Laya's log")
+		writeErrorCode(w, http.StatusInternalServerError, "save_failed", "deleting the stored admin token failed; see Lissandra's log")
 	}
 }
 

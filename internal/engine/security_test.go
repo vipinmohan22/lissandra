@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine/enginetest"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine/enginetest"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // An answer is shared only by events the engine reads the same way, so one
@@ -122,9 +122,9 @@ func TestReferencedURLIsNotEchoed(t *testing.T) {
 	dirs := config.FileRefDirs()
 	config.SetFileRefDirs([]string{dir})
 	t.Cleanup(func() { config.SetFileRefDirs(dirs) })
-	t.Setenv("LAYA_TEST_SECRET", "hvs.super-secret-token")
+	t.Setenv("LISSANDRA_TEST_SECRET", "hvs.super-secret-token")
 	cl, _, cfg := setup(t, nil)
-	cfg.Settings.Engine.URL = "${env:LAYA_TEST_SECRET}"
+	cfg.Settings.Engine.URL = "${env:LISSANDRA_TEST_SECRET}"
 	cl.Configure(cfg)
 	if st := cl.Status(); st.ConfigError == "" || strings.Contains(st.ConfigError, "super-secret") {
 		t.Errorf("config error: %q", st.ConfigError)

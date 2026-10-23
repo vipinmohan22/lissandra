@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/learn"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/learn"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 func (s *Server) groupRoutes(mux *http.ServeMux) {
@@ -141,7 +141,7 @@ func (s *Server) deleteAlertGroup(w http.ResponseWriter, r *http.Request) {
 // an ordinary rule (approving a rejected one restores what was learned). A
 // rejected one stays, without a category or
 // severity, and keeps matching events from the Laya engine, so its answer
-// is neither applied nor learned again; delete it to let Laya learn the
+// is neither applied nor learned again; delete it to let Lissandra learn the
 // pattern anew.
 func (s *Server) reviewRules(w http.ResponseWriter, r *http.Request) {
 	var body struct {

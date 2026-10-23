@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // retainer keeps a bounded sample of events for browsing, within a count
@@ -137,7 +137,7 @@ func compact(ev model.Event) model.Event {
 	ev.Message = strings.Clone(model.Truncate(ev.Message, retainedMsgBytes))
 	ev.Level = strings.Clone(model.Truncate(ev.Level, 64))
 	if len(ev.Fields) > 0 && fieldsCost(ev.Fields, retainedFieldsBytes) > retainedFieldsBytes {
-		ev.Fields = map[string]any{"laya_fields_omitted": "structured fields were too large to keep for browsing"}
+		ev.Fields = map[string]any{"lissandra_fields_omitted": "structured fields were too large to keep for browsing"}
 		cut = true
 	}
 	ev.Compacted = ev.Compacted || cut

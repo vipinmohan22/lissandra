@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Title is a one-line summary such as "[ERROR] security · api-gateway".
@@ -67,7 +67,7 @@ func (m *Message) PlainText() string {
 		fmt.Fprintf(&b, "%s: %s\n", f.Name, f.Value)
 	}
 	if m.Link != "" {
-		fmt.Fprintf(&b, "\nOpen in Laya: %s\n", m.Link)
+		fmt.Fprintf(&b, "\nOpen in Lissandra: %s\n", m.Link)
 	}
 	return b.String()
 }
@@ -97,10 +97,10 @@ func sampleMessage() *Message {
 		Event: model.Event{
 			ID:           "test",
 			SourceID:     "test",
-			SourceName:   "laya-test",
+			SourceName:   "lissandra-test",
 			ReceivedAt:   now,
 			Timestamp:    now,
-			Message:      "This is a test notification from Laya. If you can read this, the channel is configured correctly.",
+			Message:      "This is a test notification from Lissandra. If you can read this, the channel is configured correctly.",
 			Severity:     model.SeverityError,
 			Category:     "application",
 			Tags:         []string{"test"},

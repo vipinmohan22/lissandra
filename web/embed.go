@@ -1,4 +1,4 @@
-// Package web embeds Laya's single-page admin UI.
+// Package web embeds Lissandra's single-page admin UI.
 package web
 
 import (

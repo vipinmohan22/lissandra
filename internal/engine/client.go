@@ -152,7 +152,7 @@ const maxResponseBytes = 4 << 20
 // NewClient returns a client for the given base URLs.
 func NewClient(urls []string, apiKey string, timeout time.Duration, maxConns int) *Client {
 	tr := &http.Transport{
-		// No proxy: the engine runs next to Laya, and HTTP(S)_PROXY settings
+		// No proxy: the engine runs next to Lissandra, and HTTP(S)_PROXY settings
 		// meant for outbound traffic (notifications) would capture it.
 		Proxy:               nil,
 		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,

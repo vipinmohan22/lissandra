@@ -14,9 +14,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/vipinmohan22/layalogs/internal/classify"
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/classify"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 var start = time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)

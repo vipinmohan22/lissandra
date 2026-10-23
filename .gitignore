@@ -1,6 +1,6 @@
 /bin/
 /data/
-/laya
-deploy/nomad/laya.vars.hcl
+/lissandra
+deploy/nomad/lissandra.vars.hcl
 deploy/nomad/laya-engine.vars.hcl
 /.env

@@ -26,9 +26,9 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // contents of that file, which must lie in one of FileRefDirs. File
 // contents have trailing newlines trimmed and are empty if the file can't
 // be read, isn't a regular file or is over 64 KiB. This lets secrets and
-// addresses live in Nomad Variables (or Vault) and reach Laya through the
+// addresses live in Nomad Variables (or Vault) and reach Lissandra through the
 // job's template block instead of the config file; files can change while
-// Laya runs.
+// Lissandra runs.
 func ExpandEnv(s string) string {
 	if s == "" {
 		return s
@@ -85,10 +85,10 @@ var (
 )
 
 // defaultFileRefDirs are Nomad's secrets and task directories, Docker's
-// /run/secrets, and those listed in LAYA_FILE_REF_DIRS.
+// /run/secrets, and those listed in LISSANDRA_FILE_REF_DIRS.
 func defaultFileRefDirs() []string {
 	dirs := []string{os.Getenv("NOMAD_SECRETS_DIR"), os.Getenv("NOMAD_TASK_DIR"), "/run/secrets"}
-	dirs = append(dirs, filepath.SplitList(os.Getenv("LAYA_FILE_REF_DIRS"))...)
+	dirs = append(dirs, filepath.SplitList(os.Getenv("LISSANDRA_FILE_REF_DIRS"))...)
 	var out []string
 	for _, d := range dirs {
 		if d = strings.TrimSpace(d); d != "" && filepath.IsAbs(d) {
@@ -99,7 +99,7 @@ func defaultFileRefDirs() []string {
 }
 
 // FileRefDirs returns the directories ${file:} references may read from,
-// so the API can't be used to read any file Laya can.
+// so the API can't be used to read any file Lissandra can.
 func FileRefDirs() []string {
 	refMu.RLock()
 	defer refMu.RUnlock()
@@ -195,9 +195,9 @@ func CheckRefs(s string) error {
 func refError(path string) error {
 	dirs := FileRefDirs()
 	if len(dirs) == 0 {
-		return fmt.Errorf("${file:%s}: no directory is allowed for file references; list them in LAYA_FILE_REF_DIRS", path)
+		return fmt.Errorf("${file:%s}: no directory is allowed for file references; list them in LISSANDRA_FILE_REF_DIRS", path)
 	}
-	return fmt.Errorf("${file:%s}: only files under %s can be referenced, by an absolute path without \"..\" (LAYA_FILE_REF_DIRS adds directories)", path, strings.Join(dirs, ", "))
+	return fmt.Errorf("${file:%s}: only files under %s can be referenced, by an absolute path without \"..\" (LISSANDRA_FILE_REF_DIRS adds directories)", path, strings.Join(dirs, ", "))
 }
 
 // fileRefs lists the paths of the ${file:} references in the values of c

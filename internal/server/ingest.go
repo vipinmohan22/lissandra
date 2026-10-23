@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/ingest"
-	"github.com/vipinmohan22/layalogs/internal/pipeline"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/ingest"
+	"github.com/vipinmohan22/lissandra/internal/pipeline"
 )
 
 // handleIngest accepts logs for a push source:
 //
 //	POST /ingest/{source id or name}
-//	Authorization: Bearer <ingest token>   (or X-Laya-Token, or ?token=)
+//	Authorization: Bearer <ingest token>   (or X-Lissandra-Token, or ?token=)
 //
 // Bodies may be JSON (object or array), NDJSON or plain text, optionally
 // gzip-encoded.
@@ -31,7 +31,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "source is disabled")
 		return
 	}
-	token := r.Header.Get("X-Laya-Token")
+	token := r.Header.Get("X-Lissandra-Token")
 	if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		token = bearer
 	}

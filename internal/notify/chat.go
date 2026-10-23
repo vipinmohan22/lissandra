@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 func init() {
@@ -19,7 +19,7 @@ func init() {
 		Audience:    "Everyone in the channel the webhook posts to. Mention on critical can ping people.",
 		Fields: []Field{
 			{Key: "webhook_url", Label: "Webhook URL", Type: "password", Required: true, Secret: true, Placeholder: "https://hooks.slack.com/services/…", Help: "Create one under Slack app → Incoming Webhooks. ${env:NAME} reads it from the environment."},
-			{Key: "username", Label: "Username", Type: "text", Placeholder: "Laya", Help: "Optional display name (ignored by newer Slack apps)."},
+			{Key: "username", Label: "Username", Type: "text", Placeholder: "Lissandra", Help: "Optional display name (ignored by newer Slack apps)."},
 			{Key: "icon_emoji", Label: "Icon emoji", Type: "text", Placeholder: ":rotating_light:"},
 			{Key: "channel", Label: "Channel override", Type: "text", Placeholder: "#alerts", Help: "Only honoured by legacy webhooks and Mattermost."},
 			{Key: "mention", Label: "Mention on critical", Type: "text", Placeholder: "<!here>", Help: "Text prepended to critical alerts, e.g. <!channel> or <@U012AB3CD>.", Recipient: true},
@@ -53,7 +53,7 @@ func init() {
 		Audience:    "Everyone in the channel the webhook posts to.",
 		Fields: []Field{
 			{Key: "webhook_url", Label: "Webhook URL", Type: "password", Required: true, Secret: true, Placeholder: "https://discord.com/api/webhooks/…"},
-			{Key: "username", Label: "Username", Type: "text", Placeholder: "Laya"},
+			{Key: "username", Label: "Username", Type: "text", Placeholder: "Lissandra"},
 		},
 		New: func(s map[string]string) (Sender, error) {
 			if err := checkURL(s["webhook_url"]); err != nil {
@@ -129,7 +129,7 @@ func (n *slack) Send(ctx context.Context, m *Message) error {
 	blocks = append(blocks, map[string]any{"type": "context", "elements": []map[string]any{{"type": "mrkdwn", "text": model.Truncate(strings.Join(ctxParts, "  |  "), 2900)}}})
 	if m.Link != "" {
 		blocks = append(blocks, map[string]any{"type": "actions", "elements": []map[string]any{{
-			"type": "button", "text": map[string]any{"type": "plain_text", "text": "Open in Laya"}, "url": m.Link,
+			"type": "button", "text": map[string]any{"type": "plain_text", "text": "Open in Lissandra"}, "url": m.Link,
 		}}})
 	}
 	payload := map[string]any{
@@ -174,7 +174,7 @@ func (n *teams) Send(ctx context.Context, m *Message) error {
 		},
 	}
 	if m.Link != "" {
-		card["actions"] = []map[string]any{{"type": "Action.OpenUrl", "title": "Open in Laya", "url": m.Link}}
+		card["actions"] = []map[string]any{{"type": "Action.OpenUrl", "title": "Open in Lissandra", "url": m.Link}}
 	}
 	payload := map[string]any{
 		"type": "message",
@@ -230,7 +230,7 @@ func (n *googleChat) Send(ctx context.Context, m *Message) error {
 		fmt.Fprintf(&b, "*%s:* %s\n", f.Name, esc(f.Value))
 	}
 	if m.Link != "" {
-		fmt.Fprintf(&b, "<%s|Open in Laya>\n", m.Link)
+		fmt.Fprintf(&b, "<%s|Open in Lissandra>\n", m.Link)
 	}
 	return postJSON(ctx, n.url, map[string]any{"text": b.String()}, nil)
 }
@@ -256,7 +256,7 @@ func (n *pagerDuty) Send(ctx context.Context, m *Message) error {
 	payload := map[string]any{
 		"routing_key":  n.s["routing_key"],
 		"event_action": "trigger",
-		"dedup_key":    "laya-" + m.Event.Fingerprint,
+		"dedup_key":    "lissandra-" + m.Event.Fingerprint,
 		"payload": map[string]any{
 			"summary":        model.Truncate(m.Title()+": "+m.Event.Message, 1000),
 			"source":         m.Event.SourceName,
@@ -268,7 +268,7 @@ func (n *pagerDuty) Send(ctx context.Context, m *Message) error {
 		},
 	}
 	if m.Link != "" {
-		payload["links"] = []map[string]string{{"href": m.Link, "text": "Open in Laya"}}
+		payload["links"] = []map[string]string{{"href": m.Link, "text": "Open in Lissandra"}}
 	}
 	return postJSON(ctx, n.s["api_url"], payload, nil)
 }

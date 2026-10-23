@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Change is one thing a setup step's defaults add, listed by the wizard
@@ -22,7 +22,7 @@ type Change struct {
 // notifier to route alerts to.
 var ErrNeedsChannel = errors.New("add an enabled alert channel first")
 
-// ApplyStepDefaults adds Laya's defaults for a setup step to c and lists
+// ApplyStepDefaults adds Lissandra's defaults for a setup step to c and lists
 // what it added (empty, not nil, when there is nothing to add). Defaults
 // only add what is missing and never remove or edit anything, so applying
 // them again changes nothing.

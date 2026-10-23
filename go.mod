@@ -1,3 +1,3 @@
-module github.com/vipinmohan22/layalogs
+module github.com/vipinmohan22/lissandra
 
 go 1.24.7

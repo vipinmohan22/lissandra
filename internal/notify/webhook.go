@@ -9,7 +9,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 const defaultWebhookTemplate = `{{ json .Payload }}`
@@ -19,10 +19,10 @@ func init() {
 		Type:  "webhook",
 		Label: "Generic webhook",
 		Description: "Send an HTTP request to any endpoint (Opsgenie, ntfy, an internal service, …). " +
-			"The body is a Go text/template; leave it empty to send Laya's standard JSON payload.",
+			"The body is a Go text/template; leave it empty to send Lissandra's standard JSON payload.",
 		Audience: "The system at the URL.",
 		Fields: []Field{
-			{Key: "url", Label: "URL", Type: "text", Required: true, Placeholder: "https://example.com/hooks/laya"},
+			{Key: "url", Label: "URL", Type: "text", Required: true, Placeholder: "https://example.com/hooks/lissandra"},
 			{Key: "method", Label: "Method", Type: "select", Options: []string{"POST", "PUT", "PATCH"}, Default: "POST"},
 			{Key: "headers", Label: "Headers", Type: "textarea", Secret: true, Placeholder: "Authorization: Bearer ${env:HOOK_TOKEN}\nX-Team: platform", Help: "One \"Name: value\" per line."},
 			{Key: "content_type", Label: "Content type", Type: "text", Default: "application/json"},

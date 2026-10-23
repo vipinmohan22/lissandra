@@ -16,10 +16,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/importer"
-	"github.com/vipinmohan22/layalogs/internal/ingest"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/importer"
+	"github.com/vipinmohan22/lissandra/internal/ingest"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 const (
@@ -88,15 +88,15 @@ func (p *importParams) set(key, value string) {
 // Processing streams while the upload is read; the response is the final
 // report. Nothing is stored as live events and no notifications are sent.
 //
-//	curl -F file=@app.log -H "Authorization: Bearer $TOKEN" https://laya/api/imports
-//	curl --data-binary @app.log.gz -H "Authorization: Bearer $TOKEN" "https://laya/api/imports?name=app.log.gz&source=<id>&tz=Europe/Berlin"
+//	curl -F file=@app.log -H "Authorization: Bearer $TOKEN" https://lissandra/api/imports
+//	curl --data-binary @app.log.gz -H "Authorization: Bearer $TOKEN" "https://lissandra/api/imports?name=app.log.gz&source=<id>&tz=Europe/Berlin"
 //
 // Clients may pass ?id=<16 hex chars> to follow the import (GET
 // /api/imports/{id}) while the upload is still in flight.
 func (s *Server) createImport(w http.ResponseWriter, r *http.Request) {
 	limit := s.opts.MaxImportBytes
 	if r.ContentLength > limit {
-		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("file is larger than the %d MB upload limit; gzip it, or use `laya analyze` locally", limit>>20))
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("file is larger than the %d MB upload limit; gzip it, or use `lissandra analyze` locally", limit>>20))
 		return
 	}
 	var p importParams
@@ -382,7 +382,7 @@ func (s *Server) listImportEvents(w http.ResponseWriter, r *http.Request) {
 		evs, _ := im.Events(query)
 		rep := im.Report(false)
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="laya-%s-events.ndjson"`, rep.ID))
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="lissandra-%s-events.ndjson"`, rep.ID))
 		bw := bufio.NewWriter(w)
 		enc := json.NewEncoder(bw)
 		enc.SetEscapeHTML(false)

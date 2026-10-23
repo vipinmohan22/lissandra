@@ -18,9 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/ingest"
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/ingest"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 const maxResponseBytes = 20 << 20
@@ -182,7 +182,7 @@ func Fetch(ctx context.Context, src *config.Source, since, now time.Time, dedupe
 	if err != nil {
 		return nil, hideCreds(err)
 	}
-	req.Header.Set("User-Agent", "laya-poller/1")
+	req.Header.Set("User-Agent", "lissandra-poller/1")
 	req.Header.Set("Accept", "application/json, application/x-ndjson, text/plain;q=0.9, */*;q=0.5")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

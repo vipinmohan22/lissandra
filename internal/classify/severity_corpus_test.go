@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
-// sample is one line of testdata/severity/*.jsonl: a log line as Laya
+// sample is one line of testdata/severity/*.jsonl: a log line as Lissandra
 // receives it (Level is a level field, when the record has one), the level
 // it states ("" when it states none), and, for those, the severity keyword
 // guessing should give (when the corpus says).
@@ -25,10 +25,10 @@ type sample struct {
 }
 
 // TestSeverityCorpus checks severity detection against corpora of real log
-// formats. LAYA_SEVERITY_CORPUS names more files (a glob) to check.
+// formats. LISSANDRA_SEVERITY_CORPUS names more files (a glob) to check.
 func TestSeverityCorpus(t *testing.T) {
 	files, _ := filepath.Glob("testdata/severity/*.jsonl")
-	if extra := os.Getenv("LAYA_SEVERITY_CORPUS"); extra != "" {
+	if extra := os.Getenv("LISSANDRA_SEVERITY_CORPUS"); extra != "" {
 		more, _ := filepath.Glob(extra)
 		files = append(files, more...)
 	}

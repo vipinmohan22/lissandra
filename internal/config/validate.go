@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/vipinmohan22/layalogs/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
 // Normalize fills defaults, assigns missing IDs and validates c in place.
@@ -207,7 +207,7 @@ func Normalize(c *Config) error {
 }
 
 // normalizeOnboarding repairs setup state rather than rejecting it: it must
-// never stop Laya from starting. The API checks what clients send.
+// never stop Lissandra from starting. The API checks what clients send.
 func normalizeOnboarding(o *Onboarding) {
 	switch o.Status {
 	case "":

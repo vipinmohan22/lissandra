@@ -13,13 +13,13 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/vipinmohan22/layalogs/internal/config"
-	"github.com/vipinmohan22/layalogs/internal/engine"
-	"github.com/vipinmohan22/layalogs/internal/events"
-	"github.com/vipinmohan22/layalogs/internal/importer"
-	"github.com/vipinmohan22/layalogs/internal/notify"
-	"github.com/vipinmohan22/layalogs/internal/pipeline"
-	"github.com/vipinmohan22/layalogs/internal/poller"
+	"github.com/vipinmohan22/lissandra/internal/config"
+	"github.com/vipinmohan22/lissandra/internal/engine"
+	"github.com/vipinmohan22/lissandra/internal/events"
+	"github.com/vipinmohan22/lissandra/internal/importer"
+	"github.com/vipinmohan22/lissandra/internal/notify"
+	"github.com/vipinmohan22/lissandra/internal/pipeline"
+	"github.com/vipinmohan22/lissandra/internal/poller"
 )
 
 func TestFileReferencesAreLimitedToAllowedDirs(t *testing.T) {
@@ -107,10 +107,10 @@ func TestOldImportsAndPartialSettingsKeepEngineSettings(t *testing.T) {
 	if eng := e.cfg.Get().Settings.Engine; eng.MinConfidence != 0.6 || !eng.Enabled || eng.URL == "" {
 		t.Errorf("engine after importing an old export: %+v", eng)
 	}
-	if code := e.admin("PUT", "/api/settings", map[string]any{"public_url": "https://laya.example"}, nil); code != 200 {
+	if code := e.admin("PUT", "/api/settings", map[string]any{"public_url": "https://lissandra.example"}, nil); code != 200 {
 		t.Fatalf("put %d", code)
 	}
-	if st := e.cfg.Get().Settings; st.Engine.MinConfidence != 0.6 || len(st.Categories) != 1 || st.PublicURL != "https://laya.example" {
+	if st := e.cfg.Get().Settings; st.Engine.MinConfidence != 0.6 || len(st.Categories) != 1 || st.PublicURL != "https://lissandra.example" {
 		t.Errorf("settings after a partial update: %+v", st)
 	}
 }
@@ -120,7 +120,7 @@ func TestConcurrentPartialSettingsUpdates(t *testing.T) {
 	e := newEnv(t)
 	for i := 0; i < 20; i++ {
 		var wg sync.WaitGroup
-		url, cat := fmt.Sprintf("https://laya-%d.example", i), fmt.Sprintf("cat%d", i)
+		url, cat := fmt.Sprintf("https://lissandra-%d.example", i), fmt.Sprintf("cat%d", i)
 		wg.Add(2)
 		go func() { defer wg.Done(); e.admin("PUT", "/api/settings", map[string]any{"public_url": url}, nil) }()
 		go func() {

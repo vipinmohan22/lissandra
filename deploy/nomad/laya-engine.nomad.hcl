@@ -1,5 +1,5 @@
 # Laya engine: laya-serve (github.com/NandhaKishorM/laya), the decision model
-# Laya asks to classify what its rules leave uncategorized.
+# Lissandra asks to classify what its rules leave uncategorized.
 #
 #   docker buildx build --platform linux/amd64 --push \
 #     -t registry.example.com/laya-engine:0.4.2 \
@@ -8,9 +8,9 @@
 #   nomad var put nomad/jobs/laya-engine LAYA_API_KEY="$(openssl rand -hex 32)"
 #   nomad job run -var-file=deploy/nomad/laya-engine.vars.hcl deploy/nomad/laya-engine.nomad.hcl
 #
-# Laya's own job (laya.nomad.hcl) finds the instances through service
-# discovery. Give it the same key as LAYA_ENGINE_API_KEY in nomad/jobs/laya.
-# See deploy/nomad/README.md for details.
+# Lissandra's own job (lissandra.nomad.hcl) finds the instances through
+# service discovery. Give it the same key as LISSANDRA_ENGINE_API_KEY in
+# nomad/jobs/lissandra. See deploy/nomad/README.md for details.
 
 variable "datacenters" {
   description = "Datacenters the engine may run in."
@@ -19,7 +19,7 @@ variable "datacenters" {
 }
 
 variable "namespace" {
-  description = "Nomad namespace for the job. Use the same one as the laya job, so it can discover the engine."
+  description = "Nomad namespace for the job. Use the same one as the lissandra job, so it can discover the engine."
   type        = string
   default     = "default"
 }
@@ -31,7 +31,7 @@ variable "image" {
 }
 
 variable "count" {
-  description = "Number of engine instances. Laya spreads requests over all of them and fails over between them."
+  description = "Number of engine instances. Lissandra spreads requests over all of them and fails over between them."
   type        = number
   default     = 1
 }
@@ -61,13 +61,13 @@ variable "gpu" {
 }
 
 variable "models" {
-  description = "LAYA_MODELS: checkpoints loaded at startup, comma-separated (english, multilingual, typed-decisions, or names from extra_models). Include every checkpoint Laya's settings or sources ask for."
+  description = "LAYA_MODELS: checkpoints loaded at startup, comma-separated (english, multilingual, typed-decisions, or names from extra_models). Include every checkpoint Lissandra's settings or sources ask for."
   type        = string
   default     = "english"
 }
 
 variable "default_model" {
-  description = "LAYA_DEFAULT_MODEL. Laya always names the checkpoint it wants, so this only matters to other clients."
+  description = "LAYA_DEFAULT_MODEL. Lissandra always names the checkpoint it wants, so this only matters to other clients."
   type        = string
   default     = "english"
 }
@@ -103,13 +103,13 @@ variable "cache_volume" {
 }
 
 variable "port" {
-  description = "Static host port for laya-serve. 0 picks a dynamic port (Laya finds it through service discovery)."
+  description = "Static host port for laya-serve. 0 picks a dynamic port (Lissandra finds it through service discovery)."
   type        = number
   default     = 0
 }
 
 variable "service_provider" {
-  description = "Service discovery provider: \"nomad\" (built in) or \"consul\". Use the same as the laya job."
+  description = "Service discovery provider: \"nomad\" (built in) or \"consul\". Use the same as the lissandra job."
   type        = string
   default     = "nomad"
 }
@@ -257,7 +257,7 @@ job "laya-engine" {
         HF_HUB_DISABLE_TELEMETRY = "1"
       }
 
-      # The bearer key Laya must send, from the Nomad Variable at
+      # The bearer key Lissandra must send, from the Nomad Variable at
       # nomad/jobs/laya-engine (key LAYA_API_KEY), which this job reads
       # through its workload identity. The file is readable only by the
       # image's user (10001). Changing the key restarts the engine.

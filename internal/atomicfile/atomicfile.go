@@ -1,4 +1,4 @@
-// Package atomicfile replaces files so that a reader, or Laya after a
+// Package atomicfile replaces files so that a reader, or Lissandra after a
 // crash, sees either the old contents or the new ones, never a mix.
 package atomicfile
 
