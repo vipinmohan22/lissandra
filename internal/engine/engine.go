@@ -482,6 +482,15 @@ func (c *Classifier) Pending(ev *model.Event) bool {
 	return ok
 }
 
+// AnswerKey identifies the request that answers ev: events with the same
+// key, asked about together, cost one request.
+func (c *Classifier) AnswerKey(ev *model.Event) string {
+	text := textKey(ev)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.flightKeyLocked(ev, text)
+}
+
 // flightKeyLocked identifies an open request: the answer's key, and the
 // cache generation so no event joins a request about old categories.
 func (c *Classifier) flightKeyLocked(ev *model.Event, text string) string {
