@@ -6,13 +6,38 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORM  ?=
 PLATFORMS ?= linux/amd64,linux/arm64
 
-.PHONY: build run test lint docker docker-push nomad-validate
+.PHONY: build run up down engine test lint docker docker-push nomad-validate
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/laya ./cmd/laya
 
+# make run uses the engine started by make up or make engine when .env
+# exists. Variables already set in the environment win over .env.
 run: build
-	LAYA_ADMIN_TOKEN=$${LAYA_ADMIN_TOKEN:-dev-admin-token-change-me} LAYA_LOG_FORMAT=text ./bin/laya
+	@[ ! -f .env ] || eval "$$(sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$$/export \1="$${\1:-\2}"/p' .env)"; \
+	LAYA_ADMIN_TOKEN=$${LAYA_ADMIN_TOKEN:-dev-admin-token-change-me} \
+	LAYA_ENGINE_URL=$${LAYA_ENGINE_URL-$${LAYA_ENGINE_API_KEY:+http://127.0.0.1:$${LAYA_ENGINE_PORT:-8000}}} \
+	LAYA_LOG_FORMAT=text ./bin/laya
+
+# Laya and its local model (compose.yaml). The first start builds the engine
+# image and downloads its checkpoint, which takes several minutes.
+up: .env
+	docker compose build laya
+	docker compose up -d --wait
+	@echo "Laya: http://localhost:$${LAYA_HTTP_PORT:-8080} (sign in with LAYA_ADMIN_TOKEN from .env)"
+
+down:
+	docker compose down
+
+# The engine alone, on 127.0.0.1:8000, for make run and laya analyze -engine.
+engine: .env
+	docker compose up -d --wait laya-engine
+
+# The tokens compose.yaml and make run share, written once.
+.env:
+	@umask 077; printf 'LAYA_ADMIN_TOKEN=%s\nLAYA_ENGINE_API_KEY=%s\n' \
+		"$$(openssl rand -hex 24)" "$$(openssl rand -hex 32)" > $@
+	@echo "wrote .env with a new admin token and engine key"
 
 test:
 	go test -race ./...
