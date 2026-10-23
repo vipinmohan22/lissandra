@@ -71,9 +71,9 @@ The first time you sign in to a fresh data directory, Laya opens a setup wizard:
 | Sources | Laya's public URL, and the sources; it shows when the first event arrives | Adds a push source if none is enabled |
 | Classification | Categories and which rules are on, with a tester for your choices | Adds the built-in categories that are missing; rules are never changed |
 | Alert channels | Email, Slack, Teams, Discord, Google Chat, PagerDuty or a webhook | No alerts for now |
-| Who gets notified | Each channel's recipients (email To, Slack mention) and its route: minimum severity, categories, throttle | A route for each channel nothing routes to yet: error and above (critical for PagerDuty), 15-minute throttle |
+| Who gets notified | Each channel's recipients (email To, Slack mention) and its route: minimum severity, categories, throttle; and teams, as [alert groups](#alert-groups) | A route for each channel no route or alert group reaches yet: error and above (critical for PagerDuty), 15-minute throttle |
 
-Every step can be skipped or set to Laya's defaults. Defaults only add what is missing, and the button says what it will add. **Use defaults for everything** on the welcome page does every step at once but never changes the admin token. Laya has no user accounts: people get alerts through channels, and the review page shows who gets what.
+Every step can be skipped or set to Laya's defaults. Defaults only add what is missing, and the button says what it will add. **Use defaults for everything** on the welcome page does every step at once but never changes the admin token. Laya has no user accounts: people get alerts through channels and alert groups, and the review page shows who gets what.
 
 - **Signing in the first time.** Without `LAYA_ADMIN_TOKEN`, use the token Laya logged as `admin_token`, for example `docker logs <container> 2>&1 | grep admin_token`. It changes on every restart until you set a permanent one in the Access step or under **Settings → Access**.
 - **Finish later** leaves setup for now, and the dashboard offers to resume it. **Skip setup** ends it and keeps the configuration as it is.

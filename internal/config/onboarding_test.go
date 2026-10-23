@@ -288,6 +288,28 @@ func TestApplyStepDefaults(t *testing.T) {
 		}
 	})
 
+	t.Run("notify with alert groups", func(t *testing.T) {
+		c := Defaults()
+		c.Sources[0].ID = "src"
+		c.Notifiers = []Notifier{
+			{ID: "team", Name: "Team Slack", Type: "slack", Enabled: true},
+			{ID: "idle", Name: "Idle team Slack", Type: "slack", Enabled: true},
+			{ID: "off", Name: "Off team Slack", Type: "slack", Enabled: true},
+		}
+		c.AlertGroups = []AlertGroup{
+			{ID: "g1", Name: "Payments", Enabled: true, NotifierIDs: []string{"team"}},
+			{ID: "g2", Name: "No sources", Enabled: true, NotifierIDs: []string{"idle"}},
+			{ID: "g3", Name: "Disabled", NotifierIDs: []string{"off"}},
+		}
+		c.Sources[0].AlertGroupIDs = []string{"g1", "g3"}
+		// Only a channel an enabled group with sources alerts through is
+		// left alone: the others get nothing yet.
+		ch := apply(t, c, StepNotify)
+		if len(ch) != 2 || ch[0].Name != "Idle team Slack: error and above" || ch[1].Name != "Off team Slack: error and above" {
+			t.Fatalf("changes = %+v", ch)
+		}
+	})
+
 	t.Run("access and channels", func(t *testing.T) {
 		c := Defaults()
 		Normalize(c)

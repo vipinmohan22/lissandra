@@ -62,8 +62,11 @@ func ApplyStepDefaults(c *Config, step string) ([]Change, error) {
 		if len(enabled) == 0 {
 			return nil, ErrNeedsChannel
 		}
+		grouped := groupChannels(c)
 		for _, n := range enabled {
-			if slices.ContainsFunc(c.Routes, func(r Route) bool { return r.Enabled && slices.Contains(r.NotifierIDs, n.ID) }) {
+			// A team's channel stays scoped to the team's sources: a
+			// catch-all route would send it every source's alerts.
+			if grouped[n.ID] || slices.ContainsFunc(c.Routes, func(r Route) bool { return r.Enabled && slices.Contains(r.NotifierIDs, n.ID) }) {
 				continue
 			}
 			r := DefaultRouteFor(n)
@@ -74,6 +77,27 @@ func ApplyStepDefaults(c *Config, step string) ([]Change, error) {
 		return nil, fmt.Errorf("unknown setup step %q", step)
 	}
 	return changes, nil
+}
+
+// groupChannels returns the notifiers enabled alert groups alert through,
+// counting only groups with sources assigned: a group without sources gets
+// no alerts.
+func groupChannels(c *Config) map[string]bool {
+	assigned := map[string]bool{}
+	for _, src := range c.Sources {
+		for _, id := range src.AlertGroupIDs {
+			assigned[id] = true
+		}
+	}
+	out := map[string]bool{}
+	for _, g := range c.AlertGroups {
+		if g.Enabled && assigned[g.ID] {
+			for _, id := range g.NotifierIDs {
+				out[id] = true
+			}
+		}
+	}
+	return out
 }
 
 // unusedSourceName returns name, or name-2, name-3 and so on, whichever no

@@ -1812,39 +1812,53 @@ pages.groups = async (main) => {
     main.insertBefore(h('div', { class: 'callout' }, 'Add a notifier first: a group is alerted through notifiers (a Slack or Teams channel, PagerDuty, or an email server for its members). ', h('a', { href: '#/notifiers' }, 'Go to notifiers →')), list);
   }
   if (!cache.groups.length) list.append(h('div', { class: 'empty' }, 'No alert groups yet.'));
-  const notifierName = (id) => (cache.notifiers.find((n) => n.id === id) || {}).name;
   for (const g of cache.groups) {
-    const channels = g.notifier_ids.map(notifierName).filter(Boolean);
-    const when = [`severity ≥ ${g.min_severity}`];
-    if (g.categories && g.categories.length) when.push(`category in [${g.categories.join(', ')}]`);
-    const throttle = THROTTLES.find((t) => t[0] === g.throttle_seconds);
-    const reach = [];
-    if (channels.length) reach.push(channels.join(', '));
-    if ((g.emails || []).length) {
-      reach.push(g.email_notifier_id ? `${plural(g.emails.length, 'member')} by email (${notifierName(g.email_notifier_id)})` : h('span', { class: 'badge warn' }, `${plural(g.emails.length, 'member')}, no email notifier`));
-    }
-    list.append(h('div', { class: `list-item ${g.enabled ? '' : 'disabled-item'}` },
-      h('div', { class: 'main' },
-        h('div', { class: 'title' }, g.name, g.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
-        g.description ? h('div', { class: 'meta' }, g.description) : null,
-        h('div', { class: 'meta' }, 'Sources: ', g.source_ids.length ? g.source_ids.map(sourceName).join(', ') : h('span', { class: 'badge warn' }, 'none: the group gets no alerts')),
-        h('div', { class: 'meta' }, 'When ', when.join(' and ')),
-        h('div', { class: 'meta' }, '→ ', reach.length ? reach.map((x, i) => [i ? ' · ' : '', x]) : h('span', { class: 'badge warn' }, 'no channels or members'),
-          ' · ', g.throttle_seconds ? `throttle ${throttle ? throttle[1] : `${g.throttle_seconds}s`}` : 'no throttling')),
-      h('div', { class: 'actions' },
-        h('button', { type: 'button', class: 'small', onclick: () => editGroup(g) }, 'Edit'),
-        h('button', {
-          type: 'button', class: 'small danger',
-          onclick: async () => {
-            if (!(await confirmDialog(`Delete alert group "${g.name}"? Its sources stop alerting it.`))) return;
-            await api('DELETE', `/api/alert-groups/${g.id}`).catch(reportError);
-            route();
-          },
-        }, 'Delete'))));
+    list.append(groupItem(g,
+      h('button', { type: 'button', class: 'small', onclick: () => editGroup(g) }, 'Edit'),
+      h('button', {
+        type: 'button', class: 'small danger',
+        onclick: async () => {
+          if (!(await confirmDialog(`Delete alert group "${g.name}"? Its sources stop alerting it.`))) return;
+          await api('DELETE', `/api/alert-groups/${g.id}`).catch(reportError);
+          route();
+        },
+      }, 'Delete')));
   }
 };
 
-function editGroup(g) {
+function notifierName(id) {
+  return (cache.notifiers.find((n) => n.id === id) || {}).name;
+}
+
+// groupItem shows an alert group in a list, with the given action buttons.
+function groupItem(g, ...actions) {
+  const channels = g.notifier_ids.map(notifierName).filter(Boolean);
+  const when = [`severity ≥ ${g.min_severity}`];
+  if (g.categories && g.categories.length) when.push(`category in [${g.categories.join(', ')}]`);
+  const throttle = THROTTLES.find((t) => t[0] === g.throttle_seconds);
+  const reach = [];
+  if (channels.length) reach.push(channels.join(', '));
+  if ((g.emails || []).length) {
+    reach.push(g.email_notifier_id ? `${plural(g.emails.length, 'member')} by email (${notifierName(g.email_notifier_id)})` : h('span', { class: 'badge warn' }, `${plural(g.emails.length, 'member')}, no email notifier`));
+  }
+  return h('div', { class: `list-item ${g.enabled ? '' : 'disabled-item'}` },
+    h('div', { class: 'main' },
+      h('div', { class: 'title' }, g.name, g.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
+      g.description ? h('div', { class: 'meta' }, g.description) : null,
+      h('div', { class: 'meta' }, 'Sources: ', g.source_ids.length ? g.source_ids.map(sourceName).join(', ') : h('span', { class: 'badge warn' }, 'none: the group gets no alerts')),
+      h('div', { class: 'meta' }, 'When ', when.join(' and ')),
+      h('div', { class: 'meta' }, '→ ', reach.length ? reach.map((x, i) => [i ? ' · ' : '', x]) : h('span', { class: 'badge warn' }, 'no channels or members'),
+        ' · ', g.throttle_seconds ? `throttle ${throttle ? throttle[1] : `${g.throttle_seconds}s`}` : 'no throttling')),
+    h('div', { class: 'actions' }, actions));
+}
+
+// activeGroups are the alert groups that get alerts: enabled, with
+// sources assigned.
+function activeGroups() {
+  return (cache.groups || []).filter((g) => g.enabled && g.source_ids.length);
+}
+
+function editGroup(g, { onSaved } = {}) {
   const isNew = !g;
   g = g ? JSON.parse(JSON.stringify(g)) : { name: '', enabled: true, min_severity: 'error', categories: [], notifier_ids: [], emails: [], source_ids: [], throttle_seconds: 900 };
   const name = h('input', { value: g.name, placeholder: 'e.g. Payments team' });
@@ -1892,10 +1906,10 @@ function editGroup(g) {
             emails: emails.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean),
             email_notifier_id: emailVia.value, throttle_seconds: Number(throttle.value),
           };
-          if (isNew) await api('POST', '/api/alert-groups', data); else await api('PUT', `/api/alert-groups/${g.id}`, data);
+          const saved = isNew ? await api('POST', '/api/alert-groups', data) : await api('PUT', `/api/alert-groups/${g.id}`, data);
           close();
           toast('Alert group saved');
-          route();
+          if (onSaved) await onSaved(saved); else route();
         },
       },
     ],
@@ -3228,7 +3242,7 @@ const SETUP_PAGES = [
   },
   {
     id: 'notify', step: true, title: 'Who gets notified', label: 'Who gets notified', render: setupNotify,
-    summary: 'Pick who receives each channel\'s alerts, and which alerts they get.',
+    summary: 'Pick who receives each channel\'s alerts and which alerts they get, and add teams to alert about their own sources.',
   },
   { id: 'review', title: 'Review your setup', label: 'Review', render: setupReview },
 ];
@@ -3577,10 +3591,10 @@ function stepFooter(ctx, opts) {
 // --- welcome ---
 
 async function setupWelcome(ctx) {
-  await load('sources', 'rules', 'settings', 'notifiers', 'routes');
+  await load('sources', 'rules', 'settings', 'notifiers', 'routes', 'groups');
   const { state } = ctx;
   const recorded = SETUP_STEPS.some((p) => (state.steps || {})[p.id]);
-  const configured = cache.sources.length > 1 || cache.notifiers.length > 0 || cache.routes.length > 0;
+  const configured = cache.sources.length > 1 || cache.notifiers.length > 0 || cache.routes.length > 0 || cache.groups.length > 0;
   const picker = h('input', { type: 'file', accept: 'application/json', hidden: true });
   picker.addEventListener('change', async () => {
     const file = picker.files[0];
@@ -3603,7 +3617,8 @@ async function setupWelcome(ctx) {
     h('p', { class: 'muted' }, 'About 5 minutes. Every step can be skipped, and you can come back later.'),
     configured ? h('div', { class: 'callout' },
       h('div', null, `Already configured: ${[plural(cache.sources.length, 'source'), `${plural(cache.rules.length, 'rule')} (${num(on)} on)`,
-        `${num(cats)} ${cats === 1 ? 'category' : 'categories'}`, plural(cache.notifiers.length, 'channel'), plural(cache.routes.length, 'route')].join(' · ')}`),
+        `${num(cats)} ${cats === 1 ? 'category' : 'categories'}`, plural(cache.notifiers.length, 'channel'), plural(cache.routes.length, 'route'),
+        plural(cache.groups.length, 'alert group')].join(' · ')}`),
       h('div', { class: 'small muted' }, 'Nothing changes unless you save.')) : null,
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'link', onclick: () => picker.click() }, 'Import a configuration…'), picker));
   const footer = setupFooter({
@@ -4065,7 +4080,10 @@ function notifyCard(n, routes, draft, onRouteSaved) {
   const type = cache.types.find((t) => t.type === n.type) || { label: n.type, fields: [] };
   const own = routes.find((r) => r.notifier_ids.length === 1 && r.notifier_ids[0] === n.id);
   const others = routes.filter((r) => r !== own && r.notifier_ids.includes(n.id));
-  const reached = routes.some((r) => r.enabled && r.notifier_ids.includes(n.id));
+  const teams = activeGroups().filter((g) => g.notifier_ids.includes(n.id));
+  // As in the server's suggested routes: a team's channel stays scoped to
+  // the team's sources unless the user asks for more.
+  const reached = teams.length > 0 || routes.some((r) => r.enabled && r.notifier_ids.includes(n.id));
   const base = own
     ? { on: own.enabled, sev: own.min_severity, cats: own.categories || [], throttle: own.throttle_seconds }
     // PagerDuty pages someone: only for critical by default.
@@ -4118,6 +4136,7 @@ function notifyCard(n, routes, draft, onRouteSaved) {
       }),
     }, 'Edit route…') : null,
     others.length ? h('p', { class: 'small muted' }, `Also receives alerts from: ${others.map((r) => (r.enabled ? r.name : `${r.name} (off)`)).join(', ')}`) : null,
+    teams.length ? h('p', { class: 'small muted' }, `A channel of ${teams.map((g) => `the alert group "${g.name}"`).join(', ')}, for ${teams.length === 1 ? 'its' : 'their'} sources' alerts.`) : null,
     errBox);
 
   const want = () => ({ enabled: v('on'), min_severity: v('sev'), categories: v('cats'), throttle_seconds: v('throttle') });
@@ -4168,7 +4187,7 @@ function notifyCard(n, routes, draft, onRouteSaved) {
 async function setupNotify(ctx) {
   const { drafts } = ctx;
   if (!drafts.cards) drafts.cards = {};
-  await load('notifiers', 'types', 'routes', 'settings', 'sources');
+  await load('notifiers', 'types', 'routes', 'settings', 'sources', 'groups');
   const enabled = () => cache.notifiers.filter((n) => n.enabled);
   if (!enabled().length) {
     const footer = setupFooter({
@@ -4186,12 +4205,18 @@ async function setupNotify(ctx) {
   let cards = [];
   let footer = null;
   let stale = false; // a save failed, and the cards weren't painted again since
+  const teamsBox = h('div', { class: 'card flush' });
   const paint = () => {
     cards = enabled().map((n) => notifyCard(n, cache.routes, drafts.cards[n.id] || (drafts.cards[n.id] = {}), refresh));
     append(clear(cardsBox), cards.map((c) => c.el));
+    clear(teamsBox);
+    if (!cache.groups.length) teamsBox.append(h('div', { class: 'empty' }, 'No alert groups yet.'));
+    for (const g of cache.groups) {
+      teamsBox.append(groupItem(g, h('button', { type: 'button', class: 'small', onclick: () => editGroup(g, { onSaved: refresh }) }, 'Edit')));
+    }
   };
   const refresh = async () => {
-    const [d] = await Promise.all([markStep('notify', 'defaults', { dryRun: true }), load('routes', 'notifiers')]);
+    const [d] = await Promise.all([markStep('notify', 'defaults', { dryRun: true }), load('routes', 'notifiers', 'groups')]);
     paint();
     stale = false;
     footer.setChanges(d.changes);
@@ -4199,13 +4224,17 @@ async function setupNotify(ctx) {
   paint();
   const body = h('div', null,
     h('p', { class: 'muted' }, 'Laya has no user accounts: people get alerts through channels. For each channel, set who receives its alerts and which alerts go to it.'),
-    cardsBox);
+    cardsBox,
+    h('h2', { class: 'mt' }, 'Teams'),
+    h('p', { class: 'muted' }, 'Optional. An alert group alerts a team about its own sources only: through the team\'s channels, and by email to its members through an email channel\'s server, with its own minimum severity and categories.'),
+    teamsBox,
+    h('div', { class: 'row mt' }, h('button', { type: 'button', onclick: () => editGroup(null, { onSaved: refresh }) }, 'Add an alert group…')));
   const dirty = () => cards.some((c) => c.dirty());
   footer = stepFooter(ctx, {
     changes: dry.changes,
     dirty,
     defaultsName: 'Use suggested routes',
-    defaults: { help: 'Default: a route for each channel no route reaches, for error and above (critical for PagerDuty), any category, repeats throttled for 15 minutes.' },
+    defaults: { help: 'Default: a route for each channel no route or alert group reaches, for error and above (critical for PagerDuty), any category, repeats throttled for 15 minutes.' },
     save: async () => {
       // A request that failed may still have been applied, only its answer
       // lost. So after a failure the cards are painted again, from Laya's
@@ -4248,21 +4277,36 @@ function routeLine(r) {
 }
 
 // whoGetsWhat lists, per enabled channel, who receives its alerts and the
-// enabled routes that reach it.
+// enabled routes and alert groups that reach it; then the members of each
+// alert group that emails its members.
 function whoGetsWhat() {
   const chans = cache.notifiers.filter((n) => n.enabled);
   if (!chans.length) return h('p', { class: 'muted' }, 'No alert channels: nobody is notified.');
+  const teams = activeGroups();
   const tbl = h('table', null, h('tr', null, h('th', null, 'Channel'), h('th', null, 'Who receives'), h('th', null, 'Which alerts')));
   for (const n of chans) {
     const type = cache.types.find((t) => t.type === n.type) || { label: n.type, fields: [] };
     const who = type.fields.filter((f) => f.recipient && n.settings[f.key]).map((f) => `${f.label}: ${n.settings[f.key]}`);
-    const routes = cache.routes.filter((r) => r.enabled && r.notifier_ids.includes(n.id));
+    const lines = [
+      ...cache.routes.filter((r) => r.enabled && r.notifier_ids.includes(n.id)).map((r) => h('div', { title: r.name }, routeLine(r))),
+      ...teams.filter((g) => g.notifier_ids.includes(n.id)).map((g) => h('div', { title: `Alert group "${g.name}"` }, `${g.name}: ${routeLine(g)}`)),
+    ];
     tbl.append(h('tr', null,
       h('td', null, n.name, h('div', { class: 'muted small' }, type.label)),
       h('td', null, who.map((x) => h('div', null, x)), type.audience ? h('div', { class: who.length ? 'muted small' : '' }, type.audience) : null),
-      h('td', null, routes.length
-        ? routes.map((r) => h('div', { title: r.name }, routeLine(r)))
-        : h('span', { class: 'badge warn' }, 'No route: gets no alerts'))));
+      h('td', null, lines.length ? lines : h('span', { class: 'badge warn' }, 'No route or alert group: gets no alerts'))));
+  }
+  for (const g of (cache.groups || []).filter((x) => x.enabled && (x.emails || []).length)) {
+    const via = cache.notifiers.find((n) => n.id === g.email_notifier_id);
+    // As the dispatcher: members are emailed only through an enabled email
+    // channel, about the group's sources.
+    let which = h('span', { class: 'badge warn' }, 'No sources: gets no alerts');
+    if (!via || !via.enabled) which = h('span', { class: 'badge warn' }, 'Email channel missing or off: gets no alerts');
+    else if (g.source_ids.length) which = h('div', null, routeLine(g));
+    tbl.append(h('tr', null,
+      h('td', null, `${g.name} members`, h('div', { class: 'muted small' }, via ? `Alert group, email via ${via.name}` : 'Alert group')),
+      h('td', null, g.emails.map((x) => h('div', null, x))),
+      h('td', null, which)));
   }
   return h('div', { class: 'table-wrap' }, tbl);
 }
@@ -4270,7 +4314,7 @@ function whoGetsWhat() {
 async function setupReview(ctx) {
   const { state } = ctx;
   const [stats, latest] = await Promise.all([GET('/api/stats'), GET('/api/events?limit=1'),
-    load('auth', 'sources', 'rules', 'settings', 'notifiers', 'types', 'routes')]);
+    load('auth', 'sources', 'rules', 'settings', 'notifiers', 'types', 'routes', 'groups')]);
   const a = cache.auth;
   const row = (id, ...what) => {
     const p = setupPage(id);
@@ -4299,7 +4343,7 @@ async function setupReview(ctx) {
       row('channels', chans.length
         ? chans.map((n) => h('div', { class: 'row' }, n.name, h('button', { type: 'button', class: 'small', onclick: (e) => sendTest(n, e.currentTarget) }, 'Send test')))
         : 'None: nobody is notified'),
-      row('notify', plural(routesOn, 'enabled route'))),
+      row('notify', `${plural(routesOn, 'enabled route')} · ${plural(cache.groups.filter((g) => g.enabled).length, 'enabled alert group')}`)),
     h('div', { class: 'card mt' }, h('h2', null, 'Who gets what'), whoGetsWhat()));
   const footer = setupFooter({
     back: { label: 'Back', onClick: () => ctx.go(prevPage('review', state)) },
