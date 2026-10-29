@@ -27,6 +27,12 @@ func TestNumericLevelNeedsALogRecord(t *testing.T) {
 		`{"level":50,"time":1793268000000,"message":"charge request to stripe returned 402"}`:                       "50",
 		`{"level":50,"msg":"charge request to stripe returned 402"}`:                                                "50",
 		`{"level":30,"time":1793268000000,"msg":"tank reading","sensor":"t3"}`:                                      "",
+		`{"level":"50","message":"request errored","trace_id":"4bf92f35"}`:                                          "50",
+		// a game's or a device's level with a message, but not in pino's shape
+		`{"time":"2026-10-29T10:00:00Z","msg":"player reached a new level","player":"steve","level":60}`: "",
+		`{"event":"level_up","player":"steve","level":50,"message":"steve levelled up"}`:                 "",
+		`{"device":"tank-3","msg":"fill level","level":60,"pct":true}`:                                   "",
+		`{"time":"2026-10-29T10:00:00Z","msg":"battery status","device":"phone-7","level":10}`:           "",
 	} {
 		evs, err := Parse([]byte(body), "application/json", src, time.Now())
 		if err != nil || len(evs) != 1 || evs[0].Level != want {

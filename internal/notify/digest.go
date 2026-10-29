@@ -47,7 +47,8 @@ type Digest struct {
 	Highest         model.Severity `json:"highest_severity"`
 	Held            int            `json:"held,omitempty"`
 	CriticalHeld    int            `json:"critical_held,omitempty"`
-	Entries         []DigestEntry  `json:"entries"` // ≤ 50
+	Undelivered     int            `json:"undelivered,omitempty"` // of Held: problems whose right-away alert failed to deliver
+	Entries         []DigestEntry  `json:"entries"`               // ≤ 50
 	OtherPatterns   int            `json:"other_patterns,omitempty"`
 	OtherEvents     int            `json:"other_events,omitempty"`
 	UntrackedEvents int            `json:"untracked_events,omitempty"`
@@ -88,6 +89,7 @@ type PendingDigest struct {
 	Events       int            `json:"events"`
 	Patterns     int            `json:"patterns"`
 	Held         int            `json:"held"`
+	Undelivered  int            `json:"undelivered,omitempty"` // of Held: problems whose right-away alert failed to deliver
 	Summary      bool           `json:"summary"`
 	Disabled     bool           `json:"disabled,omitempty"` // the notifier is disabled: sent when it is enabled again
 	Highest      model.Severity `json:"highest_severity"`
@@ -384,6 +386,18 @@ func (buf *digestBuffer) highest() model.Severity {
 	return h
 }
 
+// undelivered counts the problems held because their right-away alert
+// failed to deliver: sent again, not held back by flood protection.
+func (buf *digestBuffer) undelivered() int {
+	n := 0
+	for _, e := range buf.Entries {
+		if e.Held != "" && e.HeldBy == ReasonUndelivered {
+			n++
+		}
+	}
+	return n
+}
+
 // snapshot turns a buffer into the Digest that is sent.
 func (d *Dispatcher) snapshot(buf *digestBuffer, reason string, now time.Time) *Digest {
 	if reason == "" {
@@ -395,7 +409,7 @@ func (d *Dispatcher) snapshot(buf *digestBuffer, reason string, now time.Time) *
 	dg := &Digest{
 		ID: model.NewID(), Reason: reason, From: buf.Opened, To: now, IntervalMinutes: buf.Interval,
 		Routes: slices.Clone(buf.Routes), Events: buf.Events, Patterns: len(buf.Entries) + len(buf.Other),
-		Highest: buf.highest(), Held: buf.Held, CriticalHeld: buf.CriticalHeld,
+		Highest: buf.highest(), Held: buf.Held, CriticalHeld: buf.CriticalHeld, Undelivered: buf.undelivered(),
 		UntrackedEvents: buf.UntrackedEvents, Retried: buf.Retried, Entries: []DigestEntry{},
 	}
 	for i, e := range sortedEntries(buf) {
@@ -575,6 +589,10 @@ func (d *Dispatcher) flushLocked(nid string, buf *digestBuffer, reason string, n
 					st = &alertState{}
 					a.alerts[key] = st
 				}
+				if msg.opened == nil {
+					msg.opened = map[string]openedWindow{}
+				}
+				msg.opened[key] = openedWindow{seq: a.seq, prev: *st}
 				st.LastSent, st.LastSeverity, st.Reason, st.Digested, st.Seq, st.Updated = now, e.Severity, e.Held, time.Time{}, a.seq, now
 			}
 		}
@@ -624,7 +642,7 @@ func (d *Dispatcher) PendingDigests() []PendingDigest {
 	for nid, buf := range d.al.digests {
 		pd := PendingDigest{
 			NotifierID: nid, Routes: slices.Clone(buf.Routes), Opened: buf.Opened, Due: buf.Due, Events: buf.Events,
-			Patterns: len(buf.Entries) + len(buf.Other), Held: buf.Held, Summary: buf.Summary, Highest: buf.highest(), Top: []DigestEntry{},
+			Patterns: len(buf.Entries) + len(buf.Other), Held: buf.Held, Undelivered: buf.undelivered(), Summary: buf.Summary, Highest: buf.highest(), Top: []DigestEntry{},
 		}
 		if ch := d.channels[nid]; ch != nil {
 			pd.NotifierName, pd.NotifierType = ch.n.Name, ch.n.Type

@@ -222,3 +222,21 @@ func TestBurst(t *testing.T) {
 		}
 	})
 }
+
+// A route for other categories never gets a burst: its Why doesn't promise
+// one; a route for security does.
+func TestBurstPolicyNeedsAuthOrSecurity(t *testing.T) {
+	db := smartRoute("DB warnings", model.SeverityWarning, 30, 3600, "email")
+	db.Categories = []string{"database"}
+	sec := smartRoute("Security warnings", model.SeverityWarning, 30, 3600, "slack")
+	sec.Categories = []string{"security"}
+	e := newEnv(t, Options{Warmup: -1}, &config.Config{Notifiers: []config.Notifier{chat("email"), chat("slack")}, Routes: []config.Route{db, sec}})
+	d := wantDecision(t, e.at(t0, e.ev("db-1", "database", "slow-query", model.SeverityWarning)), "email", ActionDigest, ReasonDigest)
+	if strings.Contains(d.Reason.Text, "bursts") {
+		t.Errorf("database route: %q", d.Reason.Text)
+	}
+	d = wantDecision(t, e.at(t0.Add(time.Second), e.ev("waf", "security", "probe", model.SeverityWarning)), "slack", ActionDigest, ReasonDigest)
+	if !strings.Contains(d.Reason.Text, "bursts of auth or security warnings") {
+		t.Errorf("security route: %q", d.Reason.Text)
+	}
+}

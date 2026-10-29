@@ -116,3 +116,32 @@
 {"line": "Certificate renewed for example.com; old certificate has expired and was removed", "severity": "info", "category": "", "why": "review: an expired certificate replaced"}
 {"line": "2026-10-29 10:00:00 INFO Certificate renewed for example.com; old certificate has expired and was removed", "severity": "info", "category": "", "why": "review: an expired certificate replaced"}
 {"line": "x509: certificate has expired or is not yet valid", "severity": "error", "category": "network", "why": "review: an expired certificate"}
+{"line": "payments api is down and has not recovered after 3 restarts", "severity": "critical", "category": "application", "why": "review 2: Service down: not recovered is still down"}
+{"line": "database is down, writes are no longer accepted", "severity": "critical", "category": "application", "why": "review 2: Service down: no longer is still down"}
+{"line": "cluster is down: quorum lost, node no longer reachable", "severity": "critical", "category": "application", "why": "review 2: Service down: no longer is still down"}
+{"line": "database is unreachable: host db.internal could not be resolved", "severity": "critical", "category": "application", "why": "review 2: Service down: a name not resolved is no resolved alert"}
+{"line": "upstream unreachable: payments.svc.cluster.local could not be resolved (3: Host not found)", "severity": "critical", "category": "application", "why": "review 2: Service down: a name not resolved is no resolved alert"}
+{"line": "2026-10-29 10:00:00 ERROR database is down; primary no longer accepting connections", "severity": "critical", "category": "application", "why": "review 2: Service down raises a stated error"}
+{"line": "site is down and not back up after deploy", "severity": "critical", "category": "application", "why": "review 2: Service down: not back up is still down"}
+{"line": "api is down (resolved)", "severity": "info", "category": "", "why": "review 2: Service down: a resolved alert"}
+{"line": "Resolved: payments api is down", "severity": "info", "category": "", "why": "review 2: Service down: a resolved alert"}
+{"line": "payments api is down; it's back up now", "severity": "info", "category": "", "why": "review 2: Service down: back up"}
+{"line": "replication lag of 45000 ms exceeds threshold of 1000 ms", "severity": "warning", "category": "database", "why": "review 2: replication lag in milliseconds"}
+{"line": "replication lag: 2500ms", "severity": "warning", "category": "database", "why": "review 2: replication lag in milliseconds"}
+{"line": "replica lag is 12.0 seconds (threshold 10s)", "severity": "warning", "category": "database", "why": "review 2: replication lag of N.0 seconds"}
+{"line": "Replication lag 30.0s on replica db-2", "severity": "warning", "category": "database", "why": "review 2: replication lag of N.0 seconds"}
+{"line": "replication lag: 5 ms", "severity": "info", "category": "", "why": "review 2: replication lag under a second"}
+{"line": "Circuit breaker OPEN for payments-api after 5 failures", "severity": "warning", "category": "network", "why": "review 2: a circuit breaker open"}
+{"line": "circuit breaker state=OPEN service=payments", "severity": "warning", "category": "network", "why": "review 2: a circuit breaker open"}
+{"line": "request failed: circuit breaker open", "severity": "error", "category": "network", "why": "review 2: failsafe-go's ErrOpen"}
+{"line": "circuit breaker is now half-open, allowing a trial request", "severity": "info", "category": "", "why": "review 2: a circuit breaker half-opening"}
+{"line": "circuit breaker payments: state=HALF_OPEN", "severity": "info", "category": "", "why": "review 2: a circuit breaker half-opening"}
+{"line": "Started processing queue orders: backlog of 25000 messages", "severity": "warning", "category": "performance", "why": "review 2: a queue backlog on start"}
+{"line": "Starting consumer for queue 'emails'; queue depth 15000 exceeds 10000", "severity": "warning", "category": "performance", "why": "review 2: a queue backlog on start"}
+{"line": "Created queue 'jobs' with max length 100000", "severity": "info", "category": "", "why": "review 2: a queue just created"}
+{"line": "2026-10-29 10:00:00 WARN certmon: certificate for shop.example.com has expired and could not be renewed", "severity": "error", "category": "network", "why": "review 2: an expired certificate not renewed"}
+{"line": "TLS certificate for api.example.com has expired and was not renewed: ACME order failed", "severity": "error", "category": "network", "why": "review 2: an expired certificate not renewed"}
+{"line": "Successfully renewed certificate for example.com; previous certificate has expired", "severity": "info", "category": "", "why": "review 2: an expired certificate replaced"}
+{"line": "Possible intrusion: 25 failed password attempts for root from 203.0.113.9", "severity": "error", "category": "security", "why": "review 2: an attack's login failures are security"}
+{"line": "SQL injection attempt blocked: login failed for admin' OR 1=1-- from 203.0.113.9", "severity": "error", "category": "security", "why": "review 2: an attack's login failures are security"}
+{"line": "malicious login: authentication failed for admin from 203.0.113.9 (listed on AbuseIPDB)", "severity": "error", "category": "security", "why": "review 2: an attack's login failures are security"}

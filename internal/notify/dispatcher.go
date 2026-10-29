@@ -614,6 +614,9 @@ func (d *Dispatcher) completed(ch *channel, msg *Message, err error) {
 	retry := err != nil && retryable(err) && ch.err == nil
 	msg.failed = retry
 	if dg := msg.Digest; dg != nil {
+		if err != nil {
+			a.closeWindows(msg, now)
+		}
 		switch {
 		case err == nil:
 			d.DigestsSent.Add(1)
@@ -631,11 +634,25 @@ func (d *Dispatcher) completed(ch *channel, msg *Message, err error) {
 		return
 	}
 	delete(a.inflight, msg.seq)
+	a.dirty = true // a save while it was in flight saved it as undelivered
 	if !retry {
 		return // sent, or a failure retrying can't fix: the window stays
 	}
 	a.undelivered(msg, now)
 	a.dirty = true
+}
+
+// closeWindows undoes the windows summary msg opened for its held alerts
+// when it was not delivered: it was not their alert, so the next event
+// alerts (a merged-back summary opens them again when it goes out). A
+// window an alert has replaced since stays.
+func (a *alerting) closeWindows(msg *Message, now time.Time) {
+	for key, w := range msg.opened {
+		if st := a.alerts[key]; st != nil && st.Seq == w.seq {
+			st.LastSent, st.LastSeverity, st.Reason, st.Digested, st.Seq, st.Updated = w.prev.LastSent, w.prev.LastSeverity, w.prev.Reason, w.prev.Digested, w.prev.Seq, now
+			a.dirty = true
+		}
+	}
 }
 
 // undelivered applies a right-away alert that was not delivered: when it
@@ -737,16 +754,22 @@ func (d *Dispatcher) Run(ctx context.Context, workers int) {
 		case <-flush.C:
 			d.tick(d.now())
 		case <-save.C:
-			d.amu.Lock()
-			dirty := d.al.dirty
-			d.amu.Unlock()
-			if dirty {
-				_ = d.SaveState() // logged and counted
-			}
+			d.saveChanged()
 		case <-prune.C:
 			d.prune(d.now())
 			d.pruneLanes()
 		}
+	}
+}
+
+// saveChanged saves alert state when it changed since the last save (Run,
+// every minute).
+func (d *Dispatcher) saveChanged() {
+	d.amu.Lock()
+	dirty := d.al.dirty
+	d.amu.Unlock()
+	if dirty {
+		_ = d.SaveState() // logged and counted
 	}
 }
 

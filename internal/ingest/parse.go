@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -208,7 +209,10 @@ func toEvent(rec any, p config.Parse, now time.Time, tp timeParser) (ev model.Ev
 // only in a record shaped as theirs. A sensor's or a game's "level": 60 is
 // not pino's fatal; a record without a message is data, and so is one
 // with a reading's fields. pino's base, time and message key are often
-// configured away (base: null, isoTime, messageKey "message").
+// configured away (base: null, isoTime, messageKey "message"): without its
+// pid and hostname, a number is pino's when the time is pino's (epoch
+// milliseconds, or isoTime's) or the record is just the level and the
+// message. A level sent as text ("50") was put there as a level.
 func numericLevelOK(key string, n int, r map[string]any, hasMessage bool) bool {
 	has := func(k string) bool { _, ok := r[k]; return ok }
 	switch {
@@ -228,9 +232,26 @@ func numericLevelOK(key string, n int, r map[string]any, hasMessage bool) bool {
 	if n%10 != 0 || n < 10 || n > 60 { // pino, bunyan
 		return false
 	}
-	return has("pid") && has("hostname") || has("v") && has("name") ||
-		(has("msg") || has("message")) && !has("unit") && !has("value") && !has("reading") && !has("sensor")
+	if has("pid") && has("hostname") || has("v") && has("name") {
+		return true
+	}
+	if !has("msg") && !has("message") || has("unit") || has("value") || has("reading") || has("sensor") {
+		return false
+	}
+	if _, text := r[key].(string); text {
+		return true
+	}
+	switch t := r["time"].(type) {
+	case json.Number:
+		return true
+	case string:
+		return pinoISOTime.MatchString(t)
+	}
+	return len(r) == 2
 }
+
+// pinoISOTime is pino's isoTime: always in UTC, with milliseconds.
+var pinoISOTime = regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`)
 
 // mongoLevel reads the severity of MongoDB 4.4+'s structured log
 // ({"t":{"$date":…},"s":"W","c":"CONTROL",…}): F, E, W, I or D1-D5.

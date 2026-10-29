@@ -677,7 +677,7 @@ func routePolicy(r *route) string {
 	if r == nil {
 		return ""
 	}
-	return policySentence(r.DeliveryPolicy, r.MinSeverity, time.Duration(r.ThrottleSeconds)*time.Second)
+	return policySentence(r.DeliveryPolicy, r.MinSeverity, time.Duration(r.ThrottleSeconds)*time.Second, r.Categories)
 }
 
 // digestText is the Why of a digest message.
@@ -762,9 +762,10 @@ func joinAnd(list []string) string {
 	return strings.Join(list[:len(list)-1], ", ") + " and " + list[len(list)-1]
 }
 
-// policySentence is the one Go source of the policy wording. The UI's
-// policyText (web/static/app.js) mirrors it: change both together.
-func policySentence(p config.DeliveryPolicy, minSev model.Severity, throttle time.Duration) string {
+// policySentence is the one Go source of the policy wording, for a route
+// matching categories (none: any). The UI's policyText (web/static/app.js)
+// mirrors it: change both together.
+func policySentence(p config.DeliveryPolicy, minSev model.Severity, throttle time.Duration, categories []string) string {
 	if !minSev.Valid() {
 		minSev = model.SeverityError
 	}
@@ -779,9 +780,10 @@ func policySentence(p config.DeliveryPolicy, minSev model.Severity, throttle tim
 		if floor.Rank() < promoteFloor.Rank() {
 			floor = promoteFloor
 		}
-		// bursts of warnings reach routes that match warnings and don't
-		// send them right away anyway
-		bursts := minSev.Rank() <= model.SeverityWarning.Rank() && imm.Rank() > model.SeverityWarning.Rank()
+		// bursts of warnings reach routes that match warnings, and auth or
+		// security, and don't send them right away anyway
+		bursts := minSev.Rank() <= model.SeverityWarning.Rank() && imm.Rank() > model.SeverityWarning.Rank() &&
+			(len(categories) == 0 || slices.ContainsFunc(categories, func(c string) bool { return burstCategories[c] }))
 		switch {
 		case imm.Rank() > floor.Rank():
 			s := fmt.Sprintf("Right away: %s and up", imm)

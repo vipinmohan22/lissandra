@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -159,6 +160,108 @@ func TestUndeliveredAlertsAreNotSavedAsSent(t *testing.T) {
 	}
 	e3 := e.restart(t, path)
 	wantDecision(t, e3.at(t0.Add(6*time.Minute), e3.ev("payments", "app", "down", model.SeverityCritical)), "slack", ActionThrottled, ReasonThrottled)
+}
+
+// An alert delivered after a save that caught it in flight (as
+// undelivered) is saved as sent by the next minute's save: a crash then
+// neither sends it again nor pages again.
+func TestDeliveredAfterSaveIsSavedAsSent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerting.json")
+	e := newEnv(t, Options{StatePath: path, Warmup: -1}, &config.Config{
+		Notifiers: []config.Notifier{chat("slack"), pager("pd")},
+		Routes: []config.Route{
+			smartRoute("slack", model.SeverityError, 30, 3600, "slack"),
+			immediateRoute("pd", model.SeverityCritical, 4*3600, "pd"),
+		},
+	})
+	wantDecision(t, e.at(t0, e.ev("payments", "app", "down", model.SeverityCritical)), "slack", ActionSent, ReasonSeverity)
+	if err := e.d.SaveState(); err != nil { // the minute's save, while both alerts are being delivered
+		t.Fatal(err)
+	}
+	e.clock.Set(t0.Add(10 * time.Second)) // delivered after a retry
+	if n := e.pump(); n != 2 {
+		t.Fatalf("delivered %d", n)
+	}
+	e.clock.Set(t0.Add(time.Minute))
+	e.d.saveChanged()        // the next minute's save
+	e2 := e.restart(t, path) // a crash now
+	e2.flush(t0.Add(3 * time.Minute))
+	if all := e.sinks["slack"].all(); len(all) != 1 {
+		t.Fatalf("the delivered alert went out again: %d messages, the last %q", len(all), all[len(all)-1].Reason.Text)
+	}
+	decs := e2.at(t0.Add(5*time.Minute), e2.ev("payments", "app", "down", model.SeverityCritical))
+	wantDecision(t, decs, "slack", ActionThrottled, ReasonThrottled)
+	wantDecision(t, decs, "pd", ActionThrottled, ReasonThrottled)
+}
+
+// A summary of held alerts that isn't delivered was not their alert: the
+// windows it opened close again, so a problem the channel never heard of
+// isn't throttled as a repeat of it.
+func TestUndeliveredSummaryOpensNoWindows(t *testing.T) {
+	e := newEnv(t, Options{Warmup: -1}, &config.Config{
+		Notifiers: []config.Notifier{chat("email")},
+		Routes:    []config.Route{smartRoute("r", model.SeverityWarning, 60, 3600, "email")},
+	})
+	for i := 0; i < 25; i++ {
+		e.at(t0.Add(time.Duration(i)*time.Second), e.ev(fmt.Sprint("src-", i), "app", fmt.Sprint("crit-", i), model.SeverityCritical))
+	}
+	e.pump()
+	b := e.buffer("email")
+	if b == nil || b.CriticalHeld != 5 {
+		t.Fatalf("held: %+v", b)
+	}
+	failedAt := b.Due.Add(10 * time.Second)
+	e.clock.Set(b.Due)
+	e.d.flushDue(b.Due)
+	e.clock.Set(failedAt)
+	e.pumpErr(&HTTPError{Status: 429}) // merged back, due again within a minute
+	if st := e.state("email", "crit-24"); st != nil && !st.LastSent.IsZero() {
+		t.Fatalf("the summary that failed left crit-24's window open: %+v", st)
+	}
+	// Meanwhile crit-24 is held again, not a repeat of the summary.
+	wantDecision(t, e.at(failedAt.Add(5*time.Second), e.ev("src-24", "app", "crit-24", model.SeverityCritical)), "email", ActionHeld, ReasonCriticalLimit)
+	b = e.buffer("email")
+	e.clock.Set(b.Due)
+	e.d.flushDue(b.Due)
+	e.clock.Set(b.Due.Add(10 * time.Second))
+	e.pumpErr(&HTTPError{Status: 429}) // failed again: lost
+	if lost := e.d.LostEvents.Load(); lost != 6 || len(e.sinks["email"].digests()) != 0 {
+		t.Fatalf("lost %d", lost)
+	}
+	// Past the critical limit's window, crit-24 alerts: the channel never got it.
+	wantDecision(t, e.at(t0.Add(15*time.Minute), e.ev("src-24", "app", "crit-24", model.SeverityCritical)), "email", ActionSent, ReasonSeverity)
+}
+
+// A right-away alert that failed to deliver is counted in the summary as
+// undelivered, apart from what flood protection held back, so the UI
+// doesn't call it held.
+func TestUndeliveredCountedApartFromHeld(t *testing.T) {
+	e := newEnv(t, Options{Warmup: -1}, &config.Config{
+		Notifiers: []config.Notifier{chat("slack")},
+		Routes:    []config.Route{smartRoute("r", model.SeverityError, 30, 3600, "slack")},
+	})
+	wantDecision(t, e.at(t0, e.ev("payments", "app", "payment-down", model.SeverityCritical)), "slack", ActionSent, ReasonSeverity)
+	e.pumpErr(&HTTPError{Status: 503})
+	counts := func(v any) string {
+		data, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m struct{ Held, Undelivered int }
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf("held %d, undelivered %d", m.Held, m.Undelivered)
+	}
+	pending := e.d.PendingDigests()
+	if len(pending) != 1 || counts(pending[0]) != "held 1, undelivered 1" {
+		t.Fatalf("pending: %+v", pending)
+	}
+	e.flush(t0.Add(2 * time.Minute))
+	ds := e.sinks["slack"].digests()
+	if len(ds) != 1 || counts(ds[0].Digest) != "held 1, undelivered 1" {
+		t.Fatalf("digests: %+v", ds)
+	}
 }
 
 // A notifier that hangs through Drain's deadline: its alerts are saved as

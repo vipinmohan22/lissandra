@@ -1094,19 +1094,24 @@ func TestPolicySentence(t *testing.T) {
 		p        config.DeliveryPolicy
 		min      model.Severity
 		throttle time.Duration
+		cats     []string
 		want     string
 	}{
-		{smart(model.SeverityCritical, 30), model.SeverityError, time.Hour, "Right away: critical and up, and errors that are new, spiking or getting worse. Everything else from error up: one digest every 30 min."},
-		{smart(model.SeverityCritical, 60), model.SeverityWarning, time.Hour, "Right away: critical and up, errors that are new, spiking or getting worse, and bursts of auth or security warnings. Everything else from warning up: one digest every 1 h."},
-		{smart(model.SeverityError, 30), model.SeverityError, time.Hour, "Everything from error up right away, with flood protection; repeats in a digest every 30 min."},
-		{smart(model.SeverityError, 90), model.SeverityWarning, time.Hour, "Right away: error and up, and bursts of auth or security warnings. Everything else from warning up: one digest every 1 h 30 min."},
-		{smart(model.SeverityWarning, 30), model.SeverityInfo, time.Hour, "Right away: warning and up. Everything else from info up: one digest every 30 min."},
-		{smart(model.SeverityCritical, 30), model.SeverityCritical, time.Hour, "Everything from critical up right away, with flood protection; repeats in a digest every 30 min."},
-		{config.DeliveryPolicy{Delivery: config.DeliveryDigest, DigestMinutes: 60}, model.SeverityError, 0, "Everything this route matches: one digest every 1 h."},
-		{config.DeliveryPolicy{Delivery: config.DeliveryImmediate}, model.SeverityError, 15 * time.Minute, "Every matching event right away; repeats of a problem are held back for 15 min."},
-		{config.DeliveryPolicy{}, model.SeverityError, 0, "Every matching event right away."},
+		{smart(model.SeverityCritical, 30), model.SeverityError, time.Hour, nil, "Right away: critical and up, and errors that are new, spiking or getting worse. Everything else from error up: one digest every 30 min."},
+		{smart(model.SeverityCritical, 60), model.SeverityWarning, time.Hour, nil, "Right away: critical and up, errors that are new, spiking or getting worse, and bursts of auth or security warnings. Everything else from warning up: one digest every 1 h."},
+		{smart(model.SeverityError, 30), model.SeverityError, time.Hour, nil, "Everything from error up right away, with flood protection; repeats in a digest every 30 min."},
+		{smart(model.SeverityError, 90), model.SeverityWarning, time.Hour, nil, "Right away: error and up, and bursts of auth or security warnings. Everything else from warning up: one digest every 1 h 30 min."},
+		{smart(model.SeverityWarning, 30), model.SeverityInfo, time.Hour, nil, "Right away: warning and up. Everything else from info up: one digest every 30 min."},
+		{smart(model.SeverityCritical, 30), model.SeverityCritical, time.Hour, nil, "Everything from critical up right away, with flood protection; repeats in a digest every 30 min."},
+		// bursts are of auth or security warnings: a route for other categories never gets one
+		{smart(model.SeverityCritical, 30), model.SeverityWarning, time.Hour, []string{"database"}, "Right away: critical and up, and errors that are new, spiking or getting worse. Everything else from warning up: one digest every 30 min."},
+		{smart(model.SeverityError, 30), model.SeverityWarning, time.Hour, []string{"database"}, "Right away: error and up. Everything else from warning up: one digest every 30 min."},
+		{smart(model.SeverityCritical, 30), model.SeverityWarning, time.Hour, []string{"database", "security"}, "Right away: critical and up, errors that are new, spiking or getting worse, and bursts of auth or security warnings. Everything else from warning up: one digest every 30 min."},
+		{config.DeliveryPolicy{Delivery: config.DeliveryDigest, DigestMinutes: 60}, model.SeverityError, 0, nil, "Everything this route matches: one digest every 1 h."},
+		{config.DeliveryPolicy{Delivery: config.DeliveryImmediate}, model.SeverityError, 15 * time.Minute, nil, "Every matching event right away; repeats of a problem are held back for 15 min."},
+		{config.DeliveryPolicy{}, model.SeverityError, 0, nil, "Every matching event right away."},
 	} {
-		if got := policySentence(tc.p, tc.min, tc.throttle); got != tc.want {
+		if got := policySentence(tc.p, tc.min, tc.throttle, tc.cats); got != tc.want {
 			t.Errorf("%+v %s: %q", tc.p, tc.min, got)
 		}
 	}

@@ -71,7 +71,7 @@ func Defaults() *Config {
 				Match:       MatchAll,
 				Conditions: []Condition{
 					cond("message", OpRegex, `(?i)(failed password|invalid user|authentication (failed|failure)|login (failed|denied)|invalid (password|credentials))`),
-					cond("message", OpNotRegex, `\bfailed to connect\b|\bbrute[- ]?force\b|\battack`),
+					cond("message", OpNotRegex, `\bfailed to connect\b|\bbrute[- ]?force\b|\battack|\bintrusion\b|\bmalicious\b|\bsql injection\b|\bxss\b|\bblocked by waf\b|\bpath traversal\b`), // the attack rules' words: they say security
 				},
 				Category:     "auth",
 				Severity:     model.SeverityWarning,
@@ -117,7 +117,7 @@ func Defaults() *Config {
 				Match:   MatchAll,
 				Conditions: []Condition{
 					cond("message", OpRegex, `\b(?:service|site|website|api|database|db|cluster|backend|upstream)s? (?:is |are |went |seems |appears )?(?:completely |currently |now )?(?:down|offline|unreachable)\b|\bhealth ?checks? (?:are |is )?failing\b|\b(?:all|every) (?:replicas|instances|backends|upstreams|endpoints|targets|pods|nodes|servers)(?: are| is)? (?:unhealthy|down|unavailable|failing|unreachable)\b|\bhas no server available\b`),
-					cond("message", OpNotRegex, `\b(?:shut(?:ting)?|bring(?:ing)?|brought|tak(?:e|ing)|took|turn(?:ing|ed)?|spin(?:ning)?|scal(?:e|ing|ed)|wind(?:ing)?|slow(?:ing|ed)?|count(?:ing)?)\b[^\n]{0,30}\bdown\b|\bfor maintenance\b|\bscheduled (?:downtime|maintenance)\b|\b(?:resolved|recovered|back up|no longer|maintenance mode)\b|\boffline (?:backup|mode|migration)\b|\b(?:down|offline)-`),
+					cond("message", OpNotRegex, `\b(?:shut(?:ting)?|bring(?:ing)?|brought|tak(?:e|ing)|took|turn(?:ing|ed)?|spin(?:ning)?|scal(?:e|ing|ed)|wind(?:ing)?|slow(?:ing|ed)?|count(?:ing)?)\b[^\n]{0,30}\bdown\b|\bfor maintenance\b|\bscheduled (?:downtime|maintenance)\b|\[(?:resolved|recovered)\]|\((?:resolved|recovered)\)|\bresolved:|\b(?:has|have) recovered\b|\b(?:is|are|was|were|now|came|comes|been|it's) back (?:up|online)\b|\bmaintenance mode\b|\boffline (?:backup|mode|migration)\b|\b(?:down|offline)-`),
 				},
 				Category:               "application",
 				Severity:               model.SeverityCritical,
@@ -187,7 +187,7 @@ func Defaults() *Config {
 				Match:   MatchAll,
 				Conditions: []Condition{
 					cond("message", OpRegex, `\bcert(?:ificate)?s?\b[^\n]{0,80}?\b(?:has|have) expired\b|\bcert(?:ificate)? (?:is |has )?expired\b|\bexpired (?:tls |ssl |x509 )?cert(?:ificate)?\b|\bCERT_HAS_EXPIRED\b`),
-					cond("message", OpNotRegex, `\brenew(?:ed|al succeeded)\b|\bold cert`),
+					cond("message", OpNotRegex, `\bcert(?:ificate)?s? (?:was |were |has been |have been |successfully )?renewed\b|\brenewed (?:the )?(?:tls |ssl )?cert|\brenewals? succeeded\b|\bold cert`), // replaced, not "could not be renewed"
 				},
 				Category:     "network",
 				Severity:     model.SeverityError,
@@ -211,7 +211,7 @@ func Defaults() *Config {
 				Match:   MatchAll,
 				Conditions: []Condition{
 					cond("message", OpRegex, `\breplica(?:tion)?\b[^\n]{0,40}?\blag(?:ging)?\b|\bseconds_behind_(?:master|source)\b|\breplication delay\b|\bslave (?:lag|delay)\b`),
-					cond("message", OpNotRegex, `\b(?:lag|delay)\b[^\n]{0,15}?\b(?:0(?:\.\d+)? ?(?:s|secs?|seconds?)|\d+(?:\.\d+)? ?ms)\b`), // none, or under a second
+					cond("message", OpNotRegex, `\b(?:lag|delay)\b[^\n]{0,15}?(?:^|[^\d.])(?:0(?:\.\d+)? ?(?:s|secs?|seconds?)|\d{1,3}(?:\.\d+)? ?ms)\b`), // none, or under a second
 				},
 				Category:     "database",
 				Severity:     model.SeverityWarning,
@@ -225,7 +225,7 @@ func Defaults() *Config {
 				Conditions: []Condition{
 					cond("message", OpRegex, `\bqueue\b[^\n]{0,60}?\b(?:depth|backlog|length|size)\b[^\n]{0,20}?\b\d{4,}\b|\b(?:0|no) (?:active )?consumers\b|\bconsumer lag\b|\bbacklog (?:of|is|at|grew to) \d{3,}\b`),
 					// a queue being set up: its capacity, no consumers yet
-					cond("message", OpNotRegex, `\b(?:start(?:ed|ing)|creat(?:ed|ing)|declar(?:ed|ing)|initiali[sz](?:ed|ing)|configur(?:ed|ing))\b[^\n]{0,40}?\bqueue\b|\bqueue (?:capacity|max(?:imum)? size)\b`),
+					cond("message", OpNotRegex, `\b(?:creat(?:ed|ing)|declar(?:ed|ing)|initiali[sz](?:ed|ing)|configur(?:ed|ing))\b[^\n]{0,40}?\bqueue\b|\bstart(?:ed|ing)\b[^\n]{0,40}?\bqueue (?:size|capacity)\b|\bqueue (?:capacity|max(?:imum)? size)\b`),
 				},
 				Category:     "performance",
 				Severity:     model.SeverityWarning,
@@ -233,10 +233,13 @@ func Defaults() *Config {
 				KeepStated:   true,
 			},
 			{
-				Name:         "Circuit breaker open",
-				Enabled:      true,
-				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `\bcircuit[- ]?breaker\b[^\n]{0,60}?(?:\b(?:to|is|now|was) (?:open|opened|tripped)\b|\b(?:opened|tripped)\b)|\bcircuit (?:is )?(?:open|opened|tripped)\b`)}, // into open, not "from OPEN to CLOSED"
+				Name:    "Circuit breaker open",
+				Enabled: true,
+				Match:   MatchAll,
+				Conditions: []Condition{
+					cond("message", OpRegex, `\bcircuit[- ]?breaker\b[^\n]{0,60}?\b(?:open(?:ed)?|tripped)\b|\bcircuit (?:is )?(?:open|opened|tripped)\b`),
+					cond("message", OpNotRegex, `\bto (?:closed|half[_ -]?open)\b|\bhalf[- ]open\b`), // into open, not "from OPEN to CLOSED"
+				},
 				Category:     "network",
 				Severity:     model.SeverityWarning,
 				SeverityMode: SeverityAtLeast,
@@ -378,9 +381,12 @@ func ruleIndex(rules []Rule, name string) int {
 }
 
 // prevDefault is the index in c of the closest default before d.Rules[k]
-// that c has, or -1.
-func prevDefault(c, d *Config, k int) int {
+// that c has, skipping those skip names, or -1.
+func prevDefault(c, d *Config, k int, skip func(string) bool) int {
 	for j := k - 1; j >= 0; j-- {
+		if skip(d.Rules[j].Name) {
+			continue
+		}
 		if i := ruleIndex(c.Rules, d.Rules[j].Name); i >= 0 {
 			return i
 		}
@@ -398,6 +404,8 @@ func RestoreDefaultRules(c *Config, names []string) int {
 	d := Defaults()
 	Normalize(d)
 	moved := outOfOrder(c, d)
+	// a default out of order that stays so is no place to put one after
+	skip := func(name string) bool { return moved[name] && len(names) > 0 && !slices.Contains(names, name) }
 	n := 0
 	for k, def := range d.Rules {
 		if len(names) > 0 && !slices.Contains(names, def.Name) {
@@ -411,12 +419,12 @@ func RestoreDefaultRules(c *Config, names []string) int {
 			}
 			if moved[def.Name] {
 				c.Rules = slices.Delete(c.Rules, i, i+1)
-				c.Rules = slices.Insert(c.Rules, prevDefault(c, d, k)+1, def)
+				c.Rules = slices.Insert(c.Rules, prevDefault(c, d, k, skip)+1, def)
 			}
 			continue
 		}
 		def.ID = ""
-		c.Rules = slices.Insert(c.Rules, prevDefault(c, d, k)+1, def)
+		c.Rules = slices.Insert(c.Rules, prevDefault(c, d, k, skip)+1, def)
 		n++
 	}
 	return n

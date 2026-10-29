@@ -1884,17 +1884,23 @@ const digestLabel = (v) => fmtDuration(v * 60);
 // deliveryOf is a route's or alert group's delivery mode ("" is immediate).
 function deliveryOf(r) { return r.delivery || 'immediate'; }
 
-// policyText says when a route's matching events are sent. It mirrors
-// policySentence in internal/notify/policy.go, the server's wording of the
-// same rules: change both together.
-function policyText(p, minSev, throttle) {
+// BURST_CATEGORIES are the categories whose warnings count toward a burst
+// (burstCategories in internal/notify/policy.go).
+const BURST_CATEGORIES = ['auth', 'security'];
+
+// policyText says when a route's matching events are sent, for a route
+// matching cats (none: any). It mirrors policySentence in
+// internal/notify/policy.go, the server's wording of the same rules: change
+// both together.
+function policyText(p, minSev, throttle, cats = []) {
   const min = SEVERITIES.includes(minSev) ? minSev : 'error';
   if (p.delivery === 'smart') {
     const imm = SEVERITIES.includes(p.immediate_severity) ? p.immediate_severity : 'critical';
     const every = fmtDuration((p.digest_minutes || 30) * 60);
     const floor = sevRank(min) < sevRank('error') ? 'error' : min;
-    // bursts of warnings reach routes that match warnings and don't send them right away anyway
-    const bursts = sevRank(min) <= sevRank('warning') && sevRank(imm) > sevRank('warning');
+    // bursts of warnings reach routes that match warnings, and auth or security, and don't send them right away anyway
+    const bursts = sevRank(min) <= sevRank('warning') && sevRank(imm) > sevRank('warning')
+      && (!cats.length || cats.some((c) => BURST_CATEGORIES.includes(c)));
     if (sevRank(imm) > sevRank(floor)) {
       let s = `Right away: ${imm} and up`;
       if (bursts) s += ', errors that are new, spiking or getting worse, and bursts of auth or security warnings';
@@ -1930,9 +1936,9 @@ function noDigest(n) { return Boolean(typeInfo(n.type).no_digest); }
 // deliveryFields edits when a route's or alert group's matching events are
 // sent: the When to send choice, its intervals and the re-alert window,
 // with the policy in words and notes about the chosen channels.
-// notifierIds() and minSev() read the editor's other fields; call update()
-// when they change. values() returns the fields to save.
-function deliveryFields(p, { notifierIds, minSev, noun = 'route' }) {
+// notifierIds(), minSev() and categories() read the editor's other fields;
+// call update() when they change. values() returns the fields to save.
+function deliveryFields(p, { notifierIds, minSev, categories: cats = () => [], noun = 'route' }) {
   let mode = deliveryOf(p);
   let throttleVal = p.throttle_seconds || 0;
   let digestMin = p.digest_minutes || 0; // 0: the mode's default
@@ -1974,7 +1980,7 @@ function deliveryFields(p, { notifierIds, minSev, noun = 'route' }) {
     immBox.hidden = mode !== 'immediate';
     digestBox.hidden = mode !== 'digest';
     flood.hidden = mode !== 'smart';
-    sentence.textContent = policyText({ delivery: mode, immediate_severity: immVal, digest_minutes: digestFor() }, min, throttleVal);
+    sentence.textContent = policyText({ delivery: mode, immediate_severity: immVal, digest_minutes: digestFor() }, min, throttleVal, cats());
 
     const chosen = notifierIds().map(notifierById).filter(Boolean);
     const pagers = chosen.filter(noDigest);
@@ -2086,13 +2092,17 @@ function editRoute(r, { onSaved } = {}) {
   const enabled = checkbox('Enabled', r.enabled);
   const minSev = select(SEVERITIES, r.min_severity, { onchange: () => when.update() });
   const descs = Object.fromEntries(categoryList().map((c) => [c.name, c.description]));
-  const cats = [...new Set([...categories(), 'uncategorized', ...(r.categories || [])])].map((c) => ({ c, box: checkbox(c, (r.categories || []).includes(c)) }));
+  const cats = [...new Set([...categories(), 'uncategorized', ...(r.categories || [])])].map((c) => ({ c, box: checkbox(c, (r.categories || []).includes(c), () => when.update()) }));
   for (const x of cats) if (descs[x.c]) x.box.el.title = descs[x.c];
   const srcs = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (r.source_ids || []).includes(x.id)) }));
   const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, (r.notifier_ids || []).includes(x.id), () => when.update()) }));
   const tagsIn = h('input', { value: (r.tags || []).join(', ') });
   const regex = h('input', { value: r.message_regex || '', placeholder: '(?i)payment|checkout' });
-  const when = deliveryFields(r, { notifierIds: () => nts.filter((x) => x.box.input.checked).map((x) => x.id), minSev: () => minSev.value });
+  const when = deliveryFields(r, {
+    notifierIds: () => nts.filter((x) => x.box.input.checked).map((x) => x.id),
+    minSev: () => minSev.value,
+    categories: () => cats.filter((x) => x.box.input.checked).map((x) => x.c),
+  });
 
   const body = h('div', null,
     field('Name', name), enabled.el,
@@ -2197,7 +2207,7 @@ function editGroup(g, { onSaved } = {}) {
   const desc = h('input', { value: g.description || '' });
   const enabled = checkbox('Enabled', g.enabled);
   const minSev = select(SEVERITIES, g.min_severity, { onchange: () => when.update() });
-  const cats = [...new Set([...categories(), 'uncategorized', ...(g.categories || [])])].map((c) => ({ c, box: checkbox(c, (g.categories || []).includes(c)) }));
+  const cats = [...new Set([...categories(), 'uncategorized', ...(g.categories || [])])].map((c) => ({ c, box: checkbox(c, (g.categories || []).includes(c), () => when.update()) }));
   const srcs = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, g.source_ids.includes(x.id)) }));
   const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, g.notifier_ids.includes(x.id), () => when.update()) }));
   const emailNotifiers = cache.notifiers.filter((n) => n.type === 'email');
@@ -2208,6 +2218,7 @@ function editGroup(g, { onSaved } = {}) {
   const when = deliveryFields(g, {
     noun: 'group',
     minSev: () => minSev.value,
+    categories: () => cats.filter((x) => x.box.input.checked).map((x) => x.c),
     notifierIds: () => [...nts.filter((x) => x.box.input.checked).map((x) => x.id), ...(splitEmails().length && emailVia.value ? [emailVia.value] : [])],
   });
 
@@ -2388,7 +2399,7 @@ function renderPendingDigests(root, al, refresh) {
     : 'Alert state is kept in memory only: pending digests are sent when Lissandra stops.';
   root.append(h('div', { class: 'list-item' }, h('div', { class: 'main' },
     h('h2', null, 'Pending digests'),
-    h('div', { class: 'meta' }, 'Events batched for each channel, sent when due. A summary carries alerts flood protection held back and is due within minutes. ', saved),
+    h('div', { class: 'meta' }, 'Events batched for each channel, sent when due. A summary carries alerts flood protection held back, or right-away alerts that failed to deliver, and is due within minutes. ', saved),
     st.error ? h('div', { class: 'callout warn mt' }, `Saving alert state failed: ${st.error}`) : null)));
   if (!al.pending.length) {
     root.append(h('div', { class: 'empty' }, 'Nothing batched right now.'));
@@ -2403,7 +2414,9 @@ function renderPendingDigests(root, al, refresh) {
     root.append(h('div', { class: 'list-item' },
       h('div', { class: 'main' },
         h('div', { class: 'title' }, p.notifier_name || p.notifier_id,
-          p.summary ? h('span', { class: 'badge reason reason-summary' }, `summary · ${num(p.held)} held`) : null,
+          // problems whose alert failed to deliver are sent again, not held back
+          p.summary && p.held > (p.undelivered || 0) ? h('span', { class: 'badge reason reason-summary' }, `summary · ${num(p.held - (p.undelivered || 0))} held`) : null,
+          p.summary && p.undelivered ? h('span', { class: 'badge bad' }, `resend · ${num(p.undelivered)} undelivered`) : null,
           p.disabled ? h('span', { class: 'badge warn' }, 'notifier disabled') : null),
         h('div', { class: 'meta' }, `${plural(p.patterns, 'problem')}, ${plural(p.events, 'event')} · highest ${p.highest_severity} · ${when}`,
           p.routes.length ? ` · ${p.routes.join(', ')}` : ''),
@@ -2441,7 +2454,8 @@ async function showDigest(id) {
       h('div', null, 'Period'), h('div', null, `${fmtTime(dg.from)} – ${fmtTime(dg.to)}`),
       h('div', null, 'Routes'), h('div', null, (dg.routes || []).join(', ') || '—'),
       h('div', null, 'Events'), h('div', null, `${plural(dg.events, 'event')} · ${plural(dg.patterns, 'problem')} · highest ${dg.highest_severity}`,
-        dg.held ? ` · ${num(dg.held)} held back` : ''));
+        dg.held > (dg.undelivered || 0) ? ` · ${num(dg.held - (dg.undelivered || 0))} held back` : '',
+        dg.undelivered ? ` · ${num(dg.undelivered)} undelivered, sent again` : ''));
     const tbl = h('table', { class: 'digest-table' }, h('tr', null, h('th', null, 'Severity'), h('th', null, 'Count'), h('th', null, 'Source · category'),
       h('th', null, 'Sample'), h('th', null, 'First–last'), h('th', null, '')));
     for (const e of dg.entries || []) {
@@ -4672,7 +4686,7 @@ function notifyCard(n, routes, draft, onRouteSaved) {
     const imm = sevRank(p.immediate_severity || 'critical') < sevRank(v('sev')) ? v('sev') : p.immediate_severity || 'critical';
     if (pager && p.delivery === 'smart') policy.textContent = `${n.name} is ${type.label}: it gets only ${imm} and up, right away, never digests.`;
     else if (pager && p.delivery === 'digest') policy.textContent = `${n.name} is ${type.label}: it never gets digests, so this route sends it nothing.`;
-    else policy.textContent = policyText(p, v('sev'), v('throttle'));
+    else policy.textContent = policyText(p, v('sev'), v('throttle'), v('cats'));
   };
   const edit = (k, x) => { if (!('on' in draft)) draft.on = v('on'); draft[k] = x; showPolicy(); };
   const sev = select(SEVERITIES, v('sev'), { onchange: (e) => edit('sev', e.target.value) });

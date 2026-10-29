@@ -76,3 +76,36 @@ func TestRestoreDefaultRulesOrder(t *testing.T) {
 		t.Errorf("still differs: %v %v", m, ch)
 	}
 }
+
+// An install from before has its own "Crash / panic" ahead of "Resource
+// exhaustion", and no "Service down". Restoring all but Crash / panic puts
+// Service down in its place, not after the Crash / panic left out of order,
+// so it isn't listed as changed afterwards, and applying it again changes
+// nothing.
+func TestRestoreDefaultRulesKeepsOneOutOfOrder(t *testing.T) {
+	c := Defaults()
+	Normalize(c)
+	i := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == "Crash / panic" })
+	crash := c.Rules[i]
+	crash.Tags = append(crash.Tags, "oncall")
+	c.Rules = slices.Delete(c.Rules, i, i+1)
+	c.Rules = slices.DeleteFunc(c.Rules, func(r Rule) bool { return r.Name == "Service down" })
+	j := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == "Resource exhaustion" })
+	c.Rules = slices.Insert(c.Rules, j, crash)
+	missing, changed := DefaultRuleChanges(c)
+	if !slices.Equal(missing, []string{"Service down"}) || !slices.Equal(changed, []string{"Crash / panic"}) {
+		t.Fatalf("missing %v changed %v", missing, changed)
+	}
+	if n := RestoreDefaultRules(c, missing); n != 1 {
+		t.Fatalf("restored %d", n)
+	}
+	if missing, changed := DefaultRuleChanges(c); len(missing) != 0 || !slices.Equal(changed, []string{"Crash / panic"}) {
+		t.Fatalf("after: missing %v changed %v", missing, changed)
+	}
+	if k := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == "Service down" }); c.Rules[k-1].Name != "Resource limits" {
+		t.Errorf("Service down after %q", c.Rules[k-1].Name)
+	}
+	if n := RestoreDefaultRules(c, []string{"Service down"}); n != 0 {
+		t.Errorf("applying Service down again restored %d", n)
+	}
+}

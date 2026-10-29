@@ -61,6 +61,16 @@ type Message struct {
 	prevWhy   string        // the previous alert's reason code
 	digestMin int           // alerts: the interval undelivered events are batched at; 0 = counted instead
 	buf       *digestBuffer // digests: the buffer it was made from, for a merge back
+	// summaries: the windows it opened for its held alerts, by alert state
+	// key; if it isn't delivered they close again
+	opened map[string]openedWindow
+}
+
+// openedWindow is an alert window a summary opened: the state's Seq it
+// set, and what the fields it set held before.
+type openedWindow struct {
+	seq  uint64
+	prev alertState
 }
 
 // IsDigest reports whether m carries a digest rather than one event.
