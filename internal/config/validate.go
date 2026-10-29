@@ -116,6 +116,9 @@ func Normalize(c *Config) error {
 		if r.ThrottleSeconds < 0 {
 			r.ThrottleSeconds = 0
 		}
+		if err := normalizeDelivery(&r.DeliveryPolicy); err != nil {
+			return fmt.Errorf("route %q: %w", r.Name, err)
+		}
 		// Drop references to notifiers that no longer exist.
 		kept := r.NotifierIDs[:0]
 		for _, id := range r.NotifierIDs {
@@ -331,6 +334,9 @@ func normalizeAlertGroup(g *AlertGroup, notifiers []Notifier, notifierIDs map[st
 	if g.ThrottleSeconds < 0 {
 		g.ThrottleSeconds = 0
 	}
+	if err := normalizeDelivery(&g.DeliveryPolicy); err != nil {
+		return err
+	}
 	for j, cat := range g.Categories {
 		g.Categories[j] = strings.ToLower(strings.TrimSpace(cat))
 	}
@@ -362,6 +368,39 @@ func normalizeAlertGroup(g *AlertGroup, notifiers []Notifier, notifierIDs map[st
 	g.Emails = emails
 	if len(g.Emails) == 0 {
 		g.Emails = nil
+	}
+	return nil
+}
+
+// normalizeDelivery checks a route's or alert group's delivery policy and
+// fills its defaults. "" is immediate, so configs written before the
+// setting, and API clients that leave it out, send as they always did.
+func normalizeDelivery(p *DeliveryPolicy) error {
+	p.Delivery = strings.ToLower(strings.TrimSpace(p.Delivery))
+	switch p.Delivery {
+	case "", DeliveryImmediate:
+		*p = DeliveryPolicy{Delivery: DeliveryImmediate} // canonical: unused fields cleared
+		return nil
+	case DeliverySmart:
+		if p.ImmediateSeverity == "" {
+			p.ImmediateSeverity = model.SeverityCritical
+		}
+		if !p.ImmediateSeverity.Valid() {
+			return fmt.Errorf("invalid immediate_severity %q", p.ImmediateSeverity)
+		}
+		if p.DigestMinutes == 0 {
+			p.DigestMinutes = 30
+		}
+	case DeliveryDigest:
+		p.ImmediateSeverity = ""
+		if p.DigestMinutes == 0 {
+			p.DigestMinutes = 60
+		}
+	default:
+		return fmt.Errorf("delivery must be immediate, smart or digest")
+	}
+	if p.DigestMinutes < 5 || p.DigestMinutes > 1440 {
+		return fmt.Errorf("digest_minutes must be between 5 and 1440")
 	}
 	return nil
 }

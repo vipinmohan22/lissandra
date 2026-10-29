@@ -1,8 +1,9 @@
 // Package notify delivers classified events to external channels (email,
 // Slack, Microsoft Teams, Discord, Google Chat, PagerDuty, generic
-// webhooks). Channel types are plugins: each registers a field schema that
-// the UI renders as a form, and a constructor that builds a Sender from the
-// saved settings.
+// webhooks), and decides per channel which go right away and which wait
+// for the channel's digest. Channel types are plugins: each registers a
+// field schema that the UI renders as a form, and a constructor that builds
+// a Sender from the saved settings.
 package notify
 
 import (
@@ -23,15 +24,39 @@ import (
 	"github.com/vipinmohan22/lissandra/internal/model"
 )
 
+// Message kinds.
+const (
+	KindAlert  = "alert"  // one event, right away
+	KindDigest = "digest" // a channel's batched events
+)
+
 // Message is what a Sender delivers: one classified event plus routing
-// context.
+// context (an alert), or a channel's batched events (a digest).
 type Message struct {
-	Event      model.Event
-	RouteName  string
-	Suppressed int    // similar events throttled since the previous notification
-	Link       string // link to the event in the Lissandra UI, when a public URL is set
+	ID         string      // delivery ID; for digests also Digest.ID
+	Kind       string      // KindAlert ("" counts as one) or KindDigest
+	Event      model.Event // digests: digestEvent(Digest), for webhook templates
+	Digest     *Digest
+	RouteName  string // Routes joined ", "
+	Routes     []string
+	Reason     Reason
+	Suppressed int       // repeats since the previous alert, reported with this one
+	Since      time.Time // the previous alert on this channel for this problem
+	Link       string    // link to the event (or digest) in the Lissandra UI, when a public URL is set
 	Test       bool
+
+	// For the completion hook (dispatcher.completed) and texts.
+	at        time.Time // when it was decided: "today" for clock texts
+	nid, fp   string
+	seq       uint64
+	prevSent  time.Time
+	prevSev   model.Severity
+	digestMin int           // alerts: the interval undelivered events are batched at; 0 = counted instead
+	buf       *digestBuffer // digests: the buffer it was made from, for a merge back
 }
+
+// IsDigest reports whether m carries a digest rather than one event.
+func (m *Message) IsDigest() bool { return m.Digest != nil }
 
 // Sender delivers messages to one configured channel.
 type Sender interface {
@@ -60,6 +85,9 @@ type Plugin struct {
 	Description string  `json:"description"`
 	Audience    string  `json:"audience,omitempty"` // one line: who receives this channel's alerts
 	Fields      []Field `json:"fields"`
+	// NoDigest is set by channels that must only get right-away alerts
+	// (PagerDuty): smart and digest routes never batch for them.
+	NoDigest bool `json:"no_digest,omitempty"`
 	// New builds a Sender. settings have defaults applied and ${env:...}
 	// references expanded.
 	New func(settings map[string]string) (Sender, error) `json:"-"`
@@ -246,8 +274,30 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.Status, e.Body)
 }
 
+// permanentError is a failed send that retrying can't fix.
+type permanentError struct{ error }
+
+func (e permanentError) Unwrap() error { return e.error }
+
+// Permanent marks err as not worth retrying (a bad template, a message the
+// channel never takes). Permanent(nil) is nil.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return permanentError{err}
+}
+
+// ErrNoDigest is returned for a digest handed to a channel that only takes
+// right-away alerts.
+var ErrNoDigest = errors.New("this notifier never receives digests")
+
 // retryable reports whether a failed send is worth retrying.
 func retryable(err error) bool {
+	var pe permanentError
+	if errors.As(err, &pe) {
+		return false
+	}
 	var he *HTTPError
 	if errors.As(err, &he) {
 		return he.Status == http.StatusTooManyRequests || he.Status >= 500

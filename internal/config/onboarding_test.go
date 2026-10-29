@@ -266,17 +266,21 @@ func TestApplyStepDefaults(t *testing.T) {
 			{Name: "unused", Enabled: false, NotifierIDs: []string{"email"}},
 		}
 		ch := apply(t, c, StepNotify)
-		if len(ch) != 2 || ch[0].Name != "Email DBAs: error and above" || ch[1].Name != "PagerDuty: critical and above" {
+		if len(ch) != 2 || ch[0].Name != "Email DBAs: warning and above" || ch[1].Name != "PagerDuty: critical and above" {
 			t.Fatalf("changes = %+v", ch)
 		}
 		if len(c.Routes) != 4 {
 			t.Fatalf("routes = %+v", c.Routes)
 		}
 		email, pd := c.Routes[2], c.Routes[3]
-		if email.MinSeverity != model.SeverityError || !slices.Equal(email.NotifierIDs, []string{"email"}) || email.ThrottleSeconds != 900 || !email.Enabled || email.ID == "" {
+		// Email: warnings too, in an hourly digest; PagerDuty: every critical
+		// right away.
+		if email.MinSeverity != model.SeverityWarning || !slices.Equal(email.NotifierIDs, []string{"email"}) || email.ThrottleSeconds != 3600 || !email.Enabled || email.ID == "" ||
+			email.DeliveryPolicy != (DeliveryPolicy{Delivery: DeliverySmart, ImmediateSeverity: model.SeverityCritical, DigestMinutes: 60}) {
 			t.Errorf("email route = %+v", email)
 		}
-		if pd.MinSeverity != model.SeverityCritical || !slices.Equal(pd.NotifierIDs, []string{"pd"}) || pd.ThrottleSeconds != 900 {
+		if pd.MinSeverity != model.SeverityCritical || !slices.Equal(pd.NotifierIDs, []string{"pd"}) || pd.ThrottleSeconds != 900 ||
+			pd.DeliveryPolicy != (DeliveryPolicy{Delivery: DeliveryImmediate}) {
 			t.Errorf("pagerduty route = %+v", pd)
 		}
 		if ch := apply(t, c, StepNotify); len(ch) != 0 {

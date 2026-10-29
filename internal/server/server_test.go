@@ -31,10 +31,11 @@ import (
 const adminToken = "test-admin-token-0123456789"
 
 type env struct {
-	t       *testing.T
-	srv     *httptest.Server
-	cfg     *config.Store
-	imports *importer.Registry
+	t          *testing.T
+	srv        *httptest.Server
+	cfg        *config.Store
+	imports    *importer.Registry
+	dispatcher *notify.Dispatcher
 }
 
 func newEnv(t *testing.T) *env {
@@ -51,8 +52,9 @@ func newEnvWith(t *testing.T, mutate func(*Options)) *env {
 
 // envConfig sets up an env beyond Options.
 type envConfig struct {
-	configPath string       // default: a new file
-	log        *slog.Logger // default: discarded
+	configPath string         // default: a new file
+	log        *slog.Logger   // default: discarded
+	notify     notify.Options // default: alert state in memory, sources warm up for an hour
 	mutate     func(*Options)
 }
 
@@ -72,7 +74,7 @@ func newEnvFrom(t *testing.T, ec envConfig) *env {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	store := events.NewStore(1000)
-	d := notify.NewDispatcher(log)
+	d := notify.NewDispatcherWith(log, ec.notify)
 	a := engine.New(log)
 	t.Cleanup(a.Close)
 	p := pipeline.New(100, store, d, a)
@@ -98,7 +100,7 @@ func newEnvFrom(t *testing.T, ec envConfig) *env {
 	s := New(opts, log, cfg, store, p, d, a, l, pm, reg)
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return &env{t: t, srv: srv, cfg: cfg, imports: reg}
+	return &env{t: t, srv: srv, cfg: cfg, imports: reg, dispatcher: d}
 }
 
 func (e *env) do(method, path string, body any, headers map[string]string) (int, []byte) {

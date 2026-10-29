@@ -209,6 +209,23 @@ type Route struct {
 	MessageRegex    string         `json:"message_regex,omitempty"`
 	NotifierIDs     []string       `json:"notifier_ids"`
 	ThrottleSeconds int            `json:"throttle_seconds"`
+	DeliveryPolicy
+}
+
+// Delivery modes: when a route's or alert group's matching events are sent.
+const (
+	DeliveryImmediate = "immediate" // every matching event right away (also "")
+	DeliverySmart     = "smart"     // immediate_severity and up, and new/spiking/worse errors, right away; the rest in a digest
+	DeliveryDigest    = "digest"    // everything in a digest
+)
+
+// DeliveryPolicy is embedded in Route and AlertGroup; JSON inlines its fields.
+// Do not give it, Route or AlertGroup an UnmarshalJSON: server.alertGroupView
+// embeds AlertGroup and a promoted method would swallow source_ids.
+type DeliveryPolicy struct {
+	Delivery          string         `json:"delivery"`
+	ImmediateSeverity model.Severity `json:"immediate_severity,omitempty"` // smart only
+	DigestMinutes     int            `json:"digest_minutes,omitempty"`     // smart and digest, 5-1440
 }
 
 // AlertGroup is a team, or a set of people, alerted about the events of
@@ -230,6 +247,7 @@ type AlertGroup struct {
 	MinSeverity     model.Severity `json:"min_severity"`
 	Categories      []string       `json:"categories,omitempty"` // empty: any category
 	ThrottleSeconds int            `json:"throttle_seconds"`
+	DeliveryPolicy
 }
 
 // Category is a label events are classified into. Rules set it directly;

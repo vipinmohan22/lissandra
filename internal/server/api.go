@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -42,6 +43,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/rules", s.createRule)
 	mux.HandleFunc("POST /api/rules/test", s.testRules)
 	mux.HandleFunc("POST /api/rules/reorder", s.reorderRules)
+	mux.HandleFunc("GET /api/rules/defaults", s.getDefaultRules)
+	mux.HandleFunc("POST /api/rules/defaults", s.restoreDefaultRules)
 	mux.HandleFunc("PUT /api/rules/{id}", s.updateRule)
 	mux.HandleFunc("DELETE /api/rules/{id}", s.deleteRule)
 
@@ -71,6 +74,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.importRoutes(mux)
 	s.setupRoutes(mux)
 	s.groupRoutes(mux)
+	s.alertingRoutes(mux)
 }
 
 // update runs a config mutation and maps errors to HTTP responses.
@@ -141,10 +145,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 			"dropped": p.Dropped.Load(), "rejected": p.Rejected.Load(), "engine_queued": p.EngineQueued.Load(),
 			"engine_queue_depth": p.EngineQueueDepth(), "engine_shed": p.EngineShed.Load(),
 		},
-		"notifications": map[string]any{
-			"queue_depth": d.QueueDepth(), "sent": d.Sent.Load(), "failed": d.Failed.Load(),
-			"dropped": d.Dropped.Load(), "throttled": d.Throttled.Load(),
-		},
+		"notifications":  d.Stats(),
 		"engine":         s.classifier.Status(),
 		"learning":       s.learningStats(),
 		"imports":        map[string]any{"active": s.imports.Active(), "done": s.imports.Succeeded.Load(), "failed": s.imports.Failed.Load()},
@@ -176,7 +177,7 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "event not found (it may have been rotated out of memory)")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"event": ev, "routes": s.dispatcher.Matches(&ev)})
+	writeJSON(w, http.StatusOK, map[string]any{"event": ev, "routes": s.dispatcher.Matches(&ev), "alerts": s.decisions(ev.ID)})
 }
 
 // --- sources ---
@@ -282,11 +283,13 @@ func (s *Server) rotateToken(w http.ResponseWriter, r *http.Request) {
 	s.writeSource(w, http.StatusOK, id)
 }
 
-// previewEvent is a classified sample returned by the test endpoints.
+// previewEvent is a classified sample returned by the test endpoints, with
+// where it would be sent (judged as if it were neither new nor spiking).
 type previewEvent struct {
-	Event   model.Event `json:"event"`
-	Dropped bool        `json:"dropped"`
-	Routes  []string    `json:"routes"`
+	Event   model.Event       `json:"event"`
+	Dropped bool              `json:"dropped"`
+	Routes  []string          `json:"routes"`
+	Alerts  []notify.Decision `json:"alerts"`
 }
 
 func (s *Server) preview(evs []model.Event, engine *classify.Engine) []previewEvent {
@@ -296,11 +299,12 @@ func (s *Server) preview(evs []model.Event, engine *classify.Engine) []previewEv
 			break
 		}
 		kept := engine.Classify(&ev)
-		pe := previewEvent{Event: ev, Dropped: !kept, Routes: []string{}}
+		pe := previewEvent{Event: ev, Dropped: !kept, Routes: []string{}, Alerts: []notify.Decision{}}
 		if kept {
 			if r := s.dispatcher.Matches(&ev); r != nil {
 				pe.Routes = r
 			}
+			pe.Alerts = s.dispatcher.Preview(&ev)
 		}
 		out = append(out, pe)
 	}
@@ -436,6 +440,50 @@ func (s *Server) reorderRules(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getDefaultRules lists this version's default rules the config lacks or
+// has changed (by name), with what each does, for "Default rules".
+func (s *Server) getDefaultRules(w http.ResponseWriter, r *http.Request) {
+	missing, changed := config.DefaultRuleChanges(s.cfg.Get())
+	desc := map[string]string{}
+	for _, d := range config.Defaults().Rules {
+		if slices.Contains(missing, d.Name) || slices.Contains(changed, d.Name) {
+			desc[d.Name] = d.Description
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"missing": orEmpty(missing), "changed": orEmpty(changed), "descriptions": desc})
+}
+
+// restoreDefaultRules gives the config this version's default rules named
+// in names (all that differ when names is empty or left out). A rule keeps
+// its ID and whether it is enabled; a renamed default is the operator's
+// and is left alone.
+func (s *Server) restoreDefaultRules(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Names []string `json:"names"`
+	}
+	// The body is optional: none restores every default that differs.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	n := 0
+	if s.update(w, func(c *config.Config) error {
+		if n = config.RestoreDefaultRules(c, body.Names); n == 0 {
+			return errUnchanged
+		}
+		return nil
+	}) {
+		writeJSON(w, http.StatusOK, map[string]any{"restored": n, "rules": s.cfg.Get().Rules})
+	}
+}
+
+func orEmpty(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
+}
+
 // testRules parses a sample payload and classifies it, optionally against
 // a draft rule set, without storing anything.
 func (s *Server) testRules(w http.ResponseWriter, r *http.Request) {
@@ -566,7 +614,20 @@ func (s *Server) testNotifier(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	if err := s.dispatcher.Test(ctx, n); err != nil {
+	send := s.dispatcher.Test
+	switch r.URL.Query().Get("kind") {
+	case "", notify.KindAlert:
+	case notify.KindDigest:
+		if p, ok := notify.PluginFor(n.Type); ok && p.NoDigest {
+			writeError(w, http.StatusBadRequest, p.Label+" never receives digests")
+			return
+		}
+		send = s.dispatcher.TestDigest
+	default:
+		writeError(w, http.StatusBadRequest, `kind must be "alert" or "digest"`)
+		return
+	}
+	if err := send(ctx, n); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
@@ -634,11 +695,6 @@ func (s *Server) deleteRoute(w http.ResponseWriter, r *http.Request) {
 	}) {
 		w.WriteHeader(http.StatusNoContent)
 	}
-}
-
-func (s *Server) listDeliveries(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	writeJSON(w, http.StatusOK, s.dispatcher.Deliveries(limit))
 }
 
 // --- settings ---

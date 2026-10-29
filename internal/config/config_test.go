@@ -478,3 +478,67 @@ func TestRuleStatusValidated(t *testing.T) {
 		t.Error("unknown rule status accepted")
 	}
 }
+
+func TestNormalizeDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		in   DeliveryPolicy
+		want DeliveryPolicy
+		err  string
+	}{
+		{DeliveryPolicy{}, DeliveryPolicy{Delivery: DeliveryImmediate}, ""},
+		{DeliveryPolicy{Delivery: "immediate", ImmediateSeverity: model.SeverityError, DigestMinutes: 30}, DeliveryPolicy{Delivery: DeliveryImmediate}, ""},
+		{DeliveryPolicy{Delivery: " SMART "}, DeliveryPolicy{Delivery: DeliverySmart, ImmediateSeverity: model.SeverityCritical, DigestMinutes: 30}, ""},
+		{DeliveryPolicy{Delivery: "smart", ImmediateSeverity: model.SeverityError, DigestMinutes: 240}, DeliveryPolicy{Delivery: DeliverySmart, ImmediateSeverity: model.SeverityError, DigestMinutes: 240}, ""},
+		{DeliveryPolicy{Delivery: "digest", ImmediateSeverity: model.SeverityCritical}, DeliveryPolicy{Delivery: DeliveryDigest, DigestMinutes: 60}, ""},
+		{DeliveryPolicy{Delivery: "batch"}, DeliveryPolicy{}, "delivery must be immediate, smart or digest"},
+		{DeliveryPolicy{Delivery: "smart", ImmediateSeverity: "loud"}, DeliveryPolicy{}, `invalid immediate_severity "loud"`},
+		{DeliveryPolicy{Delivery: "smart", DigestMinutes: 3}, DeliveryPolicy{}, "digest_minutes must be between 5 and 1440"},
+		{DeliveryPolicy{Delivery: "digest", DigestMinutes: 2000}, DeliveryPolicy{}, "digest_minutes must be between 5 and 1440"},
+	} {
+		for _, kind := range []string{"route", "group"} {
+			c := Defaults()
+			c.Notifiers = []Notifier{{ID: "n", Name: "n", Type: "slack"}}
+			if kind == "route" {
+				c.Routes = []Route{{Name: "r", Enabled: true, NotifierIDs: []string{"n"}, DeliveryPolicy: tc.in}}
+			} else {
+				c.AlertGroups = []AlertGroup{{Name: "g", Enabled: true, NotifierIDs: []string{"n"}, DeliveryPolicy: tc.in}}
+			}
+			err := Normalize(c)
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) || !strings.Contains(err.Error(), map[string]string{"route": `route "r": `, "group": `alert group "g": `}[kind]) {
+					t.Errorf("%s %+v: %v", kind, tc.in, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Errorf("%s %+v: %v", kind, tc.in, err)
+				continue
+			}
+			got := c.Routes
+			if kind == "group" {
+				if c.AlertGroups[0].DeliveryPolicy != tc.want {
+					t.Errorf("group %+v → %+v", tc.in, c.AlertGroups[0].DeliveryPolicy)
+				}
+			} else if got[0].DeliveryPolicy != tc.want {
+				t.Errorf("route %+v → %+v", tc.in, got[0].DeliveryPolicy)
+			}
+		}
+	}
+
+	// The policy is inlined in JSON, and a view embedding AlertGroup (as the
+	// server's alert group API does) still decodes its own fields.
+	data, _ := json.Marshal(Route{Name: "r", DeliveryPolicy: DeliveryPolicy{Delivery: DeliverySmart, ImmediateSeverity: model.SeverityCritical, DigestMinutes: 30}})
+	if !strings.Contains(string(data), `"delivery":"smart","immediate_severity":"critical","digest_minutes":30`) {
+		t.Errorf("route JSON = %s", data)
+	}
+	var view struct {
+		AlertGroup
+		SourceIDs []string `json:"source_ids"`
+	}
+	if err := json.Unmarshal([]byte(`{"name":"g","delivery":"digest","digest_minutes":15,"source_ids":["a","b"]}`), &view); err != nil {
+		t.Fatal(err)
+	}
+	if len(view.SourceIDs) != 2 || view.Delivery != DeliveryDigest || view.DigestMinutes != 15 || view.Name != "g" {
+		t.Errorf("view = %+v", view)
+	}
+}

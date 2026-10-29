@@ -136,7 +136,9 @@ func run() error {
 	defer stop()
 
 	store := events.NewStore(envInt("LISSANDRA_EVENT_BUFFER", 5000))
-	dispatcher := notify.NewDispatcher(log)
+	// Alert state (windows, pending digests, per-pattern baselines) is
+	// loaded here and saved every minute and at shutdown.
+	dispatcher := notify.NewDispatcherWith(log, notify.Options{StatePath: filepath.Join(dataDir, "alerting.json")})
 	eng := engine.New(log)
 	pipe := pipeline.New(envInt("LISSANDRA_QUEUE_SIZE", 10000), store, dispatcher, eng)
 	learner := learn.New(log, cfg.Update)
@@ -212,8 +214,9 @@ func run() error {
 	// Stop ingest (pollers stopped with ctx), then finish every accepted
 	// event, engine requests cancelled, and deliver its alerts. Requests
 	// and events have their own budgets, so a slow upload can't use up the
-	// drain's; notifications get what is left of 26 s, and stopping 2 s
-	// more, within Nomad's kill_timeout (30 s).
+	// drain's; notifications (digests already due, then saving alert
+	// state) get what is left of 26 s, and stopping 2 s more, within
+	// Nomad's kill_timeout (30 s).
 	step := func(d time.Duration) (context.Context, context.CancelFunc) {
 		return context.WithTimeout(context.Background(), d)
 	}

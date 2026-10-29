@@ -347,7 +347,7 @@ func TestOnboardingLifecycle(t *testing.T) {
 		r.State.Resume != pageReview || len(r.State.Remaining) != 0 {
 		t.Errorf("notify defaults: %d %+v", code, r)
 	}
-	if rs := e.cfg.Get().Routes; len(rs) != 1 || !slices.Equal(rs[0].NotifierIDs, []string{n.ID}) || rs[0].ThrottleSeconds != 900 {
+	if rs := e.cfg.Get().Routes; len(rs) != 1 || !slices.Equal(rs[0].NotifierIDs, []string{n.ID}) || rs[0].ThrottleSeconds != 3600 || rs[0].Delivery != config.DeliverySmart {
 		t.Errorf("routes = %+v", rs)
 	}
 }

@@ -2,7 +2,7 @@
 
 `lissandra.nomad.hcl` runs Lissandra as a single Docker task with:
 
-- a **host volume** for its configuration file,
+- a **host volume** for its configuration file and its alert state (`alerting.json`: what was sent, pending digests, per-pattern baselines),
 - **Nomad Variables** for secrets, rendered into the task environment,
 - **service registration** (Nomad native or Consul) with an HTTP health check on `/healthz`,
 - rolling updates gated on health checks, with auto-revert, and a graceful drain on stop,
@@ -290,8 +290,8 @@ The job sets `GOMEMLIMIT` to 80% of `memory`, so Go reclaims memory before Docke
 
 ## Upgrades and backups
 
-- **Upgrade:** change `image` and re-run the job. The config file on the volume is kept; settings it doesn't have yet (the engine's, when upgrading from a release before it) start at their defaults. If the new version doesn't pass its health check, Nomad reverts to the old one. When the old one stops, it finishes the events it accepted and delivers queued notifications first (up to 28 s, within the job's 30 s `kill_timeout`). To upgrade the engine, see [Upgrades](#upgrades) in step 6.
-- **Backup:** use **Settings → Backup → Export** (masked) in the UI, or copy `config.json` from the volume. Exports carry neither the admin token nor the setup wizard's progress; a token set in the UI is in `admin-token.json` next to `config.json`, so a copy of the volume restores both. Secrets referenced as `${env:…}` live in the Nomad Variable, so back that up too (`nomad var get -out=json nomad/jobs/lissandra`). The engine's cache volume needs no backup: it's downloaded again.
+- **Upgrade:** change `image` and re-run the job. The config file on the volume is kept; settings it doesn't have yet (the engine's, when upgrading from a release before it) start at their defaults. If the new version doesn't pass its health check, Nomad reverts to the old one. When the old one stops, it finishes the events it accepted, delivers queued notifications and the digests already due, and saves its alert state (up to 28 s, within the job's 30 s `kill_timeout`); the new one sends the other digests on time and doesn't alert again on problems the old one already sent. To upgrade the engine, see [Upgrades](#upgrades) in step 6.
+- **Backup:** use **Settings → Backup → Export** (masked) in the UI, or copy `config.json` from the volume. Exports carry neither the admin token nor the setup wizard's progress; a token set in the UI is in `admin-token.json` next to `config.json`, so a copy of the volume restores both. `alerting.json` needs no backup: without it, sources only learn what's normal again for an hour (new lesser problems are batched meanwhile) and pending digests are lost. Secrets referenced as `${env:…}` live in the Nomad Variable, so back that up too (`nomad var get -out=json nomad/jobs/lissandra`). The engine's cache volume needs no backup: it's downloaded again.
 - **Seeding a new cluster:** render a known config into the task and set `LISSANDRA_CONFIG_SEED` to its path. It's used only when `config.json` doesn't exist yet. A seed doesn't open the setup wizard unless it has an `"onboarding": {}` key.
 
 ## Troubleshooting

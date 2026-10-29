@@ -293,7 +293,8 @@ func TestDispatcherRoutingAndThrottle(t *testing.T) {
 	fake.msgs, fake.fails = nil, 1 // first attempt fails, retry succeeds
 	fake.mu.Unlock()
 
-	d := NewDispatcher(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	clock := newFakeClock()
+	d := NewDispatcherWith(slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Now: clock.Now})
 	d.Configure(&config.Config{
 		Notifiers: []config.Notifier{{ID: "n1", Name: "fake", Type: "fake-test", Enabled: true}},
 		Routes: []config.Route{
@@ -339,10 +340,19 @@ func TestDispatcherRoutingAndThrottle(t *testing.T) {
 	}
 
 	// After the window, the next alert reports suppressed repeats.
-	r := &d.routes[0]
-	suppressed, ok := d.admit(r, "n1", "fp1", time.Now().Add(2*time.Hour))
-	if !ok || suppressed != 1 {
-		t.Errorf("admit after window = %d, %v", suppressed, ok)
+	clock.Add(2 * time.Hour)
+	d.Handle(ev)
+	for fake.count() < 3 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if fake.count() != 3 {
+		t.Fatalf("delivered %d, want 3", fake.count())
+	}
+	fake.mu.Lock()
+	third := fake.msgs[2]
+	fake.mu.Unlock()
+	if third.Suppressed != 1 || third.Reason.Code != ReasonRepeat {
+		t.Errorf("after the window: suppressed %d, reason %+v", third.Suppressed, third.Reason)
 	}
 }
 
@@ -579,5 +589,92 @@ func TestAlertGroupRoutes(t *testing.T) {
 		if got := match(&model.Event{SourceID: tc.src, Severity: tc.sev}); len(got) != tc.want {
 			t.Errorf("%s %s: %v", tc.src, tc.sev, got)
 		}
+	}
+}
+
+// Alerts lead with why they were sent; chat headers and subjects say what
+// made them go right away.
+func TestAlertWhyAndHeadline(t *testing.T) {
+	m := testMessage()
+	m.Reason = Reason{ReasonNew, "New problem: first seen just now; nothing like it in the last 7 days."}
+	if f := m.Facts(); f[0].Name != "Why" || f[0].Value != m.Reason.Text || f[1].Name != "Severity" {
+		t.Errorf("facts = %+v", f)
+	}
+	for code, suffix := range map[string]string{ReasonNew: " · new problem", ReasonSpike: " · spiking", ReasonWorse: " · got worse", ReasonRepeat: " · still happening", ReasonSeverity: ""} {
+		m.Reason.Code = code
+		if got := m.Headline(); got != m.Title()+suffix {
+			t.Errorf("%s: %q", code, got)
+		}
+	}
+	m.Reason.Code = ReasonNew
+	m.Since, m.at = time.Date(2026, 10, 19, 10, 2, 0, 0, time.UTC), time.Date(2026, 10, 19, 11, 0, 0, 0, time.UTC)
+	var supp string
+	for _, f := range m.Facts() {
+		if f.Name == "Suppressed" {
+			supp = f.Value
+		}
+	}
+	if supp != "3 more since the alert at 10:02 UTC" {
+		t.Errorf("suppressed = %q", supp)
+	}
+
+	var c capture
+	srv := c.server(t, http.StatusOK)
+	for _, n := range []config.Notifier{
+		{Type: "slack", Settings: map[string]string{"webhook_url": srv.URL + "/slack"}},
+		{Type: "pagerduty", Settings: map[string]string{"routing_key": "rk", "api_url": srv.URL + "/pd"}},
+		{Type: "webhook", Settings: map[string]string{"url": srv.URL + "/hook"}},
+	} {
+		s, _ := Build(n)
+		if err := s.Send(context.Background(), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reqs := c.all()
+	head := reqs[0].body["attachments"].([]any)[0].(map[string]any)["blocks"].([]any)[0].(map[string]any)["text"].(map[string]any)["text"].(string)
+	if head != "*[CRITICAL] application · api · new problem*" {
+		t.Errorf("slack head = %q", head)
+	}
+	pd := reqs[1].body["payload"].(map[string]any)
+	if pd["custom_details"].(map[string]any)["why"] != m.Reason.Text || !strings.HasPrefix(pd["summary"].(string), "[CRITICAL] application · api: ") {
+		t.Errorf("pagerduty = %v", pd)
+	}
+	if hook := reqs[2].body; hook["kind"] != "alert" || hook["reason"].(map[string]any)["code"] != ReasonNew || hook["routes"] == nil || hook["digest"] != nil {
+		t.Errorf("webhook = %v", hook)
+	}
+	// A template that can't render is not retried.
+	s, _ := Build(config.Notifier{Type: "webhook", Settings: map[string]string{"url": srv.URL, "body_template": "{{ .Event.Nope.X }}"}})
+	if err := s.Send(context.Background(), m); err == nil || retryable(err) {
+		t.Errorf("template error: %v (retryable %v)", err, retryable(err))
+	}
+	if !retryable(&HTTPError{Status: 503}) || retryable(Permanent(&HTTPError{Status: 503})) || Permanent(nil) != nil {
+		t.Error("Permanent")
+	}
+	if p, _ := PluginFor("pagerduty"); !p.NoDigest {
+		t.Error("PagerDuty takes digests")
+	}
+	if data, _ := json.Marshal(Plugins()); !strings.Contains(string(data), `"no_digest":true`) {
+		t.Error("no_digest isn't in the notifier types")
+	}
+}
+
+func TestDeliveriesRing(t *testing.T) {
+	d := NewDispatcher(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ch := &channel{n: config.Notifier{ID: "n", Name: "n", Type: "fake-test"}}
+	for i := 0; i < maxDeliveries+20; i++ {
+		d.record(ch, &Message{ID: fmt.Sprint(i), Event: model.Event{ID: fmt.Sprint(i)}}, "sent", "", 1, 0)
+	}
+	all := d.Deliveries(0)
+	if len(all) != maxDeliveries || all[0].ID != fmt.Sprint(maxDeliveries+19) || all[len(all)-1].ID != "20" {
+		t.Errorf("ring: %d, newest %s, oldest %s", len(all), all[0].ID, all[len(all)-1].ID)
+	}
+	if got := d.Deliveries(3); len(got) != 3 || got[2].ID != fmt.Sprint(maxDeliveries+17) {
+		t.Errorf("limit: %+v", got)
+	}
+	if _, _, ok := d.DeliveryDetail("19"); ok {
+		t.Error("an evicted delivery was found")
+	}
+	if del, _, ok := d.DeliveryDetail("20"); !ok || del.ID != "20" {
+		t.Error("the oldest kept delivery wasn't found")
 	}
 }

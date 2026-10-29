@@ -27,7 +27,7 @@ func init() {
 			{Key: "headers", Label: "Headers", Type: "textarea", Secret: true, Placeholder: "Authorization: Bearer ${env:HOOK_TOKEN}\nX-Team: platform", Help: "One \"Name: value\" per line."},
 			{Key: "content_type", Label: "Content type", Type: "text", Default: "application/json"},
 			{Key: "body_template", Label: "Body template", Type: "textarea", Placeholder: `{"text": {{ json .Title }}, "severity": {{ json .Event.Severity }}}`,
-				Help: "Fields: .Title .Text .Link .RouteName .Suppressed .Test .Event (.Message .Severity .Category .SourceName .Tags .Engine .Fingerprint .Fields …) and .Payload. Functions: json, upper, lower, truncate."},
+				Help: "Fields: .Title .Text .Link .Kind (alert or digest) .ID .Reason (.Code .Text) .Routes .RouteName .Suppressed .Since .Test .Event (.Message .Severity .Category .SourceName .Tags .Engine .Fingerprint .Fields …), .Digest (digests only: .Events .Patterns .Highest .Entries …) and .Payload. For a digest .Event summarizes it (.Severity is the highest). Functions: json, upper, lower, truncate."},
 		},
 		New: newWebhook,
 	})
@@ -94,23 +94,39 @@ type webhookData struct {
 // StandardPayload is the JSON body sent by the generic webhook when no
 // template is configured.
 func StandardPayload(m *Message) map[string]any {
-	return map[string]any{
+	kind := KindAlert
+	if m.Digest != nil {
+		kind = KindDigest
+	}
+	routes := m.Routes
+	if routes == nil {
+		routes = []string{}
+	}
+	p := map[string]any{
+		"id":         m.ID,
+		"kind":       kind,
 		"title":      m.Title(),
 		"text":       m.PlainText(),
 		"link":       m.Link,
 		"route":      m.RouteName,
+		"routes":     routes,
+		"reason":     m.Reason,
 		"suppressed": m.Suppressed,
 		"test":       m.Test,
 		"sent_at":    time.Now().UTC().Format(time.RFC3339),
 		"event":      m.Event,
 	}
+	if m.Digest != nil {
+		p["digest"] = m.Digest
+	}
+	return p
 }
 
 func (n *webhook) Send(ctx context.Context, m *Message) error {
 	var buf bytes.Buffer
 	data := webhookData{Message: m, Title: m.Title(), Text: m.PlainText(), Payload: StandardPayload(m)}
 	if err := n.tmpl.Execute(&buf, data); err != nil {
-		return fmt.Errorf("render body: %w", err)
+		return Permanent(fmt.Errorf("render body: %w", err)) // the same template fails again
 	}
 	return doRequest(ctx, n.method, n.url, n.contentType, buf.Bytes(), n.headers)
 }

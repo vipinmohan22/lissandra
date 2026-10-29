@@ -293,6 +293,39 @@ div.tile { display: flex; border: 1px solid var(--border); border-radius: var(--
 .try-it > .card { position: static; box-shadow: none; border: none; padding: 12px 0 0; }
 .notify-card .row h2 { margin: 0; }
 .table-wrap { overflow-x: auto; }
+.fixed-choice { padding: 6px 0; }
+.mt-small { margin-top: 6px; }
+
+/* When to send: the delivery choice in route and alert group editors, the
+   policy in words, and why each message was sent. */
+.when-choice { align-items: flex-start; }
+.fields-3.when-box { grid-template-columns: 1fr 1fr 1fr; }
+.field .when-choice input[type=radio] { width: 15px; height: 15px; flex: none; margin: 3px 0 0; accent-color: var(--accent); }
+.callout.policy { border-left-color: var(--ok); }
+.callout.policy.warn { border-left-color: var(--warn); }
+.callout.policy p { margin: 0 0 4px; }
+.callout.policy .notes { margin: 6px 0 0; padding-left: 18px; }
+.callout.policy .notes li + li { margin-top: 2px; }
+.smart-switch .muted { overflow-wrap: anywhere; }
+.badge.reason { background: transparent; border-color: currentColor; }
+.badge.reason-new { color: var(--accent); }
+.badge.reason-spike, .badge.reason-held, .badge.reason-summary { color: var(--warn); }
+.badge.reason-worse { color: var(--sev-error); }
+.badge.reason-severity { color: var(--sev-critical); }
+.badge.reason-every, .badge.reason-repeat { color: var(--muted); }
+.badge.reason-digest { color: var(--ok); }
+td.why { min-width: 220px; max-width: 380px; }
+td.why .small { margin-top: 3px; }
+td.routes { min-width: 140px; }
+.pending-top { margin-top: 6px; }
+.pending-top summary { cursor: pointer; color: var(--muted); }
+.pending-top > div { margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+table.digest-table td.count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+table.digest-table td.sample { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; min-width: 220px; }
+table.digest-table td.flags .badge { margin: 0 4px 3px 0; }
+.decision + .decision { margin-top: 6px; }
+.defaults-list label { align-items: flex-start; }
+.defaults-list input { margin-top: 3px; }
 
 @media (max-width: 860px) {
   #app { flex-direction: column; }
@@ -300,7 +333,7 @@ div.tile { display: flex; border: 1px solid var(--border); border-radius: var(--
   #nav { flex-direction: row; flex-wrap: wrap; }
   .nav-group, .sidebar-foot { display: none; }
   main { padding: 18px 16px 40px; }
-  .fields-2, .fields-3 { grid-template-columns: 1fr; }
+  .fields-2, .fields-3, .fields-3.when-box { grid-template-columns: 1fr; }
   .cond-row { grid-template-columns: 1fr 1fr; }
   .cat-row { grid-template-columns: auto minmax(0, 1fr) auto; padding-bottom: 6px; border-bottom: 1px dashed var(--border); }
   .cat-row .order-btns { grid-row: span 2; }

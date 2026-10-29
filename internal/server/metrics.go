@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vipinmohan22/lissandra/internal/model"
+	"github.com/vipinmohan22/lissandra/internal/notify"
 )
 
 // handleMetrics writes Prometheus text-format metrics.
@@ -38,6 +39,26 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf(`{status="dropped"} %d`, d.Dropped.Load()),
 		fmt.Sprintf(`{status="throttled"} %d`, d.Throttled.Load()))
 	metric("lissandra_notification_queue_depth", "gauge", "Notifications waiting for delivery.", fmt.Sprintf(" %d", d.QueueDepth()))
+	var decided, right []string
+	for i, a := range notify.Actions {
+		decided = append(decided, fmt.Sprintf(`{action=%q} %d`, a, d.Decided[i].Load()))
+	}
+	for i, r := range notify.RightAwayReasons {
+		right = append(right, fmt.Sprintf(`{reason=%q} %d`, r, d.RightAway[i].Load()))
+	}
+	metric("lissandra_alert_decisions_total", "counter", "What matching events did on each channel: sent right away, batched into a digest, throttled, held by flood protection, skipped or dropped.", decided...)
+	metric("lissandra_alerts_right_away_total", "counter", "Alerts sent right away, by reason.", right...)
+	metric("lissandra_digests_total", "counter", "Digests by outcome.",
+		fmt.Sprintf(`{status="sent"} %d`, d.DigestsSent.Load()),
+		fmt.Sprintf(`{status="failed"} %d`, d.DigestsFailed.Load()),
+		fmt.Sprintf(`{status="discarded"} %d`, d.DigestsDiscarded.Load()))
+	metric("lissandra_digest_events_total", "counter", "Events reported in digests that were sent.", fmt.Sprintf(" %d", d.DigestEvents.Load()))
+	metric("lissandra_alert_lost_events_total", "counter", "Matching events no message reported: a digest discarded or failed twice, or repeats unreported for 7 days.", fmt.Sprintf(" %d", d.LostEvents.Load()))
+	g := d.Gauges()
+	metric("lissandra_digest_pending_events", "gauge", "Events waiting in digests.", fmt.Sprintf(" %d", g.PendingDigestEvents))
+	metric("lissandra_alert_patterns_tracked", "gauge", "Message patterns whose usual rate and severity are tracked.", fmt.Sprintf(" %d", g.PatternsTracked))
+	metric("lissandra_alert_sources_warming_up", "gauge", "Sources still learning what's normal (nothing counts as new yet).", fmt.Sprintf(" %d", g.WarmingUp))
+	metric("lissandra_alert_state_save_errors_total", "counter", "Failed saves of alert state (alerting.json).", fmt.Sprintf(" %d", d.StateSaveErrors.Load()))
 
 	e := s.classifier
 	est := e.Status()

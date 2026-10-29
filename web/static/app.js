@@ -669,11 +669,13 @@ function pageHead(title, subtitle, ...actions) {
 // ---------- Dashboard ----------
 
 pages.dashboard = async (main) => {
-  await load('sources', 'settings', 'info');
+  await load('sources', 'settings', 'info', 'routes', 'groups');
+  const notes = h('div');
   const body = h('div');
-  append(main, pageHead('Dashboard', 'Last 60 minutes of classified log activity.'), setupBanner(cache.info), tokenWarning(cache.info), body);
+  append(main, pageHead('Dashboard', 'Last 60 minutes of classified log activity.'), setupBanner(cache.info), tokenWarning(cache.info), notes, body);
   const refresh = async () => {
-    const st = await GET('/api/stats');
+    const [st, al] = await Promise.all([GET('/api/stats'), GET('/api/alerting')]);
+    append(clear(notes), warmupCallout(al), stateCallout(al));
     renderDashboard(body, st);
   };
   await refresh();
@@ -705,6 +707,24 @@ function setupBanner(info) {
         }),
       }, 'Dismiss')));
   return el;
+}
+
+// warmupCallout says which sources are still learning what's normal, while
+// a smart route or alert group would treat them differently afterwards.
+function warmupCallout(al) {
+  const w = al.warming_up || [];
+  const smart = [...(cache.routes || []), ...activeGroups()].some((r) => r.enabled && deliveryOf(r) === 'smart');
+  if (!w.length || !smart) return null;
+  const names = w.length > 1 ? `${w[0].source_name} and ${num(w.length - 1)} more` : w[0].source_name;
+  return h('div', { class: 'callout', title: w.map((x) => `${x.source_name}: until ${fmtTime(x.until)}`).join('\n') },
+    `Learning what's normal for ${names} until ${clockTime(w[w.length - 1].until)}: until then nothing counts as new, so only critical problems and floods go out right away; the rest is batched.`);
+}
+
+// stateCallout flags alert state that can't be saved (pending digests,
+// throttle windows and baselines would be lost on a restart).
+function stateCallout(al) {
+  if (!al.state || !al.state.error) return null;
+  return h('div', { class: 'callout warn' }, `Alert state can't be saved to ${al.state.file}: ${al.state.error}. Lissandra retries every minute; if it still can't at shutdown, pending digests are sent then.`);
 }
 
 // tokenWarning flags a per-run admin token whatever the setup status, so
@@ -740,7 +760,7 @@ function renderDashboard(root, st) {
   const kpis = h('div', { class: 'kpis' },
     kpi('Events (1h)', num(ev.last_hour), `${num(ev.total_since_start)} since start`),
     kpi('Errors + critical (1h)', num(bad), `${num(bySev.critical || 0)} critical`, bad > 0),
-    kpi('Notifications', num(n.sent), `${num(n.failed)} failed · ${n.dropped ? `${num(n.dropped)} dropped (queue full) · ` : ''}${num(n.throttled)} throttled`, n.failed > 0 || n.dropped > 0),
+    notificationsKpi(n, kpi),
     kpi('Pull sources', pulls.length ? `${healthy}/${pulls.length}` : '—', pulls.length ? 'healthy' : 'none configured', healthy < pulls.length),
     st.engine && st.engine.enabled
       ? engineKpi(st.engine, st.pipeline, kpi)
@@ -788,6 +808,20 @@ function renderDashboard(root, st) {
       bars('By category', ev.by_category, (k) => `#/events?category=${encodeURIComponent(k)}`),
       bars('By source', ev.by_source)),
     patterns);
+}
+
+// notificationsKpi sums up what was sent right away and in digests, and
+// what flood protection held back; it links to Deliveries.
+function notificationsKpi(n, kpi) {
+  const right = Object.values(n.right_away || {}).reduce((a, b) => a + b, 0);
+  const parts = [`${num(right)} right away`, `${plural(n.digests, 'digest')} (${num(n.digest_events)} events batched)`, `${num(n.held)} held`, `${num(n.failed)} failed`];
+  if (n.dropped) parts.push(`${num(n.dropped)} dropped (queue full)`);
+  if (n.lost_events) parts.push(`${num(n.lost_events)} events lost`);
+  const card = kpi('Notifications', num(n.sent), parts.join(' · '), n.failed > 0 || n.dropped > 0 || n.lost_events > 0);
+  const link = h('a', { class: 'kpi-link', href: '#/deliveries' }, card);
+  link.title = [`${num(n.pending_digest_events)} events waiting in digests`, `${num(n.throttled)} repeats held back by throttling`,
+    `${num(n.skipped)} not sent to channels that take no digests (PagerDuty)`, `${num(n.patterns_tracked)} message patterns tracked`].join('\n');
+  return link;
 }
 
 // engineKpi summarizes the engine: flagged when it is not configured,
@@ -974,7 +1008,9 @@ async function showEvent(target, opts = {}) {
   row('File', ev.file ? `${ev.file}${ev.line ? `:${ev.line}` : ''}` : '');
   row('Tags', tags(ev.tags));
   row('Matched rules', (ev.matched_rules || []).join(', '));
-  row('Alert routes', (data.routes || []).join(', ') || 'none');
+  // An analyzed file's events are never sent: they only match routes.
+  if (ev.import_id) row('Alert routes', (data.routes || []).join(', ') || 'none');
+  else row('Alerts', alertDecisions(data, ev));
   if (ev.engine) {
     const e = ev.engine;
     const v = engineVerdict(ev);
@@ -1020,6 +1056,26 @@ async function showEvent(target, opts = {}) {
   actions.push({ label: 'Create rule from this…', onClick: (close) => { close(); editRule(null, ev); } });
   actions.push({ label: 'Close', primary: true, onClick: (close) => close() });
   const modal = openModal({ title: 'Event', body, actions, wide: true });
+}
+
+// DECISION_BADGES label what an event did on a channel.
+const DECISION_BADGES = {
+  sent: ['ok', 'sent'], digest: ['', 'in the digest'], throttled: ['', 'repeat'], held: ['warn', 'held back'], skipped: ['', 'not sent'], dropped: ['bad', 'dropped'],
+};
+
+// alertDecisions says, per channel, whether a live event was sent and why
+// (or why not), while its decisions are among the last 5,000 kept.
+function alertDecisions(data, ev) {
+  const decs = data.alerts || [];
+  if (!decs.length) {
+    if (!(data.routes || []).length) return `No route or alert group matches (${ev.severity} from ${ev.source_name}).`;
+    return `${data.routes.join(', ')} (decision no longer in memory)`;
+  }
+  return h('div', { class: 'decisions' }, decs.map((d) => {
+    const [cls, label] = DECISION_BADGES[d.action] || ['', d.action];
+    return h('div', { class: 'decision' }, h('span', { class: `badge ${cls}` }, label), ' ', h('strong', null, d.notifier_name), `: ${d.reason.text}`,
+      d.routes && d.routes.length ? h('div', { class: 'muted small' }, `Routes: ${d.routes.join(', ')}`) : null);
+  }));
 }
 
 // ---------- Sources ----------
@@ -1263,7 +1319,7 @@ function editSource(src, { onSaved } = {}) {
 
 function previewTable(items) {
   if (!items.length) return h('div', { class: 'empty' }, 'No records.');
-  const tbl = h('table', null, h('tr', null, h('th', null, 'Severity'), h('th', null, 'Category'), h('th', null, 'Message'), h('th', null, 'Rules'), h('th', null, 'Routes')));
+  const tbl = h('table', null, h('tr', null, h('th', null, 'Severity'), h('th', null, 'Category'), h('th', null, 'Message'), h('th', null, 'Rules'), h('th', null, 'Alerts')));
   for (const it of items) {
     const ev = it.event;
     tbl.append(h('tr', null,
@@ -1271,9 +1327,23 @@ function previewTable(items) {
       h('td', null, it.dropped ? '—' : ev.category),
       h('td', { class: 'msg', title: ev.message }, ev.message, ' ', tags(ev.tags)),
       h('td', { class: 'small' }, (ev.matched_rules || []).join(', ') || '—'),
-      h('td', { class: 'small' }, (it.routes || []).join(', ') || '—')));
+      h('td', { class: 'small', title: (it.routes || []).length ? `Routes: ${it.routes.join(', ')}` : null }, previewAlerts(it))));
   }
   return h('div', { class: 'preview' }, tbl);
+}
+
+// previewAlerts says where a tested sample would be sent, per channel, as
+// if it were neither new nor spiking: "dev-slack: right away".
+function previewAlerts(it) {
+  if (it.dropped) return '—';
+  const decs = it.alerts || [];
+  if (!decs.length) return (it.routes || []).join(', ') || '—';
+  const words = (d) => {
+    if (d.action === 'right_away') return 'right away';
+    if (d.action === 'digest') return d.reason.text.includes('unless') ? 'in the next digest unless new, spiking or getting worse' : 'in the next digest';
+    return 'not sent (never gets digests)';
+  };
+  return decs.map((d) => h('div', { title: d.reason.text }, `${d.notifier_name}: ${words(d)}`));
 }
 
 // ---------- Rules ----------
@@ -1300,13 +1370,17 @@ function updateReviewBadge(n) {
 }
 
 pages.rules = async (main, _arg, params) => {
-  await load('rules', 'sources', 'settings', 'routes');
+  const [defs] = await Promise.all([GET('/api/rules/defaults'), load('rules', 'sources', 'settings', 'routes')]);
   let tab = RULE_TABS.some(([k]) => k === params.get('status')) ? params.get('status') : 'all';
   const tabs = h('div', { class: 'row tabs' });
   const list = h('div', { class: 'card flush' });
   const tester = ruleTester();
+  const updates = defs.missing.length + defs.changed.length;
   append(main,
     pageHead('Classification rules', 'Evaluated top to bottom after built-in severity detection. Every match adds tags and adjusts severity; the first match with a category sets it; "stop" ends evaluation. When no rule categorizes an event, the classification engine does, and Lissandra learns a rule from its answer for you to review.',
+      h('button', {
+        type: 'button', title: 'Compare your rules with this version\'s default rules', onclick: (e) => busy(e.currentTarget, defaultRulesDialog),
+      }, updates ? `Default rules (${plural(updates, 'update')})` : 'Default rules'),
       h('button', { type: 'button', class: 'primary', onclick: () => editRule(null) }, 'Add rule')),
     tabs,
     h('div', { class: 'grid cols-2 top' }, list, tester));
@@ -1325,6 +1399,47 @@ pages.rules = async (main, _arg, params) => {
   };
   render();
 };
+
+// defaultRulesDialog lists this version's default rules that the config
+// lacks or has changed, and applies the ones checked. A rule keeps its ID
+// and whether it is on; renamed defaults are the operator's and not listed.
+async function defaultRulesDialog() {
+  const d = await GET('/api/rules/defaults');
+  const items = [...d.missing.map((name) => ({ name, kind: 'new' })), ...d.changed.map((name) => ({ name, kind: 'changed' }))];
+  if (!items.length) {
+    openModal({
+      title: 'Default rules', body: h('p', null, 'Your rules match this version\'s default rules.'),
+      actions: [{ label: 'Close', primary: true, onClick: (c) => c() }],
+    });
+    return;
+  }
+  for (const it of items) it.input = h('input', { type: 'checkbox', checked: true });
+  const body = h('div', null,
+    h('p', null, 'This version of Lissandra ships default rules that differ from yours. Applying one replaces your rule of that name with the default, keeping whether it is on, or adds a missing one after the default rules before it. Rules you renamed are yours and are not listed.'),
+    h('p', { class: 'small muted' }, 'Rules set severities, and severities decide which problems are sent right away: review the changes before applying them.'),
+    h('ul', { class: 'checklist defaults-list' }, items.map((it) => h('li', null, h('label', { class: 'check' }, it.input,
+      h('span', null, h('strong', null, it.name), ' ', h('span', { class: `badge ${it.kind === 'new' ? 'ok' : 'warn'}` }, it.kind),
+        d.descriptions && d.descriptions[it.name] ? h('div', { class: 'small muted' }, d.descriptions[it.name]) : null))))));
+  openModal({
+    title: `Default rules: ${plural(items.length, 'update')}`, body, wide: true,
+    actions: [
+      { label: 'Cancel', onClick: (c) => c() },
+      {
+        label: 'Apply selected', primary: true,
+        onClick: async (close) => {
+          const names = items.filter((it) => it.input.checked).map((it) => it.name);
+          if (!names.length) { toast('Nothing selected'); return false; }
+          const r = await api('POST', '/api/rules/defaults', { names });
+          cache.rules = r.rules;
+          close();
+          toast(`${plural(r.restored, 'default rule')} applied`);
+          if (parseHash().page === 'rules') route();
+          return true;
+        },
+      },
+    ],
+  });
+}
 
 // review approves or rejects learned rules, then re-renders.
 async function reviewRules(action, ids, rerender) {
@@ -1435,7 +1550,10 @@ function ruleActions(r) {
   const acts = [];
   if (r.drop) acts.push(h('span', { class: 'badge bad' }, 'drop'));
   if (r.category) acts.push(h('span', { class: 'badge' }, `category: ${r.category}`));
-  if (r.severity) acts.push(h('span', { class: 'badge' }, `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}`));
+  if (r.severity) {
+    acts.push(h('span', { class: 'badge', title: r.keep_stated ? 'Only for records that state no level of their own' : null },
+      `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}${r.keep_stated ? ' (if unstated)' : ''}`));
+  }
   if (r.skip_engine) acts.push(h('span', { class: 'badge', title: 'Matching events are not sent to the engine' }, 'no engine'));
   if (r.stop) acts.push(h('span', { class: 'badge' }, 'stop'));
   acts.push(tags(r.tags));
@@ -1521,6 +1639,7 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
   const drop = checkbox('Drop matching events (don\'t store or alert)', rule.drop);
   const stop = checkbox('Stop evaluating later rules', rule.stop);
   const skipEngine = checkbox('Don\'t ask the engine about matching events', rule.skip_engine);
+  const keepStated = checkbox('Only when the record states no level', rule.keep_stated);
   const srcChecks = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (rule.source_ids || []).includes(x.id)) }));
 
   const testIn = h('textarea', { rows: 3, placeholder: 'Sample log to try this rule on…' }, fromEvent ? fromEvent.message : '');
@@ -1531,7 +1650,7 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
     name: name.value.trim(), description: desc.value.trim(), enabled: enabled.input.checked, match: match.value,
     conditions: conds.map((c) => ({ field: c.field.trim(), op: c.op, value: c.value || '', case_sensitive: Boolean(c.case_sensitive) })),
     category: catIn.value.trim(), severity: sev.value, severity_mode: sevMode.value, tags: splitList(tagsIn.value),
-    drop: drop.input.checked, stop: stop.input.checked, skip_engine: skipEngine.input.checked,
+    drop: drop.input.checked, stop: stop.input.checked, skip_engine: skipEngine.input.checked, keep_stated: keepStated.input.checked,
     source_ids: srcChecks.filter((x) => x.box.input.checked).map((x) => x.id),
   });
   const status = ruleStatus(rule);
@@ -1550,6 +1669,8 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
       h('div', { class: 'field mt' }, h('label', null, 'Only for sources'), h('div', { class: 'chips' }, srcChecks.map((x) => x.box.el)), h('div', { class: 'help' }, 'Leave all unchecked to apply to every source.'))),
     h('fieldset', null, h('legend', null, 'Then'),
       h('div', { class: 'fields-3' }, field('Category', catIn), field('Severity', sev), field('Severity mode', sevMode)),
+      h('div', { class: 'field' }, keepStated.el,
+        h('div', { class: 'help' }, 'A level the record states (a level field, or one written in the line) then wins: the severity above applies only where the level was guessed from the words. The category always applies.')),
       field('Add tags', tagsIn, 'Comma-separated.'),
       h('div', { class: 'row' }, drop.el, stop.el, skipEngine.el)),
     h('fieldset', null, h('legend', null, 'Try it'),
@@ -1606,6 +1727,7 @@ pages.notifiers = async (main) => {
         h('div', { class: 'meta' }, notifierSummary(n, type))),
       h('div', { class: 'actions' },
         h('button', { type: 'button', class: 'small', onclick: (e) => sendTest(n, e.currentTarget) }, 'Send test'),
+        type && type.no_digest ? null : h('button', { type: 'button', class: 'small', onclick: (e) => sendTest(n, e.currentTarget, 'digest') }, 'Send test digest'),
         h('button', { type: 'button', class: 'small', onclick: () => editNotifier(n) }, 'Edit'),
         h('button', {
           type: 'button', class: 'small danger',
@@ -1624,11 +1746,13 @@ function notifierSummary(n, type) {
     .map((f) => `${f.label}: ${n.settings[f.key]}`).join(' · ');
 }
 
-async function sendTest(n, btn) {
+// sendTest sends a sample alert through n, or with kind 'digest' a sample
+// digest.
+async function sendTest(n, btn, kind) {
   if (btn) btn.disabled = true;
   try {
-    const r = await api('POST', '/api/notifiers/test', n);
-    if (r.ok) toast(`Test notification sent via "${n.name || n.type}"`);
+    const r = await api('POST', kind === 'digest' ? '/api/notifiers/test?kind=digest' : '/api/notifiers/test', n);
+    if (r.ok) toast(`Test ${kind === 'digest' ? 'digest' : 'notification'} sent via "${n.name || n.type}"`);
     else toast(`Test failed: ${r.error}`, 'error');
   } catch (err) {
     reportError(err);
@@ -1648,11 +1772,13 @@ function editNotifier(n, { type, onSaved } = {}) {
   const enabled = checkbox('Enabled', n.enabled);
   const desc = h('div', { class: 'callout' });
   const fieldsWrap = h('div');
+  const testDigest = h('button', { type: 'button', onclick: (e) => sendTest(collect(), e.currentTarget, 'digest') }, 'Send test digest');
   let inputs = {};
 
   const renderFields = () => {
     const t = cache.types.find((x) => x.type === typeSel.value);
-    clear(desc).append(t.description);
+    clear(desc).append(t.description); // PagerDuty's says it gets right-away alerts only
+    testDigest.hidden = Boolean(t.no_digest);
     clear(fieldsWrap);
     inputs = {};
     const settings = typeSel.value === n.type ? n.settings : {};
@@ -1688,7 +1814,7 @@ function editNotifier(n, { type, onSaved } = {}) {
     h('p', { class: 'small muted' }, 'Tip: any value can be written as ${env:NAME} to read it from Lissandra\'s environment, so secrets can live in Nomad Variables or Vault instead of Lissandra\'s config file.'));
   openModal({
     title: isNew ? 'Add notifier' : `Edit notifier "${n.name}"`, body,
-    left: h('button', { type: 'button', onclick: (e) => sendTest(collect(), e.currentTarget) }, 'Send test'),
+    left: [h('button', { type: 'button', onclick: (e) => sendTest(collect(), e.currentTarget) }, 'Send test'), testDigest],
     actions: [
       { label: 'Cancel', onClick: (c) => c() },
       {
@@ -1708,32 +1834,194 @@ function editNotifier(n, { type, onSaved } = {}) {
 // ---------- Routes ----------
 
 const THROTTLES = [[0, 'No throttling'], [60, '1 minute'], [300, '5 minutes'], [900, '15 minutes'], [3600, '1 hour'], [21600, '6 hours'], [86400, '24 hours']];
+// When to send: digest intervals (minutes), and the re-alert windows a
+// smart route offers.
+const DIGESTS = [[15, '15 minutes'], [30, '30 minutes'], [60, '1 hour'], [240, '4 hours'], [1440, '24 hours']];
+const REALERTS = THROTTLES.filter(([v]) => v >= 300);
+// New routes and alert groups are smart, as the routes the setup wizard
+// suggests: critical right away, the rest every 30 minutes, re-alert after
+// an hour.
+const SMART_DEFAULTS = { delivery: 'smart', immediate_severity: 'critical', digest_minutes: 30, throttle_seconds: 3600 };
+const FLOOD_TEXT = 'Flood protection: at most 10 right-away alerts below critical per channel in 10 minutes, and one new-problem alert per source and category; the rest arrive in one summary within minutes. The first 20 critical alerts in any 10 minutes are never held.';
+
+// withValue returns options plus value as one more, labelled by label(),
+// when it is not among them (a value set through the API).
+function withValue(options, value, label) {
+  return options.some(([v]) => v === value) ? options : [...options, [value, label(value)]];
+}
+
+// setOptions replaces a select's options and selects value.
+function setOptions(sel, options, value) {
+  clear(sel);
+  for (const [v, label] of options) sel.append(h('option', { value: String(v), selected: String(v) === String(value) }, label));
+}
+
+// fmtDuration formats seconds as the server's messages do: "30 s",
+// "15 min", "1 h", "1 h 30 min".
+function fmtDuration(sec) {
+  if (sec < 60) return `${sec} s`;
+  const m = Math.round(sec / 60);
+  const hrs = Math.floor(m / 60);
+  if (!hrs) return `${m} min`;
+  return m % 60 ? `${hrs} h ${m % 60} min` : `${hrs} h`;
+}
+
+const throttleLabel = (v) => (THROTTLES.find((t) => t[0] === v) || [v, fmtDuration(v)])[1];
+const digestLabel = (v) => fmtDuration(v * 60);
+
+// deliveryOf is a route's or alert group's delivery mode ("" is immediate).
+function deliveryOf(r) { return r.delivery || 'immediate'; }
+
+// policyText says when a route's matching events are sent. It mirrors
+// policySentence in internal/notify/policy.go, the server's wording of the
+// same rules: change both together.
+function policyText(p, minSev, throttle) {
+  const min = SEVERITIES.includes(minSev) ? minSev : 'error';
+  if (p.delivery === 'smart') {
+    const imm = SEVERITIES.includes(p.immediate_severity) ? p.immediate_severity : 'critical';
+    const every = fmtDuration((p.digest_minutes || 30) * 60);
+    const floor = sevRank(min) < sevRank('error') ? 'error' : min;
+    if (sevRank(imm) > sevRank(floor)) {
+      let s = `Right away: ${imm} and up`;
+      if (sevRank(min) <= sevRank('error')) s += ', and errors that are new, spiking or getting worse';
+      return `${s}. Everything else from ${min} up: one digest every ${every}.`;
+    }
+    if (sevRank(imm) <= sevRank(min)) return `Everything from ${min} up right away, with flood protection; repeats in a digest every ${every}.`;
+    return `Right away: ${imm} and up. Everything else from ${min} up: one digest every ${every}.`;
+  }
+  if (p.delivery === 'digest') return `Everything this route matches: one digest every ${fmtDuration((p.digest_minutes || 60) * 60)}.`;
+  if (throttle > 0) return `Every matching event right away; repeats of a problem are held back for ${fmtDuration(throttle)}.`;
+  return 'Every matching event right away.';
+}
+
+// policyLine is a route's or alert group's delivery in a list: "Smart:
+// critical right away, the rest every 30 min · re-alert 1 h".
+function policyLine(r) {
+  switch (deliveryOf(r)) {
+    case 'smart':
+      return `Smart: ${r.immediate_severity || 'critical'} right away, the rest every ${digestLabel(r.digest_minutes || 30)}${r.throttle_seconds ? ` · re-alert ${fmtDuration(r.throttle_seconds)}` : ''}`;
+    case 'digest':
+      return `Digest every ${digestLabel(r.digest_minutes || 60)}`;
+    default:
+      return `Every alert right away · ${r.throttle_seconds ? `throttle ${fmtDuration(r.throttle_seconds)}` : 'no throttling'}`;
+  }
+}
+
+function notifierById(id) { return (cache.notifiers || []).find((n) => n.id === id); }
+function typeInfo(type) { return (cache.types || []).find((t) => t.type === type) || { type, label: type, fields: [] }; }
+// noDigest reports whether a notifier never gets digests (PagerDuty).
+function noDigest(n) { return Boolean(typeInfo(n.type).no_digest); }
+
+// deliveryFields edits when a route's or alert group's matching events are
+// sent: the When to send choice, its intervals and the re-alert window,
+// with the policy in words and notes about the chosen channels.
+// notifierIds() and minSev() read the editor's other fields; call update()
+// when they change. values() returns the fields to save.
+function deliveryFields(p, { notifierIds, minSev, noun = 'route' }) {
+  let mode = deliveryOf(p);
+  let throttleVal = p.throttle_seconds || 0;
+  let digestMin = p.digest_minutes || 0; // 0: the mode's default
+  let immVal = p.immediate_severity || 'critical';
+  const digestFor = () => digestMin || (mode === 'digest' ? 60 : 30);
+  const group = `when-${++fieldSeq}`;
+
+  const imm = h('select', { onchange: (e) => { immVal = e.target.value; update(); } });
+  const every = h('select', { onchange: (e) => { digestMin = Number(e.target.value); update(); } });
+  const everyOnly = h('select', { onchange: (e) => { digestMin = Number(e.target.value); update(); } });
+  const realert = h('select', { onchange: (e) => { throttleVal = Number(e.target.value); update(); } });
+  const throttle = h('select', { onchange: (e) => { throttleVal = Number(e.target.value); update(); } });
+
+  const radio = (value, label, help) => h('label', { class: 'check when-choice' },
+    h('input', { type: 'radio', name: group, value, checked: mode === value, onchange: () => { mode = value; update(); } }),
+    h('span', null, h('strong', null, label), h('span', { class: 'help' }, ` ${help}`)));
+  const smartBox = h('div', { class: 'fields-3 when-box' },
+    field('Right away at or above', imm),
+    field('Batch the rest every', every),
+    field('Re-alert on the same problem after', realert, 'Repeats in between go into the digest, so nothing is lost. A rise in severity is sent at once.'));
+  const immBox = h('div', { class: 'when-box' },
+    field('Throttle repeats', throttle, 'After alerting on a problem, hold back the same problem on the same channel for this long. The next alert reports how many were held back; a rise in severity is sent at once.'));
+  const digestBox = h('div', { class: 'when-box' }, field('Batch every', everyOnly));
+  const sentence = h('p');
+  const flood = h('p', { class: 'small' }, FLOOD_TEXT);
+  const notes = h('ul', { class: 'notes small' });
+  const policy = h('div', { class: 'callout policy', 'aria-live': 'polite' }, sentence, flood, notes);
+
+  const update = () => {
+    const min = minSev();
+    const sevs = SEVERITIES.filter((x) => sevRank(x) >= sevRank(min));
+    if (sevRank(immVal) < sevRank(min) && !sevs.includes(immVal)) immVal = min;
+    setOptions(imm, sevs.map((x) => [x, x]), immVal);
+    setOptions(every, withValue(DIGESTS, digestFor(), digestLabel), digestFor());
+    setOptions(everyOnly, withValue(DIGESTS, digestFor(), digestLabel), digestFor());
+    setOptions(realert, withValue(REALERTS, throttleVal, throttleLabel), throttleVal);
+    setOptions(throttle, withValue(THROTTLES, throttleVal, throttleLabel), throttleVal);
+    smartBox.hidden = mode !== 'smart';
+    immBox.hidden = mode !== 'immediate';
+    digestBox.hidden = mode !== 'digest';
+    flood.hidden = mode !== 'smart';
+    sentence.textContent = policyText({ delivery: mode, immediate_severity: immVal, digest_minutes: digestFor() }, min, throttleVal);
+
+    const chosen = notifierIds().map(notifierById).filter(Boolean);
+    const pagers = chosen.filter(noDigest);
+    const lines = [];
+    for (const n of pagers) {
+      if (mode === 'smart') lines.push(`${n.name} is ${typeInfo(n.type).label}: it gets only ${immVal} and up, right away, never digests.`);
+      if (mode === 'digest') lines.push(`${n.name} is ${typeInfo(n.type).label}: it never gets digests, so this ${noun} sends it nothing.`);
+    }
+    if (mode !== 'immediate' && chosen.some((n) => n.type === 'webhook')) {
+      lines.push('Generic webhooks receive digests as kind: "digest" payloads; for a pager behind a webhook, use Every alert right away.');
+    }
+    if (mode === 'smart' && sevRank(immVal) <= sevRank(min)) lines.push(`Right away at or above is the minimum severity: everything this ${noun} matches is sent right away.`);
+    append(clear(notes), lines.map((x) => h('li', null, x)));
+    notes.hidden = !lines.length;
+    policy.classList.toggle('warn', mode === 'digest' && chosen.length > 0 && pagers.length === chosen.length);
+  };
+  const labelId = `${group}-label`;
+  const el = h('div', null,
+    h('div', { class: 'field' }, h('label', { id: labelId }, 'When to send'),
+      h('div', { class: 'checks', role: 'radiogroup', 'aria-labelledby': labelId },
+        radio('smart', 'Smart (recommended)', 'Critical problems, and errors that are new, spiking or getting worse, right away; the rest in one digest per channel.'),
+        radio('immediate', 'Every alert right away', 'Every matching event as it happens; repeats of a problem are throttled.'),
+        radio('digest', 'Digest only', 'Nothing right away: everything in one digest per channel.'))),
+    smartBox, immBox, digestBox, policy);
+  update();
+  return {
+    el,
+    update,
+    values: () => {
+      const out = { delivery: mode, immediate_severity: '', digest_minutes: 0, throttle_seconds: throttleVal };
+      if (mode === 'smart') Object.assign(out, { immediate_severity: immVal, digest_minutes: digestFor() });
+      if (mode === 'digest') out.digest_minutes = digestFor();
+      return out;
+    },
+  };
+}
 
 pages.routes = async (main) => {
-  await load('routes', 'notifiers', 'sources', 'settings');
+  await load('routes', 'notifiers', 'sources', 'settings', 'types');
   const list = h('div', { class: 'card flush' });
   append(main,
-    pageHead('Alert routes', 'Send matching events to notifiers. Throttling limits repeats of the same problem (same fingerprint) per notifier.',
+    pageHead('Alert routes', 'Send matching events to notifiers, right away or in digests.',
       h('button', { type: 'button', class: 'primary', onclick: () => editRoute(null) }, 'Add route')),
+    smartCallout(),
     list);
   if (!cache.notifiers.length) {
     main.insertBefore(h('div', { class: 'callout' }, 'Add a notifier first, then create routes that send events to it. ', h('a', { href: '#/notifiers' }, 'Go to notifiers →')), list);
   }
   if (!cache.routes.length) list.append(h('div', { class: 'empty' }, 'No routes yet — classified events are stored but nobody is notified.'));
   for (const r of cache.routes) {
-    const notifierNames = r.notifier_ids.map((id) => (cache.notifiers.find((n) => n.id === id) || {}).name).filter(Boolean);
+    const notifierNames = r.notifier_ids.map((id) => (notifierById(id) || {}).name).filter(Boolean);
     const when = [`severity ≥ ${r.min_severity}`];
     if (r.categories && r.categories.length) when.push(`category in [${r.categories.join(', ')}]`);
     if (r.source_ids && r.source_ids.length) when.push(`source in [${r.source_ids.map(sourceName).join(', ')}]`);
     if (r.tags && r.tags.length) when.push(`tag in [${r.tags.join(', ')}]`);
     if (r.message_regex) when.push(`message ~ /${r.message_regex}/`);
-    const throttle = THROTTLES.find((t) => t[0] === r.throttle_seconds);
     list.append(h('div', { class: `list-item ${r.enabled ? '' : 'disabled-item'}` },
       h('div', { class: 'main' },
         h('div', { class: 'title' }, r.name, r.enabled ? null : h('span', { class: 'badge' }, 'disabled')),
         h('div', { class: 'meta' }, 'When ', when.join(' and ')),
         h('div', { class: 'meta' }, '→ ', notifierNames.length ? notifierNames.join(', ') : h('span', { class: 'badge warn' }, 'no notifiers'),
-          ' · ', r.throttle_seconds ? `throttle ${throttle ? throttle[1] : `${r.throttle_seconds}s`}` : 'no throttling')),
+          ' · ', policyLine(r))),
       h('div', { class: 'actions' },
         h('button', { type: 'button', class: 'small', onclick: () => editRoute(r) }, 'Edit'),
         h('button', {
@@ -1747,23 +2035,49 @@ pages.routes = async (main) => {
   }
 };
 
+// smartCallout offers to switch the routes that send every alert right
+// away to smart delivery: enabled ones below critical that reach a channel
+// taking digests. Each keeps its throttle as its re-alert window.
+function smartCallout() {
+  const chans = (r) => r.notifier_ids.map(notifierById).filter(Boolean);
+  const legacy = cache.routes.filter((r) => r.enabled && deliveryOf(r) === 'immediate' && sevRank(r.min_severity) < sevRank('critical')
+    && chans(r).some((n) => !noDigest(n)));
+  if (!legacy.length) return null;
+  const pagers = legacy.some((r) => chans(r).some(noDigest));
+  return h('div', { class: 'callout banner smart-switch' },
+    h('span', null,
+      `${legacy.length === 1 ? '1 route sends' : `${num(legacy.length)} routes send`} every alert right away. Smart delivery sends critical problems and new, spiking or worsening errors right away and batches the rest.`,
+      pagers ? ' PagerDuty on these routes then gets only critical problems.' : '',
+      h('span', { class: 'muted small' }, ` (${legacy.map((r) => r.name).join(', ')})`)),
+    h('button', {
+      type: 'button', class: 'small primary',
+      onclick: (e) => busy(e.currentTarget, async () => {
+        for (const r of legacy) {
+          const allEmail = chans(r).every((n) => n.type === 'email');
+          await api('PUT', `/api/routes/${r.id}`, { ...r, delivery: 'smart', immediate_severity: 'critical', digest_minutes: allEmail ? 60 : 30 });
+        }
+        toast(`${plural(legacy.length, 'route')} switched to smart delivery`);
+        route();
+      }),
+    }, legacy.length === 1 ? 'Switch it to smart' : 'Switch them to smart'));
+}
+
 // editRoute opens the route editor. onSaved, when given, is called with
 // the saved route instead of re-rendering the page.
 function editRoute(r, { onSaved } = {}) {
   const isNew = !r;
-  r = r ? JSON.parse(JSON.stringify(r)) : { name: '', enabled: true, min_severity: 'error', categories: [], source_ids: [], tags: [], notifier_ids: [], throttle_seconds: 900 };
+  r = r ? JSON.parse(JSON.stringify(r)) : { name: '', enabled: true, min_severity: 'error', categories: [], source_ids: [], tags: [], notifier_ids: [], ...SMART_DEFAULTS };
   const name = h('input', { value: r.name, placeholder: 'e.g. Production errors to on-call' });
   const enabled = checkbox('Enabled', r.enabled);
-  const minSev = select(SEVERITIES, r.min_severity);
+  const minSev = select(SEVERITIES, r.min_severity, { onchange: () => when.update() });
   const descs = Object.fromEntries(categoryList().map((c) => [c.name, c.description]));
   const cats = [...new Set([...categories(), 'uncategorized', ...(r.categories || [])])].map((c) => ({ c, box: checkbox(c, (r.categories || []).includes(c)) }));
   for (const x of cats) if (descs[x.c]) x.box.el.title = descs[x.c];
   const srcs = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (r.source_ids || []).includes(x.id)) }));
-  const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, (r.notifier_ids || []).includes(x.id)) }));
+  const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, (r.notifier_ids || []).includes(x.id), () => when.update()) }));
   const tagsIn = h('input', { value: (r.tags || []).join(', ') });
   const regex = h('input', { value: r.message_regex || '', placeholder: '(?i)payment|checkout' });
-  const throttleOpts = THROTTLES.some((t) => t[0] === r.throttle_seconds) ? THROTTLES : [...THROTTLES, [r.throttle_seconds, `${r.throttle_seconds} seconds`]];
-  const throttle = select(throttleOpts.map(([v, l]) => [String(v), l]), String(r.throttle_seconds));
+  const when = deliveryFields(r, { notifierIds: () => nts.filter((x) => x.box.input.checked).map((x) => x.id), minSev: () => minSev.value });
 
   const body = h('div', null,
     field('Name', name), enabled.el,
@@ -1773,8 +2087,9 @@ function editRoute(r, { onSaved } = {}) {
       h('div', { class: 'field' }, h('label', null, 'Sources'), h('div', { class: 'chips' }, srcs.map((x) => x.box.el)), h('div', { class: 'help' }, 'None checked = any source.')),
       h('div', { class: 'fields-2' }, field('Any of these tags', tagsIn), field('Message regex', regex))),
     h('fieldset', null, h('legend', null, 'Notify'),
-      nts.length ? h('div', { class: 'chips' }, nts.map((x) => x.box.el)) : h('p', { class: 'muted' }, 'No notifiers configured yet.'),
-      h('div', { class: 'mt' }, field('Throttle repeats', throttle, 'After alerting on a problem, suppress the same fingerprint on the same notifier for this long. The next alert reports how many were suppressed.'))));
+      h('div', { class: 'field' }, h('label', null, 'Channels'),
+        nts.length ? h('div', { class: 'chips' }, nts.map((x) => x.box.el)) : h('p', { class: 'muted' }, 'No notifiers configured yet.')),
+      when.el));
 
   openModal({
     title: isNew ? 'Add alert route' : `Edit route "${r.name}"`, body, wide: true,
@@ -1788,7 +2103,7 @@ function editRoute(r, { onSaved } = {}) {
             categories: cats.filter((x) => x.box.input.checked).map((x) => x.c),
             source_ids: srcs.filter((x) => x.box.input.checked).map((x) => x.id),
             notifier_ids: nts.filter((x) => x.box.input.checked).map((x) => x.id),
-            tags: splitList(tagsIn.value), message_regex: regex.value.trim(), throttle_seconds: Number(throttle.value),
+            tags: splitList(tagsIn.value), message_regex: regex.value.trim(), ...when.values(),
           };
           const saved = isNew ? await api('POST', '/api/routes', data) : await api('PUT', `/api/routes/${r.id}`, data);
           close();
@@ -1803,10 +2118,10 @@ function editRoute(r, { onSaved } = {}) {
 // ---------- Alert groups ----------
 
 pages.groups = async (main) => {
-  await load('groups', 'notifiers', 'sources', 'settings');
+  await load('groups', 'notifiers', 'sources', 'settings', 'types');
   const list = h('div', { class: 'card flush' });
   append(main,
-    pageHead('Alert groups', 'Teams and people to alert about specific sources: each group has its channels, its members\' email addresses and a minimum severity. Assign sources here or in each source\'s settings.',
+    pageHead('Alert groups', 'Teams and people to alert about specific sources: each group has its channels, its members\' email addresses, a minimum severity and when to send. Assign sources here or in each source\'s settings.',
       h('button', { type: 'button', class: 'primary', onclick: () => editGroup(null) }, 'Add alert group')),
     list);
   if (!cache.notifiers.length) {
@@ -1829,17 +2144,16 @@ pages.groups = async (main) => {
 
 // groupItem shows an alert group in a list, with the given action buttons.
 function groupItem(g, ...actions) {
-  const chans = g.notifier_ids.map((id) => cache.notifiers.find((n) => n.id === id)).filter(Boolean);
+  const chans = g.notifier_ids.map(notifierById).filter(Boolean);
   const when = [`severity ≥ ${g.min_severity}`];
   if (g.categories && g.categories.length) when.push(`category in [${g.categories.join(', ')}]`);
-  const throttle = THROTTLES.find((t) => t[0] === g.throttle_seconds);
   // Only enabled channels deliver, and members are emailed only through an
   // enabled email notifier: anything else is shown as a warning.
   const reach = [];
   if (chans.some((n) => n.enabled)) reach.push(chans.filter((n) => n.enabled).map((n) => n.name).join(', '));
   for (const n of chans.filter((x) => !x.enabled)) reach.push(h('span', { class: 'badge warn' }, `${n.name} is off`));
   if ((g.emails || []).length) {
-    const via = cache.notifiers.find((n) => n.id === g.email_notifier_id);
+    const via = notifierById(g.email_notifier_id);
     const members = plural(g.emails.length, 'member');
     if (via && via.enabled) reach.push(`${members} by email (${via.name})`);
     else reach.push(h('span', { class: 'badge warn' }, !g.email_notifier_id ? `${members}, no email notifier` : `${members}, email notifier ${via ? 'off' : 'missing'}`));
@@ -1851,7 +2165,7 @@ function groupItem(g, ...actions) {
       h('div', { class: 'meta' }, 'Sources: ', g.source_ids.length ? g.source_ids.map(sourceName).join(', ') : h('span', { class: 'badge warn' }, 'none: the group gets no alerts')),
       h('div', { class: 'meta' }, 'When ', when.join(' and ')),
       h('div', { class: 'meta' }, '→ ', reach.some((x) => typeof x === 'string') ? reach.map((x, i) => [i ? ' · ' : '', x]) : [h('span', { class: 'badge warn' }, 'no channels or members that get alerts'), reach.map((x) => [' · ', x])],
-        ' · ', g.throttle_seconds ? `throttle ${throttle ? throttle[1] : `${g.throttle_seconds}s`}` : 'no throttling')),
+        ' · ', policyLine(g))),
     h('div', { class: 'actions' }, actions));
 }
 
@@ -1863,19 +2177,24 @@ function activeGroups() {
 
 function editGroup(g, { onSaved } = {}) {
   const isNew = !g;
-  g = g ? JSON.parse(JSON.stringify(g)) : { name: '', enabled: true, min_severity: 'error', categories: [], notifier_ids: [], emails: [], source_ids: [], throttle_seconds: 900 };
+  g = g ? JSON.parse(JSON.stringify(g)) : { name: '', enabled: true, min_severity: 'error', categories: [], notifier_ids: [], emails: [], source_ids: [], ...SMART_DEFAULTS };
   const name = h('input', { value: g.name, placeholder: 'e.g. Payments team' });
   const desc = h('input', { value: g.description || '' });
   const enabled = checkbox('Enabled', g.enabled);
-  const minSev = select(SEVERITIES, g.min_severity);
+  const minSev = select(SEVERITIES, g.min_severity, { onchange: () => when.update() });
   const cats = [...new Set([...categories(), 'uncategorized', ...(g.categories || [])])].map((c) => ({ c, box: checkbox(c, (g.categories || []).includes(c)) }));
   const srcs = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, g.source_ids.includes(x.id)) }));
-  const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, g.notifier_ids.includes(x.id)) }));
+  const nts = cache.notifiers.map((x) => ({ id: x.id, box: checkbox(x.name, g.notifier_ids.includes(x.id), () => when.update()) }));
   const emailNotifiers = cache.notifiers.filter((n) => n.type === 'email');
-  const emails = h('textarea', { rows: 3, placeholder: 'alice@example.com\nbob@example.com' }, (g.emails || []).join('\n'));
-  const emailVia = select([['', emailNotifiers.length ? '— choose an email notifier —' : 'no email notifier configured'], ...emailNotifiers.map((n) => [n.id, n.name])], g.email_notifier_id || (emailNotifiers.length === 1 ? emailNotifiers[0].id : ''));
-  const throttleOpts = THROTTLES.some((t) => t[0] === g.throttle_seconds) ? THROTTLES : [...THROTTLES, [g.throttle_seconds, `${g.throttle_seconds} seconds`]];
-  const throttle = select(throttleOpts.map(([v, l]) => [String(v), l]), String(g.throttle_seconds));
+  const emails = h('textarea', { rows: 3, placeholder: 'alice@example.com\nbob@example.com', oninput: () => when.update() }, (g.emails || []).join('\n'));
+  const emailVia = select([['', emailNotifiers.length ? '— choose an email notifier —' : 'no email notifier configured'], ...emailNotifiers.map((n) => [n.id, n.name])], g.email_notifier_id || (emailNotifiers.length === 1 ? emailNotifiers[0].id : ''),
+    { onchange: () => when.update() });
+  const splitEmails = () => emails.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+  const when = deliveryFields(g, {
+    noun: 'group',
+    minSev: () => minSev.value,
+    notifierIds: () => [...nts.filter((x) => x.box.input.checked).map((x) => x.id), ...(splitEmails().length && emailVia.value ? [emailVia.value] : [])],
+  });
 
   const body = h('div', null,
     h('div', { class: 'fields-2' }, field('Name', name), field('Description', desc)), enabled.el,
@@ -1892,7 +2211,7 @@ function editGroup(g, { onSaved } = {}) {
       h('div', { class: 'fields-2' },
         field('Members (email)', emails, 'One address per line (or comma-separated).'),
         field('Email them through', emailVia, 'An email notifier: its SMTP server and From address are used, with these members as the recipients.')),
-      field('Throttle repeats', throttle, 'After alerting on a problem, suppress the same fingerprint on the same channel for this long.')));
+      when.el));
 
   openModal({
     title: isNew ? 'Add alert group' : `Edit alert group "${g.name}"`, body, wide: true,
@@ -1906,8 +2225,7 @@ function editGroup(g, { onSaved } = {}) {
             categories: cats.filter((x) => x.box.input.checked).map((x) => x.c),
             source_ids: srcs.filter((x) => x.box.input.checked).map((x) => x.id),
             notifier_ids: nts.filter((x) => x.box.input.checked).map((x) => x.id),
-            emails: emails.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean),
-            email_notifier_id: emailVia.value, throttle_seconds: Number(throttle.value),
+            emails: splitEmails(), email_notifier_id: emailVia.value, ...when.values(),
           };
           const saved = isNew ? await api('POST', '/api/alert-groups', data) : await api('PUT', `/api/alert-groups/${g.id}`, data);
           close();
@@ -1921,30 +2239,208 @@ function editGroup(g, { onSaved } = {}) {
 
 // ---------- Deliveries ----------
 
-pages.deliveries = async (main) => {
+// REASON_LABELS name why a message was sent, for its badge.
+const REASON_LABELS = {
+  every: 'right away', severity: 'right away', new: 'right away · new', spike: 'right away · spiking', worse: 'right away · got worse',
+  repeat: 'right away · still happening', digest: 'digest', summary: 'summary', manual: 'digest · sent now', shutdown: 'digest · at shutdown', test: 'test',
+};
+// HELD_BY says which limit held an alert back into a summary.
+const HELD_BY = {
+  source_limit: 'its source and category already had a right-away alert in the last 10 minutes',
+  channel_limit: 'the channel had 10 right-away alerts below critical in the last 10 minutes',
+  critical_limit: 'the channel had 20 critical alerts in the last 10 minutes',
+  queue_full: 'the channel\'s queue was full',
+};
+const DELIVERY_FILTERS = [
+  ['all', 'All', () => true],
+  ['alert', 'Right away', (d) => d.kind !== 'digest'],
+  ['digest', 'Digests', (d) => d.kind === 'digest'],
+  ['failed', 'Failed', (d) => d.status !== 'sent'],
+];
+let deliveryFilter = 'all';
+
+// reasonBadge labels why a delivery (or a decision) was sent.
+function reasonBadge(code, severity) {
+  const label = code === 'severity' && severity ? `right away · ${severity}` : REASON_LABELS[code] || code;
+  const cls = { manual: 'digest', shutdown: 'digest', test: 'every' }[code] || code;
+  return h('span', { class: `badge reason reason-${cls}` }, label);
+}
+
+function clockTime(iso) { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+
+// clockSpan is "10:02–10:29" (one time when they are the same minute).
+function clockSpan(from, to) {
+  const a = clockTime(from), b = clockTime(to);
+  return a === b ? a : `${a}–${b}`;
+}
+
+// dueIn says when a digest is due: "in 12 min", "within a minute".
+function dueIn(iso) {
+  const sec = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  return sec < 60 ? 'within a minute' : `in ${fmtDuration(Math.round(sec / 60) * 60)}`;
+}
+
+// digestFlags marks a digest entry: new, held back (and why), repeats of
+// an alert, events of alerts that failed to deliver.
+function digestFlags(e) {
+  return [
+    e.new ? h('span', { class: 'badge reason reason-new' }, 'new') : null,
+    e.held ? h('span', { class: 'badge reason reason-held', title: HELD_BY[e.held_by] || e.held_by || '' }, `held (${e.held})`) : null,
+    e.repeats ? h('span', { class: 'badge reason reason-repeat' }, `${num(e.repeats)} ${e.repeats === 1 ? 'repeat' : 'repeats'} of ${clockTime(e.alerted_at)}`) : null,
+    e.undelivered ? h('span', { class: 'badge bad' }, `${num(e.undelivered)} undelivered`) : null,
+  ].filter(Boolean);
+}
+
+pages.deliveries = async (main, arg) => {
+  const pending = h('div', { class: 'card flush' });
+  const chips = h('div', { class: 'row tabs mt' });
   const wrap = h('div', { class: 'card flush' });
-  append(main, pageHead('Deliveries', 'Recent notification attempts (kept in memory).', h('button', { type: 'button', onclick: () => refresh().catch(reportError) }, 'Refresh')), wrap);
-  const refresh = async () => {
-    const list = await GET('/api/deliveries?limit=200');
+  let list = [];
+  append(main,
+    pageHead('Deliveries', 'Alerts sent right away and digests, with why each was sent (the last 500, kept in memory).',
+      h('button', { type: 'button', onclick: () => refresh().catch(reportError) }, 'Refresh')),
+    pending, chips, wrap);
+
+  // The chips are made once, so a refresh doesn't take focus from them.
+  const chipBtns = DELIVERY_FILTERS.map(([k, label]) => {
+    const count = h('span', { class: 'count' });
+    const btn = h('button', { type: 'button', class: 'small', onclick: () => { deliveryFilter = k; paintList(); } }, label, count);
+    return { k, btn, count };
+  });
+  append(chips, chipBtns.map((c) => c.btn));
+  const paintList = () => {
+    for (const c of chipBtns) {
+      c.btn.classList.toggle('primary', deliveryFilter === c.k);
+      c.btn.setAttribute('aria-pressed', String(deliveryFilter === c.k));
+      c.count.textContent = num(list.filter(DELIVERY_FILTERS.find((f) => f[0] === c.k)[2]).length);
+    }
     clear(wrap);
-    if (!list.length) { wrap.append(h('div', { class: 'empty' }, 'No notifications sent yet.')); return; }
-    const tbl = h('table', null, h('tr', null, h('th', null, 'Time'), h('th', null, 'Status'), h('th', null, 'Notifier'), h('th', null, 'Route'), h('th', null, 'Event'), h('th', null, 'Attempts'), h('th', null, 'Detail')));
-    for (const d of list) {
+    const shown = list.filter(DELIVERY_FILTERS.find((f) => f[0] === deliveryFilter)[2]);
+    if (!shown.length) {
+      wrap.append(h('div', { class: 'empty' }, list.length ? 'Nothing matches this filter.' : 'No notifications sent yet.'));
+      return;
+    }
+    const tbl = h('table', { class: 'deliveries' }, h('tr', null, h('th', null, 'Time'), h('th', null, 'Status'), h('th', null, 'Why'), h('th', null, 'Notifier'),
+      h('th', null, 'Routes'), h('th', null, 'What'), h('th', null, 'Attempts'), h('th', null, 'Detail')));
+    for (const d of shown) {
       const cls = d.status === 'sent' ? 'ok' : d.status === 'failed' ? 'bad' : 'warn';
+      let what = d.title;
+      if (d.kind === 'digest') {
+        const label = `${plural(d.patterns, 'problem')} · ${plural(d.events, 'event')}`;
+        what = d.test ? label : h('button', { type: 'button', class: 'link', title: d.title, onclick: () => showDigest(d.id) }, label);
+      } else if (d.event_id && d.event_id !== 'test') {
+        what = [h('a', { href: `#/events/${encodeURIComponent(d.event_id)}` }, d.title), d.events > 1 ? h('span', { class: 'muted small' }, ` (+${plural(d.events - 1, 'repeat')})`) : null];
+      }
       tbl.append(h('tr', null,
         h('td', null, timeCell(d.time)),
         h('td', null, h('span', { class: `badge ${cls}` }, d.status), d.test ? h('span', { class: 'badge' }, 'test') : null),
+        h('td', { class: 'why' }, reasonBadge(d.reason || (d.kind === 'digest' ? 'digest' : 'every'), d.severity),
+          d.reason_text ? h('div', { class: 'muted small' }, d.reason_text) : null),
         h('td', { class: 'nowrap' }, d.notifier_name, h('div', { class: 'muted small' }, d.notifier_type)),
-        h('td', null, d.route_name || '—'),
-        h('td', { class: 'msg', title: d.title }, d.event_id && d.event_id !== 'test' ? h('a', { href: `#/events/${d.event_id}` }, d.title) : d.title),
+        h('td', { class: 'small routes' }, ((d.routes && d.routes.length) ? d.routes : [d.route_name]).filter(Boolean).join(', ') || '—'),
+        h('td', { class: d.kind === 'digest' ? '' : 'msg', title: d.title }, what),
         h('td', null, d.attempts, h('div', { class: 'muted small' }, `${d.duration_ms} ms`)),
         h('td', { class: 'small' }, d.error || '')));
     }
-    wrap.append(tbl);
+    wrap.append(h('div', { class: 'table-wrap' }, tbl));
+  };
+  const refresh = async () => {
+    const [al, dels] = await Promise.all([GET('/api/alerting'), GET('/api/deliveries?limit=500')]);
+    list = dels;
+    renderPendingDigests(pending, al, refresh);
+    paintList();
   };
   await refresh();
+  if (arg) showDigest(arg);
   return every(10000, refresh);
 };
+
+// renderPendingDigests lists each channel's digest being collected, with
+// "Send now", and how alert state is kept.
+function renderPendingDigests(root, al, refresh) {
+  const open = new Set([...root.querySelectorAll('details[open]')].map((d) => d.dataset.nid));
+  clear(root);
+  const st = al.state || {};
+  const saved = st.saved
+    ? `Alert state is saved to ${st.file}${st.saved_at ? `, last ${ago(st.saved_at)}` : ''}: digests not yet due are sent on time after a restart.`
+    : 'Alert state is kept in memory only: pending digests are sent when Lissandra stops.';
+  root.append(h('div', { class: 'list-item' }, h('div', { class: 'main' },
+    h('h2', null, 'Pending digests'),
+    h('div', { class: 'meta' }, 'Events batched for each channel, sent when due. A summary carries alerts flood protection held back and is due within minutes. ', saved),
+    st.error ? h('div', { class: 'callout warn mt' }, `Saving alert state failed: ${st.error}`) : null)));
+  if (!al.pending.length) {
+    root.append(h('div', { class: 'empty' }, 'Nothing batched right now.'));
+    return;
+  }
+  for (const p of al.pending) {
+    const top = h('details', { class: 'pending-top', 'data-nid': p.notifier_id, open: open.has(p.notifier_id) }, h('summary', { class: 'small' }, `Top ${plural(p.top.length, 'problem')}`),
+      p.top.map((e) => h('div', { class: 'small' }, sevBadge(e.severity), ` ×${num(e.count)} `, h('strong', null, `${e.source_name} · ${e.category || 'uncategorized'}`), ' ',
+        h('span', { class: 'mono', title: e.sample }, e.sample), ' ', digestFlags(e))));
+    root.append(h('div', { class: 'list-item' },
+      h('div', { class: 'main' },
+        h('div', { class: 'title' }, p.notifier_name || p.notifier_id,
+          p.summary ? h('span', { class: 'badge reason reason-summary' }, `summary · ${num(p.held)} held`) : null),
+        h('div', { class: 'meta' }, `${plural(p.patterns, 'problem')}, ${plural(p.events, 'event')} · highest ${p.highest_severity} · due ${clockTime(p.due)} (${dueIn(p.due)})`,
+          p.routes.length ? ` · ${p.routes.join(', ')}` : ''),
+        p.top.length ? top : null),
+      h('div', { class: 'actions' }, h('button', {
+        type: 'button', class: 'small',
+        onclick: (e) => busy(e.currentTarget, async () => {
+          await api('POST', `/api/alerting/digests/${encodeURIComponent(p.notifier_id)}/send`);
+          toast(`Digest for "${p.notifier_name || p.notifier_id}" sent`);
+          await refresh();
+        }),
+      }, 'Send now'))));
+  }
+}
+
+// showDigest opens a digest in full: one row per problem, then what didn't
+// fit and why it was sent. Only the last 50 digests are kept.
+async function showDigest(id) {
+  let data = null;
+  try {
+    data = await GET(`/api/deliveries/${encodeURIComponent(id)}`);
+  } catch (err) {
+    if (err.status !== 404) { reportError(err); return; }
+  }
+  const d = data && data.delivery;
+  const dg = data && data.digest;
+  const body = h('div');
+  let modal;
+  if (!dg) {
+    body.append(h('p', { class: 'muted' }, 'Details are kept for the 50 most recent digests.'));
+  } else {
+    const kv = h('div', { class: 'kv' },
+      h('div', null, 'Channel'), h('div', null, d.notifier_name || '—'),
+      h('div', null, 'Status'), h('div', null, h('span', { class: `badge ${d.status === 'sent' ? 'ok' : d.status === 'failed' ? 'bad' : 'warn'}` }, d.status), d.error ? ` ${d.error}` : ''),
+      h('div', null, 'Period'), h('div', null, `${fmtTime(dg.from)} – ${fmtTime(dg.to)}`),
+      h('div', null, 'Routes'), h('div', null, (dg.routes || []).join(', ') || '—'),
+      h('div', null, 'Events'), h('div', null, `${plural(dg.events, 'event')} · ${plural(dg.patterns, 'problem')} · highest ${dg.highest_severity}`,
+        dg.held ? ` · ${num(dg.held)} held back` : ''));
+    const tbl = h('table', { class: 'digest-table' }, h('tr', null, h('th', null, 'Severity'), h('th', null, 'Count'), h('th', null, 'Source · category'),
+      h('th', null, 'Sample'), h('th', null, 'First–last'), h('th', null, '')));
+    for (const e of dg.entries || []) {
+      tbl.append(h('tr', null,
+        h('td', null, sevBadge(e.severity)),
+        h('td', { class: 'count' }, `×${num(e.count)}`),
+        h('td', { class: 'nowrap' }, e.source_name, h('div', { class: 'muted small' }, e.category || 'uncategorized')),
+        h('td', { class: 'sample' }, h('a', { href: `#/events?fingerprint=${encodeURIComponent(e.fingerprint)}`, onclick: () => modal.close() }, e.sample)),
+        h('td', { class: 'nowrap small' }, clockSpan(e.first, e.last)),
+        h('td', { class: 'flags' }, digestFlags(e))));
+    }
+    const more = [];
+    if (dg.other_patterns) more.push(`+ ${plural(dg.other_patterns, 'more problem')} (${plural(dg.other_events, 'event')})`);
+    if (dg.untracked_events) more.push(`+ ${plural(dg.untracked_events, 'event')} from problems beyond what one digest tracks`);
+    append(body, kv, h('div', { class: 'table-wrap mt' }, tbl),
+      more.length ? h('p', { class: 'small muted' }, more.join(' · ')) : null,
+      h('div', { class: 'callout mt' }, reasonBadge(dg.reason), ' ', d.reason_text || ''));
+  }
+  modal = openModal({
+    title: d ? d.title || 'Digest' : 'Digest', body, wide: true,
+    actions: [{ label: 'Close', primary: true, onClick: (c) => c() }],
+    onClose: () => { if (parseHash().page === 'deliveries' && parseHash().arg) history.replaceState(null, '', '#/deliveries'); },
+  });
+}
 
 // ---------- Settings ----------
 
@@ -4074,6 +4570,44 @@ async function setupChannels(ctx) {
 
 // --- notify ---
 
+// The wizard's When to send choices: smart with the digest every 30
+// minutes or every hour, a digest only, or every alert right away; the
+// recommended one is the type's default (as DefaultRouteFor).
+function whenChoices(type, key) {
+  const rec = type === 'email' ? 'smart:60' : 'smart:30';
+  const opts = [
+    ['smart:30', 'Critical, and new, spiking or worsening errors, right away; the rest every 30 min'],
+    ['smart:60', 'Critical, and new, spiking or worsening errors, right away; the rest every hour'],
+    ['digest:60', 'A digest every hour, nothing right away'],
+    ['immediate', 'Every alert right away'],
+  ].map(([v, l]) => [v, v === rec ? `${l} (recommended)` : l]);
+  return key === 'custom' ? [...opts, ['custom', 'Custom (edit the route)']] : opts;
+}
+
+// whenKey is the choice a route's delivery matches, or 'custom'.
+function whenKey(r) {
+  const d = deliveryOf(r);
+  if (d === 'immediate') return 'immediate';
+  if (d === 'smart' && (r.immediate_severity || 'critical') === 'critical' && [30, 60].includes(r.digest_minutes || 30)) return `smart:${r.digest_minutes || 30}`;
+  if (d === 'digest' && (r.digest_minutes || 60) === 60) return 'digest:60';
+  return 'custom';
+}
+
+// whenPolicy is a choice's delivery fields; 'custom' keeps the route's.
+function whenPolicy(key, own) {
+  if (key === 'custom') return { delivery: deliveryOf(own), immediate_severity: own.immediate_severity || '', digest_minutes: own.digest_minutes || 0 };
+  const [delivery, m] = key.split(':');
+  return { delivery, immediate_severity: delivery === 'smart' ? 'critical' : '', digest_minutes: Number(m || 0) };
+}
+
+// wizardDefaults is the route the wizard suggests for a channel of type
+// (DefaultRouteFor): PagerDuty pages for critical only, every one right
+// away; email batches warnings too, hourly; the rest are smart.
+function wizardDefaults(type) {
+  if (type === 'pagerduty') return { sev: 'critical', when: 'immediate', throttle: 900 };
+  return { sev: type === 'email' ? 'warning' : 'error', when: type === 'email' ? 'smart:60' : 'smart:30', throttle: 3600 };
+}
+
 // notifyCard edits who receives a channel's alerts (its recipient fields)
 // and which alerts it gets: through the first route that targets only this
 // channel, or a new one. draft keeps the edits; onRouteSaved runs after
@@ -4088,9 +4622,8 @@ function notifyCard(n, routes, draft, onRouteSaved) {
   // the team's sources unless the user asks for more.
   const reached = teams.length > 0 || routes.some((r) => r.enabled && r.notifier_ids.includes(n.id));
   const base = own
-    ? { on: own.enabled, sev: own.min_severity, cats: own.categories || [], throttle: own.throttle_seconds }
-    // PagerDuty pages someone: only for critical by default.
-    : { on: !reached, sev: n.type === 'pagerduty' ? 'critical' : 'error', cats: [], throttle: 900 };
+    ? { on: own.enabled, sev: own.min_severity, cats: own.categories || [], throttle: own.throttle_seconds, when: whenKey(own) }
+    : { on: !reached, cats: [], ...wizardDefaults(n.type) };
   const v = (k) => (k in draft ? draft[k] : base[k]);
   const errBox = h('div');
 
@@ -4104,13 +4637,20 @@ function notifyCard(n, routes, draft, onRouteSaved) {
   const on = checkbox(own ? 'Enabled' : 'Create a route for this channel', v('on'), (x) => { draft.on = x; });
   // Editing the route keeps its on/off as shown, so a repaint (after an
   // alert group is added, say) can't switch it off underneath the edit.
-  const edit = (k, x) => { if (!('on' in draft)) draft.on = v('on'); draft[k] = x; };
+  const policy = h('p', { class: 'small muted' });
+  const showPolicy = () => { policy.textContent = policyText(whenPolicy(v('when'), own), v('sev'), v('throttle')); };
+  const edit = (k, x) => { if (!('on' in draft)) draft.on = v('on'); draft[k] = x; showPolicy(); };
   const sev = select(SEVERITIES, v('sev'), { onchange: (e) => edit('sev', e.target.value) });
+  // PagerDuty never gets digests: what it gets is sent right away.
+  const pager = Boolean(type.no_digest);
+  const when = pager ? h('div', { class: 'fixed-choice' }, `Right away (${type.label} never gets digests)`)
+    : select(whenChoices(n.type, v('when')), v('when'), { onchange: (e) => edit('when', e.target.value) });
   const catBoxes = [...new Set([...categories(), 'uncategorized', ...v('cats')])].map((c) => ({
     c, box: checkbox(c, v('cats').includes(c), () => edit('cats', catBoxes.filter((x) => x.box.input.checked).map((x) => x.c))),
   }));
   const throttleOpts = THROTTLES.some((t) => t[0] === v('throttle')) ? THROTTLES : [...THROTTLES, [v('throttle'), `${v('throttle')} seconds`]];
   const throttle = select(throttleOpts.map(([x, l]) => [String(x), l]), String(v('throttle')), { onchange: (e) => edit('throttle', Number(e.target.value)) });
+  showPolicy();
   const extra = own ? [
     own.source_ids && own.source_ids.length ? `sources ${own.source_ids.map(sourceName).join(', ')}` : '',
     own.tags && own.tags.length ? `tags ${own.tags.join(', ')}` : '',
@@ -4127,7 +4667,11 @@ function notifyCard(n, routes, draft, onRouteSaved) {
     h('h3', null, 'Which alerts'),
     own ? h('p', { class: 'small muted' }, `Edits route "${own.name}"`) : null,
     on.el,
-    h('div', { class: 'fields-2 mt' }, field('Minimum severity', sev), field('Throttle repeats', throttle)),
+    h('div', { class: 'fields-2 mt' }, field('Minimum severity', sev), field('Re-alert after', throttle, pager
+      ? 'Repeats of a problem in between are counted and reported with the next alert.'
+      : 'Repeats of a problem in between go into the digest, or are counted and reported with the next alert.')),
+    pager ? h('div', { class: 'field' }, h('label', null, 'When to send'), when) : field('When to send', when),
+    policy,
     h('div', { class: 'field' }, h('label', { id: catsLabel }, 'Categories'),
       h('div', { class: 'chips', role: 'group', 'aria-labelledby': catsLabel }, catBoxes.map((x) => x.box.el)),
       h('div', { class: 'help' }, 'None checked = any category.')),
@@ -4136,7 +4680,7 @@ function notifyCard(n, routes, draft, onRouteSaved) {
       type: 'button', class: 'small',
       onclick: () => editRoute(own, {
         onSaved: async () => {
-          for (const k of ['on', 'sev', 'cats', 'throttle']) delete draft[k];
+          for (const k of ['on', 'sev', 'cats', 'throttle', 'when']) delete draft[k];
           await onRouteSaved();
         },
       }),
@@ -4145,13 +4689,13 @@ function notifyCard(n, routes, draft, onRouteSaved) {
     teams.length ? h('p', { class: 'small muted' }, `A channel of ${teams.map((g) => `the alert group "${g.name}"`).join(', ')}, for ${teams.length === 1 ? 'its' : 'their'} sources' alerts.`) : null,
     errBox);
 
-  const want = () => ({ enabled: v('on'), min_severity: v('sev'), categories: v('cats'), throttle_seconds: v('throttle') });
+  const want = () => ({ enabled: v('on'), min_severity: v('sev'), categories: v('cats'), throttle_seconds: v('throttle'), ...whenPolicy(v('when'), own) });
   const showError = (text) => fieldError(errBox, recips.length ? recips[0].input : sev, text);
   return {
     el,
     id: n.id,
     showError,
-    dirty: () => ['recipients', 'on', 'sev', 'cats', 'throttle'].some((k) => k in draft),
+    dirty: () => ['recipients', 'on', 'sev', 'cats', 'throttle', 'when'].some((k) => k in draft),
     save: async () => {
       clear(errBox);
       let saved = false;
@@ -4167,7 +4711,10 @@ function notifyCard(n, routes, draft, onRouteSaved) {
         }
         const w = want();
         if (own) {
-          const cur = { enabled: own.enabled, min_severity: own.min_severity, categories: own.categories || [], throttle_seconds: own.throttle_seconds };
+          const cur = {
+            enabled: own.enabled, min_severity: own.min_severity, categories: own.categories || [], throttle_seconds: own.throttle_seconds,
+            delivery: deliveryOf(own), immediate_severity: own.immediate_severity || '', digest_minutes: own.digest_minutes || 0,
+          };
           if (JSON.stringify(cur) !== JSON.stringify(w)) {
             Object.assign(own, await api('PUT', `/api/routes/${own.id}`, { ...own, ...w }));
             saved = true;
@@ -4246,7 +4793,7 @@ async function setupNotify(ctx) {
     changes: dry.changes,
     dirty,
     defaultsName: 'Use suggested routes',
-    defaults: { help: 'Default: a route for each channel no route or alert group reaches, for error and above (critical for PagerDuty), any category, repeats throttled for 15 minutes.' },
+    defaults: { help: 'Default: a route for each channel no route or alert group reaches. Chat and webhooks: error and above; critical, and new, spiking or worsening errors, right away; the rest in a digest every 30 minutes. Email: warning and above, digest hourly. PagerDuty: critical, right away.' },
     save: async () => {
       // A request that failed may still have been applied, only its answer
       // lost. So after a failure the cards are painted again, from Lissandra's
@@ -4276,15 +4823,14 @@ async function setupNotify(ctx) {
 
 // --- review ---
 
-// routeLine sums up which events a route sends: "≥ error · any category ·
-// throttle 15 minutes".
+// routeLine sums up which events a route sends and when: "≥ error · any
+// category · Smart: critical right away, the rest every 30 min · re-alert 1 h".
 function routeLine(r) {
-  const t = THROTTLES.find((x) => x[0] === r.throttle_seconds);
   const parts = [`≥ ${r.min_severity}`, r.categories && r.categories.length ? r.categories.join(', ') : 'any category'];
   if (r.source_ids && r.source_ids.length) parts.push(`sources ${r.source_ids.map(sourceName).join(', ')}`);
   if (r.tags && r.tags.length) parts.push(`tags ${r.tags.join(', ')}`);
   if (r.message_regex) parts.push(`message ~ /${r.message_regex}/`);
-  parts.push(r.throttle_seconds ? `throttle ${t ? t[1] : `${r.throttle_seconds}s`}` : 'no throttling');
+  parts.push(policyLine(r));
   return parts.join(' · ');
 }
 

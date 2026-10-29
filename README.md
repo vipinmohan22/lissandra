@@ -6,7 +6,7 @@ Lissandra reads logs, classifies them, and alerts the right people. It runs as a
 - **Analyze log files.** Upload a log file on the **Log files** page (or with curl, or `lissandra analyze` in a terminal) to get a classified report: a timeline in the file's own time, top issues, the alert routes that would have fired, and searchable events. Analysis never touches live events or sends alerts.
 - **Classify.** Every event gets a severity, a category and tags. Built-in detection reads level fields and common log formats; an ordered rule engine that you edit in the UI does the rest. Repeats of the same problem are grouped by fingerprint.
 - **Learn.** When the classification engine categorizes a pattern no rule covers, Lissandra turns the answer into a rule for that pattern, marked for review. From then on the rules classify it (and alert on it) without asking the model. Review learned rules on their own tab, then approve, edit or reject them.
-- **Notify.** Routes send matching events to pluggable notifiers: email (SMTP), Slack, Microsoft Teams, Discord, Google Chat, PagerDuty, or any HTTP endpoint through a templated webhook. Per-problem throttling keeps channels quiet.
+- **Notify.** Routes send matching events to pluggable notifiers: email (SMTP), Slack, Microsoft Teams, Discord, Google Chat, PagerDuty, or any HTTP endpoint through a templated webhook. Smart delivery sends critical problems, and new, spiking or worsening errors, right away, and batches the rest into one digest per channel. Every message says why it was sent.
 - **A local model for what the rules miss.** Events the rules leave uncategorized go to the [engine](#engine), a small decision model that runs next to Lissandra (`make up` starts both), which picks one of your categories. Rules always win, a severity the log states is never replaced, unsure answers are ignored, and each message pattern is asked about once.
 
 ```mermaid
@@ -18,10 +18,11 @@ flowchart LR
   E -. "category, severity" .-> C
   C --> S[(Recent events + stats)]
   C --> R{Alert routes}
-  R --> N1[Email]
-  R --> N2[Slack]
-  R --> N3[Teams]
-  R --> N4[Discord / Google Chat / PagerDuty / webhook]
+  R --> D[Right away or in a digest]
+  D --> N1[Email]
+  D --> N2[Slack]
+  D --> N3[Teams]
+  D --> N4[Discord / Google Chat / PagerDuty / webhook]
   UI[Web UI + REST API] --- S
 ```
 
@@ -71,7 +72,7 @@ The first time you sign in to a fresh data directory, Lissandra opens a setup wi
 | Sources | Lissandra's public URL, and the sources; it shows when the first event arrives | Adds a push source if none is enabled |
 | Classification | Categories and which rules are on, with a tester for your choices | Adds the built-in categories that are missing; rules are never changed |
 | Alert channels | Email, Slack, Teams, Discord, Google Chat, PagerDuty or a webhook | No alerts for now |
-| Who gets notified | Each channel's recipients (email To, Slack mention) and its route: minimum severity, categories, throttle; and teams, as [alert groups](#alert-groups) | A route for each channel no route or alert group reaches yet: error and above (critical for PagerDuty), 15-minute throttle |
+| Who gets notified | Each channel's recipients (email To, Slack mention) and its route: minimum severity, categories, [when to send](#when-alerts-are-sent-right-away-or-in-a-digest) and the re-alert window; and teams, as [alert groups](#alert-groups) | A route for each channel no route or alert group reaches yet. Chat and webhooks: error and above, smart (critical, and new, spiking or worsening errors, right away; the rest in a digest every 30 minutes). Email: warning and above, smart with an hourly digest. PagerDuty: critical and above, every alert right away. Re-alert after 1 hour (15 minutes for PagerDuty). |
 
 Every step can be skipped or set to Lissandra's defaults. Defaults only add what is missing, and the button says what it will add. **Use defaults for everything** on the welcome page does every step at once but never changes the admin token. Lissandra has no user accounts: people get alerts through channels and alert groups, and the review page shows who gets what.
 
@@ -159,13 +160,15 @@ The response is the finished report. `GET /api/imports/{id}/events` (and `?forma
 
 1. **Severity detection.** Lissandra reads explicit level fields (names such as `level`, `severity`, `@l`, `severityText`; syslog 0–7; pino/bunyan 10–60) and the levels formats write into the text: a syslog `<PRI>`, klog prefixes (`E1011 …`), `level=`/`"level":` keys, and level words near the start of the record (within 96 characters after any syslog header) that are uppercase (`ERROR …`, `WARN[0042]`, `[WRN]`), bracketed (`[crit]`, `<warn>`, `[core:error]`), a label (`app[42]: warning: …`, `main.go:42: error:`, `PHP Warning:`, `fail:`), or open the line with a colon, tab or column spacing after them (`error: …`, `2026-10-11T10:00:00Z info   …`); plus fixed-place level columns of common daemons (MongoDB, Redis, etcd, PostgreSQL csvlog, java.util.logging, Monolog, NestJS, dmesg, kernel `BTRFS error`, npm, …). The record's first level wins. Lowercase level words inside a sentence (`user info`, `debug symbols`, `error rate`, `2026/10/11 10:00:00 error connecting …` from Go's level-less `log`) are not levels, and neither are words in request paths, echoed commands, JSON values or quoted settings (`GET /logs?level=error`, `COMMAND=… FATAL`, `set to "WARN"`). A level field of 3 or 6 (journald's default for a service's stdout and stderr, Docker's stream levels) or a syslog PRI with those severities gives way to a level the text states. A severity found this way is *stated* by the record. Otherwise Lissandra *guesses* it from keywords such as panic/fatal/outage/breach, error/exception/failed/failing/refused/unable to/cannot/timed out (and a message ending in "permission denied" or "no such file or directory"), and warn/deprecated/retrying, ignoring URLs, paths, mail addresses, negations like "no errors" and zero counters (`failed=0`). It defaults to *info* and marks the event `severity_guessed`. A rule that sets a severity makes it stated. `internal/classify/testdata/severity/` holds the corpus of real formats this is tested against.
 2. **Rules, top to bottom.** Conditions test `message`, `level`, `severity`, `source`, `category`, `tags`, or any structured field by dot path (`http.status_code`). The operators are contains, equals, starts/ends with, regex (RE2, so no catastrophic backtracking), exists/missing, and numeric `>`/`<`, each with a negated form where it makes sense. Every matching rule adds tags and can set the severity or raise it to a minimum. The first matching rule with a category decides the category. **Drop** discards the event and **Stop** ends evaluation. Rules can be limited to specific sources.
-3. **Fingerprint.** The message is reduced to a pattern (numbers, IPs, UUIDs, hex ids and timestamps replaced by placeholders) and hashed with the source. The fingerprint groups the dashboard's "Top issues" and drives notification throttling. The engine's answers are cached by the text it reads instead (see below).
+3. **Fingerprint.** The message is reduced to a pattern (numbers, IPs, UUIDs, hex ids and timestamps replaced by placeholders) and hashed with the source. The fingerprint groups the dashboard's "Top issues" and is the "problem" [alert decisions](#when-alerts-are-sent-right-away-or-in-a-digest) track: re-alert windows, novelty and spikes. The engine's answers are cached by the text it reads instead (see below).
 4. **Engine.** What the rules leave uncategorized, at *warning* or above, goes to the [engine](#engine), which may fill in the category, and the severity when it was only guessed.
 5. **Learning.** A confident engine answer becomes a [learned rule](#learned-rules), so the next event of that pattern is classified at step 2.
 
 Conditions can also test `pattern`: the message lowercased, with numbers, IPs, UUIDs, hex ids and timestamps replaced by `<n>`, `<ip>`, `<uuid>`, `<hex>` and `<ts>` (the first 400 bytes). `pattern equals "shipment <n> stuck in queue"` matches every shipment number. A rule can also keep matching events away from the engine (**Don't ask the engine about matching events**, `skip_engine`).
 
-Lissandra ships with editable default rules for crashes and panics, resource exhaustion, security attacks, auth failures, HTTP 5xx, database, network, slow operations, exceptions and deployments. The **Rule tester** runs a pasted sample through the rules without storing it, and the rule editor can test a draft rule on its own.
+Lissandra ships with editable default rules for crashes and panics, services down, resource exhaustion and limits, security attacks, login and auth failures, HTTP 5xx, TLS certificates, replication lag, queue backlogs, open circuit breakers, disk usage, database, network, slow operations, exceptions and deployments. A rule's severity can apply only to records that state no level of their own (**Only when the record states no level**, `keep_stated`, shown as "(if unstated)"): most defaults do this, so a line its program logged as a warning stays a warning. The **Rule tester** runs a pasted sample through the rules without storing it, shows where each sample would be sent, and the rule editor can test a draft rule on its own.
+
+A new version can ship better default rules, but an existing install keeps its own until you choose: **Classification rules → Default rules** lists the defaults your configuration lacks or has changed (Lissandra also logs how many at startup), and applies the ones you check. Applying one replaces your rule of that name with the default, keeping its ID and whether it is on, or adds a missing one after the default rules before it; a default you renamed is yours and isn't listed. Rules set severities, and severities decide what is sent right away, so review the list before applying it. Over the API: `GET /api/rules/defaults` (`missing`, `changed`, `descriptions`) and `POST /api/rules/defaults` with `{"names": [...]}` (all of them when `names` is left out).
 
 ### Learned rules
 
@@ -192,23 +195,23 @@ An **alert group** is a team, or a set of people, alerted about specific sources
 - **Which events.** A minimum severity (*error* by default) and, optionally, categories.
 - **Channels.** Notifiers the group is reached on: its Slack or Teams channel, PagerDuty service, a webhook.
 - **Members.** Email addresses, emailed through an email notifier you pick. Its SMTP server and From address are used, with the members as the recipients instead of the notifier's own.
-- **Throttling**, as for routes.
+- **When to send and the re-alert window**, as for routes: [smart](#when-alerts-are-sent-right-away-or-in-a-digest) by default for a new group.
 
 Groups work alongside alert routes: an event goes to every route and every group of its source that it matches. A group with no sources gets nothing. Deliveries show the group as the route (`Alert group: <name>`), and file analysis reports list the groups that would have been alerted. The API is `/api/alert-groups` (`GET`, `POST`, `PUT /{id}`, `DELETE /{id}`), where `source_ids` sets the group's sources; sources list their groups in `alert_group_ids`.
 
 ### Notifiers and routes
 
-A **route** selects events by minimum severity, categories, sources, tags and an optional message regex, and sends them to one or more **notifiers**. With throttling on, after alerting on a problem the route suppresses the same fingerprint on that notifier for the window you choose. The next alert says how many similar events were suppressed. Each notifier has its own queue (10,000 notifications, as many as the pipeline holds), so a slow or failing one delays only its own alerts; if a queue fills anyway, alerts are dropped, counted (`dropped` on the dashboard and in `lissandra_notifications_total`) and logged. Deliveries are retried on network errors, 429s and 5xx responses (3 attempts with backoff, none while shutting down), and every attempt appears under **Deliveries**.
+A **route** selects events by minimum severity, categories, sources, tags and an optional message regex, and sends them to one or more **notifiers**, right away or in a digest: see [When alerts are sent](#when-alerts-are-sent-right-away-or-in-a-digest). After an alert, repeats of the same problem (fingerprint) on the same channel are held back for the re-alert window (`throttle_seconds`). The window is per channel and problem, not per route; a rise in severity is sent at once; and the repeats go into the channel's digest when it has one, else the next alert says how many there were. Each notifier has its own queue (10,000 notifications, as many as the pipeline holds), so a slow or failing one delays only its own alerts; if a queue fills anyway, an alert is held into the channel's next summary, or, on PagerDuty, which takes no digests, dropped, counted (`dropped` on the dashboard and in `lissandra_notifications_total`) and logged. Deliveries are retried on network errors, 429s and 5xx responses (3 attempts with backoff, none while shutting down), and every attempt appears under **Deliveries**, with why it was sent.
 
 | Notifier | Notes |
 | --- | --- |
-| Email (SMTP) | STARTTLS, implicit TLS or plaintext. HTML and plain-text bodies. Multiple recipients. |
+| Email (SMTP) | STARTTLS, implicit TLS or plaintext. HTML and plain-text bodies. Multiple recipients. Digests are a table, one row per problem; `X-Lissandra-Kind` says `alert` or `digest`. |
 | Slack | Incoming webhook with colour-coded blocks and an optional mention on critical events. Also works with Mattermost and Rocket.Chat. |
 | Microsoft Teams | Adaptive Card. Works with Teams Workflows ("Post to a channel when a webhook request is received") and legacy incoming webhooks. |
 | Discord | Embed, with mentions disabled so log text can't ping `@everyone`. |
 | Google Chat | Space webhook. |
-| PagerDuty | Events API v2. The fingerprint is the dedup key, so repeats update one incident. |
-| Generic webhook | Any method, URL and headers. The body is a Go `text/template` (`{{ json .Title }}`, `.Event.Severity`, `.Event.Fields`, `.Link`, …). Leave it empty for Lissandra's standard JSON payload. Use it for Opsgenie, ntfy, Zulip, internal services and so on. |
+| PagerDuty | Events API v2. The fingerprint is the dedup key, so repeats update one incident. Right-away alerts only, never digests. |
+| Generic webhook | Any method, URL and headers. The body is a Go `text/template` (`{{ json .Title }}`, `.Event.Severity`, `.Event.Fields`, `.Link`, `.Kind`, `.Reason.Text`, `.Routes`, `.Digest`, …). Leave it empty for Lissandra's standard JSON payload: `id`, `kind` (`alert` or `digest`), `title`, `text`, `link`, `route`, `routes`, `reason` (`code`, `text`), `suppressed`, `event`, and for a digest `digest` (its problems, counts and samples). For a digest, `event` summarizes it (its severity is the highest), so templates written for alerts keep working; branch on `.Kind` to tell them apart. Use it for Opsgenie, ntfy, Zulip, internal services and so on. |
 
 **Secrets.** Any notifier setting, pull-source credentials, headers and POST body, and the engine's URL and key can refer to a value kept outside Lissandra's config file, so secrets can live in Nomad Variables, Vault or a secrets file:
 
@@ -218,6 +221,57 @@ A **route** selects events by minimum severity, categories, sources, tags and an
 File contents lose their trailing newline, and a file that can't be read, isn't a regular file or is over 64 KiB gives an empty value. Notifiers read their references when the configuration is applied (at start and whenever it is saved), pull sources on every poll, and the engine URL and key every 30 seconds, so a file can change while Lissandra runs. Secret fields are masked in the API and UI (references themselves are shown), and saving a form with the masked value unchanged keeps the stored secret.
 
 **Adding a notifier type.** Create a file in `internal/notify/` that calls `Register(&Plugin{...})` from `init()`, declaring its fields (label, type, required, secret, help) and a constructor that returns a `Sender`. The UI renders the form from that schema and nothing else needs to change. See `chat.go` for compact examples.
+
+### When alerts are sent: right away or in a digest
+
+Each route and alert group has a **When to send** setting, `delivery`:
+
+| When to send | Right away | In the channel's digest | Not sent |
+| --- | --- | --- | --- |
+| **Smart** (`smart`, recommended). The default for new routes and alert groups, and in the setup wizard. | Events at or above **Right away at or above** (`immediate_severity`, critical by default), and errors that are **new**, **spiking** or **getting worse** | Everything else the route matches, repeats of problems already sent, and alerts flood protection held back | – |
+| **Every alert right away** (`immediate`, also when `delivery` is empty, so existing routes, imports and API clients that leave it out work as before) | Every matching event | Repeats inside the re-alert window, when a smart or digest-only route also reaches the channel | Repeats inside the window otherwise: counted, and reported with the next alert |
+| **Digest only** (`digest`) | – | Everything the route matches | – |
+
+`digest_minutes` is how often the digest goes out (5 to 1440; 30 by default for smart, 60 for digest only), and `throttle_seconds` is the re-alert window ("Re-alert on the same problem after"). The editors say the policy in words, for example *Right away: critical and up, and errors that are new, spiking or getting worse. Everything else from error up: one digest every 30 min.* A **Right away at or above** at or below the minimum severity sends everything right away, with flood protection. The Routes page offers to switch routes that send every alert right away to smart.
+
+**The rules.** An event on a smart route goes right away when it is at or above `immediate_severity`, or when it is an error or above and it is:
+
+- **New:** its source is past its warm-up (the first hour after Lissandra first sees the source) and nothing with its fingerprint was seen in the last 7 days.
+- **Spiking:** the pattern is at least an hour old and it logged at least 20 events in the last 5 minutes, and at least 10 times its usual rate. A pattern under an hour old needs a **flood** instead: 50 in 5 minutes, warm-up or not, so an outage on a fresh install still alerts. One spike per pattern per hour. Events whose own timestamp is more than 5 minutes old (a pull source catching up) don't count.
+- **Getting worse:** the source is warm, the pattern is known, and the severity is above the highest it logged in the last 7 days.
+
+Everything else the route matches goes into the channel's digest.
+
+**One message per channel, every repeat reported once.** An event reaches each channel once, however many routes and alert groups match it, and the message names them all. The re-alert window is per channel and problem, the shortest of the routes that want the event right away, and it runs from the last alert: repeats never extend it. Inside it, a severity above the last alert's is sent at once (*got worse*), and on a smart route so is a spike (not a flood) when the last alert is at least 15 minutes old. Other repeats go into the channel's digest when a matching smart or digest-only route gives it one; otherwise they are counted, and the next alert after the window says *Still happening: 49 more since the alert at 10:02 UTC.* If that alert goes out before the digest, it takes the repeats out of the digest, so nothing is counted twice. An alert that fails with a retryable error reopens the window, and its events go into the digest or the next alert.
+
+**Flood protection** holds back what smart routes would send right away on channels that take digests; every-alert routes and PagerDuty are never held. Per channel, in any 10 minutes:
+
+- the first 20 critical alerts go out right away; any more arrive together in a summary within a minute, with the Slack mention;
+- one new, spiking or worse alert per source and category;
+- 10 right-away alerts below critical. Criticals don't count toward this.
+
+What is held goes into the channel's digest, marked HELD with the reason it would have gone, and the digest goes out early as a **summary**: 2 minutes later, and at least 10 minutes after the channel's previous summary, so a held alert waits 10 minutes at most. So PagerDuty gets every critical (it dedups by fingerprint itself), and chat and email get the first 20 in 10 minutes right away and the rest within a minute.
+
+**Digests.** Each channel gets one digest, at the shortest interval of the routes that fill it, and only when something is in it. It has one line per problem: severity, count, source and category, a sample (the latest message at the highest severity), first and last time, and flags: NEW, HELD (and why), REPEATS of an earlier alert, UNDELIVERED for events of alerts that failed. Held problems come first, then by severity and count. A digest tracks 200 problems in full and counts up to 5,000 more; a sent digest lists 50, and each channel shows what fits: Slack, Teams and Google Chat 15, Discord 10, email and webhooks all 50, then *+ 6 more problems (34 events)*. Slack mentions only for a summary of held criticals. **Deliveries** lists each channel's pending digest with **Send now**, and opens the 50 most recent digests in full.
+
+**PagerDuty and webhooks.** PagerDuty never gets digests: on a smart route it gets events at or above `immediate_severity`, and severity rises, right away; on a digest-only route it gets nothing, and the editor warns. Generic webhooks get digests as `"kind": "digest"` payloads; for a pager behind a webhook, choose Every alert right away.
+
+**Why.** Every message carries a one-sentence *Why*, and so does every delivery record: *New problem: first seen just now; nothing like it in the last 7 days.*, *Spiking: 240 in the last 5 minutes, usually about 3 an hour.*, *Held back so this channel isn't flooded: …*. The event dialog's **Alerts** row says, for each channel, whether the event was sent, put in the digest, held, counted as a repeat or not sent, and why (for the last 5,000 events). The rule tester and **Test fetch** preview where each sample would go.
+
+**How it adapts.** Without any setup:
+
+- each pattern's usual rate: its average while it is under a day old, then an hourly moving average (α 0.1), so a pattern that is always noisy stops counting as a spike;
+- novelty: a pattern is new once, and again only after 7 quiet days;
+- each pattern's highest severity over 7 days, for *getting worse*;
+- each source's warm-up: a new source, or every source after the alert state starts fresh, batches its lesser problems for its first hour, while only critical problems and floods go right away. The dashboard says which sources are still learning.
+
+It doesn't learn from you yet: there is no mute, snooze or acknowledge, and the numbers above are constants (`GET /api/alerting` lists them).
+
+**Persistence.** The alert state (re-alert windows, pending digests, per-pattern baselines, source warm-ups) is saved to `alerting.json` in `LISSANDRA_DATA_DIR` every minute and at shutdown, so a restart neither alerts again nor forgets a digest; it is mode 0600 because it holds log samples. It is not part of the configuration or of exports. An unreadable file is set aside as `alerting.json.bad-<time>` and Lissandra starts fresh. When a new version changes message patterns, the windows, baselines and warm-ups start over once; pending digests are kept.
+
+**Upgrading.** Existing routes and groups stay *Every alert right away* until you change them, but some changes apply to them too: an event reaches a channel once when routes overlap; the window is per channel and problem instead of per route, notifier and problem, so overlapping routes send fewer duplicates; severity rises are sent through the window; messages carry a *Why*; and alert state survives restarts. **Switch them to smart** on the Routes page converts them.
+
+**Try it.** Send a critical and a few different errors to a source, for example with the curl command under **Setup instructions**. The critical goes out at once. The errors wait in the channel's digest, because a new source learns what's normal for an hour: open **Deliveries** and press **Send now** on the channel's pending digest, or `POST /api/alerting/digests/{notifier id}/send`. **Send test digest** on a notifier sends a sample digest.
 
 ### Engine
 
@@ -386,7 +440,7 @@ Runtime configuration (sources, rules, notifiers, routes, settings) is edited in
 | --- | --- | --- |
 | `LISSANDRA_ADMIN_TOKEN` | the token set in Lissandra (`admin-token.json`), else random per run (logged) | Bearer token for the UI and API. Set it to a long random value. When set, it is the only admin token; see [Admin token](#admin-token). |
 | `LISSANDRA_LISTEN` | `:8080` | HTTP listen address. |
-| `LISSANDRA_DATA_DIR` | `./data` | Holds `config.json` and `admin-token.json`. |
+| `LISSANDRA_DATA_DIR` | `./data` | Holds `config.json`, `admin-token.json` and `alerting.json` (the [alert state](#when-alerts-are-sent-right-away-or-in-a-digest)). |
 | `LISSANDRA_PUBLIC_URL` | derived from requests | External URL for ingest instructions and notification links (the UI setting takes precedence). |
 | `LISSANDRA_CONFIG_SEED` | — | JSON config file used on first start only, when `config.json` doesn't exist yet. Add `"onboarding": {}` to it to offer the [setup wizard](#first-run). |
 | `LISSANDRA_EVENT_BUFFER` | `5000` | Recent events kept in memory for the UI. |
@@ -404,14 +458,30 @@ Runtime configuration (sources, rules, notifiers, routes, settings) is edited in
 Endpoints:
 
 - `GET /healthz` returns liveness (used by the Nomad check).
-- `GET /metrics` serves Prometheus metrics: events received, processed, dropped and rejected; queue depths; last-hour events by severity; notification outcomes; log file analyses; pull-source health; and the engine (below).
+- `GET /metrics` serves Prometheus metrics: events received, processed, dropped and rejected; queue depths; last-hour events by severity; notification outcomes and alert decisions; log file analyses; pull-source health; and the engine (below).
 - `POST /ingest/{source}` accepts logs.
 - `/api/*` is the REST API the UI uses. Everything requires the [admin token](#admin-token) (`Authorization: Bearer …`). Besides the configuration (`/api/sources`, `/api/rules` and `/api/rules/review`, `/api/notifiers`, `/api/routes`, `/api/alert-groups`, `/api/settings`, `/api/config/export` and `/import`):
-  - `GET /api/stats` (counters and engine status) and `GET /api/events`;
+  - `GET /api/stats` (counters and engine status), `GET /api/events`, and `GET /api/events/{id}`, whose `alerts` says what the event did on each channel and why;
+  - `GET /api/deliveries` (`?kind=alert` or `digest`, `?limit=`) and `GET /api/deliveries/{id}`, which adds the digest in full for the 50 most recent; `GET /api/alerting` (pending digests, sources warming up, how alert state is saved, the limits); `POST /api/alerting/digests/{notifier id}/send` sends a channel's digest now; `POST /api/notifiers/test?kind=digest` sends a sample digest;
+  - `GET /api/rules/defaults` and `POST /api/rules/defaults` compare with and apply this version's default rules;
   - `GET /api/auth` says where the admin token comes from, `PUT /api/auth/token` sets a new one (`{"token": "…"}`, sent with the current one) and `DELETE /api/auth/token` deletes a stored token that `LISSANDRA_ADMIN_TOKEN` overrides;
   - `GET /api/onboarding` is the setup wizard's progress, and `POST /api/onboarding/start`, `/steps/{step}`, `/defaults`, `/defer`, `/complete` and `/dismiss` change it;
   - `POST /api/imports` analyzes a log file (`?engine=1` to ask the engine), and `GET /api/imports/{id}` (with `/events`, `/patterns` and `/training-data`) returns the results;
   - `GET /api/engine/health` checks the engine, `POST /api/engine/classify` asks it about one message or event, and `GET /api/engine/training-data` exports training data (see [Engine](#engine)).
+
+The alert decisions' metrics (`lissandra_notifications_total{status="sent|failed|dropped|throttled"}` counts deliveries as before, digests included):
+
+| Metric | |
+| --- | --- |
+| `lissandra_alert_decisions_total{action}` | What matching events did on each channel: `sent` right away, `digest`, `throttled` (a repeat), `held` by flood protection, `skipped` (a channel that takes no digests), `dropped` (queue full). |
+| `lissandra_alerts_right_away_total{reason}` | Alerts sent right away, by reason: `every`, `severity`, `new`, `spike`, `worse`, `repeat`. |
+| `lissandra_digests_total{status}` | Digests `sent`, `failed` (twice, or permanently) and `discarded` (their notifier was removed or disabled). |
+| `lissandra_digest_events_total` | Events reported in digests sent. |
+| `lissandra_alert_lost_events_total` | Matching events no message reported: digests failed or discarded, and repeats no alert reported within 7 days. |
+| `lissandra_digest_pending_events` | Events waiting in digests. |
+| `lissandra_alert_patterns_tracked` | Message patterns whose usual rate and severity are tracked. |
+| `lissandra_alert_sources_warming_up` | Sources still in their first hour. |
+| `lissandra_alert_state_save_errors_total` | Failed saves of `alerting.json`. |
 
 The engine's metrics:
 
@@ -458,9 +528,9 @@ Or delete `admin-token.json` from the data directory and restart, and Lissandra 
 
 ## Operational notes
 
-- **Single instance.** Configuration is one file on one volume, so the Nomad job runs `count = 1` and Nomad reschedules it if the node fails. Recent events and delivery history live in memory and reset on restart. Lissandra is a classifier and alerter, not long-term log storage; keep shipping logs to your log store as well (a webhook notifier can forward classified events).
+- **Single instance.** Configuration is one file on one volume, so the Nomad job runs `count = 1` and Nomad reschedules it if the node fails. Recent events and delivery history live in memory and reset on restart. Alert state (what was sent, pending digests, per-pattern baselines) is saved to `alerting.json` every minute and at shutdown. Lissandra is a classifier and alerter, not long-term log storage; keep shipping logs to your log store as well (a webhook notifier can forward classified events).
 - **Engine.** The engine is a separate service with its own needs: about 3.5 GB of memory and 4 CPU cores per instance on CPU, roughly 1–2 new message patterns per second each, or an NVIDIA GPU for far more. Lissandra never depends on it: without it, or while it's down, classification is the rules' alone. On Nomad, Lissandra re-reads the engine addresses from a file, so engine instances coming and going don't restart it; see [deploy/nomad/README.md](deploy/nomad/README.md#6-run-the-engine-optional).
-- **Shutdown.** On SIGTERM or Ctrl-C, Lissandra stops accepting requests and stops polling, finishes the events it already accepted (engine requests are cancelled, so those events keep the rules' result unless the engine already answered their pattern), then delivers the notifications still queued, without retrying failed ones. Requests in progress get 8 s (then they are cut off) and events 8 s; notifications get whatever is left of 26 s from the signal, and stopping 2 s more: 28 s at most, within Nomad's 30 s `kill_timeout`. Lissandra logs what was left if time runs out.
+- **Shutdown.** On SIGTERM or Ctrl-C, Lissandra stops accepting requests and stops polling, finishes the events it already accepted (engine requests are cancelled, so those events keep the rules' result unless the engine already answered their pattern), then delivers the notifications still queued, without retrying failed ones. Digests already due are sent; the rest are saved and sent on time after the restart, or sent at shutdown if the alert state can't be saved. Requests in progress get 8 s (then they are cut off) and events 8 s; notifications get whatever is left of 26 s from the signal, and stopping 2 s more: 28 s at most, within Nomad's 30 s `kill_timeout`. Lissandra logs what was left if time runs out. A crash (SIGKILL, out of memory) can lose up to a minute of alert state, a digest being delivered, and alerts still queued.
 - **Security.** The UI sends a strict Content-Security-Policy and renders all log content as text, never HTML. Ingest tokens are compared in constant time. The admin token is checked through an HMAC-SHA256 digest, which is also all Lissandra stores of a token set in the UI; it is an API key, so the fast hash is enough (a generated one has 192 random bits). Pull sources and webhooks can reach any URL the admin enters, so treat the admin token like infrastructure credentials and put Lissandra behind TLS (for example Traefik or another load balancer).
 
 ## Development
@@ -481,7 +551,7 @@ The layout:
 cmd/lissandra       entrypoint, env configuration, `lissandra analyze`
 internal/config     config model, validation, JSON store, secret masking, setup defaults
 internal/auth       admin token: precedence, storage as a keyed hash, rotation
-internal/atomicfile atomic file replacement, for config.json and admin-token.json
+internal/atomicfile atomic file replacement, for config.json, admin-token.json and alerting.json
 internal/ingest     payload parsing (JSON / NDJSON / text / CSV), streaming file reader
 internal/poller     pull-source polling
 internal/classify   severity heuristics, rule engine, fingerprints
@@ -490,7 +560,7 @@ internal/learn      rules learned from the engine's answers
 internal/pipeline   queue → classify → (engine) → store → dispatch
 internal/importer   log file analysis: reports, retention, timeline
 internal/events     in-memory recent events and stats
-internal/notify     notifier plugins, routing, throttling, retries
+internal/notify     notifier plugins, routing, alert decisions (smart delivery, digests, flood protection), retries
 internal/server     REST API, ingest endpoint, metrics, UI hosting
 web/static          the UI (plain JS, no build step)
 deploy/nomad        Nomad jobs (Lissandra and the engine), volumes and variables

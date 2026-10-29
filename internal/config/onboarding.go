@@ -114,14 +114,19 @@ func unusedSourceName(sources []Source, name string) string {
 }
 
 // DefaultRouteFor is the route the setup wizard suggests for a notifier
-// nothing routes to yet.
+// nothing routes to yet: smart delivery, so critical problems and new,
+// spiking or worsening errors go out right away and the rest in a digest.
 func DefaultRouteFor(n Notifier) Route {
-	sev := model.SeverityError
-	if n.Type == "pagerduty" {
-		sev = model.SeverityCritical // don't page on-call for every error
+	r := Route{Enabled: true, NotifierIDs: []string{n.ID}, MinSeverity: model.SeverityError, ThrottleSeconds: 3600,
+		DeliveryPolicy: DeliveryPolicy{Delivery: DeliverySmart, ImmediateSeverity: model.SeverityCritical, DigestMinutes: 30}}
+	switch n.Type {
+	case "pagerduty": // pages only for critical, every one right away
+		r.MinSeverity, r.ThrottleSeconds, r.DeliveryPolicy = model.SeverityCritical, 900, DeliveryPolicy{Delivery: DeliveryImmediate}
+	case "email": // the hourly digest also carries warnings (TLS expiring, replica lag, disk 85%…)
+		r.MinSeverity, r.DigestMinutes = model.SeverityWarning, 60
 	}
-	return Route{Name: fmt.Sprintf("%s: %s and above", n.Name, sev), Enabled: true, MinSeverity: sev,
-		NotifierIDs: []string{n.ID}, ThrottleSeconds: 900}
+	r.Name = fmt.Sprintf("%s: %s and above", n.Name, r.MinSeverity)
+	return r
 }
 
 // RecordStep sets how a setup step ended. It touches only that step, so

@@ -148,19 +148,81 @@ var emailHTML = template.Must(template.New("email").Parse(`<!doctype html>
 <p style="text-align:center;font-size:11px;color:#8a8f98">Sent by Lissandra</p>
 </body></html>`))
 
-func (e *email) compose(m *Message) ([]byte, error) {
-	var htmlBody bytes.Buffer
-	err := emailHTML.Execute(&htmlBody, map[string]any{
-		"Color": severityColor(m.Event.Severity), "Title": m.Title(), "Excerpt": m.Excerpt(8000),
-		"Facts": m.Facts(), "Link": m.Link,
+var emailDigestHTML = template.Must(template.New("digest").Parse(`<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1d2330">
+<table role="presentation" width="100%" style="max-width:760px;margin:0 auto;background:#ffffff;border-radius:8px;border-top:6px solid {{.Color}}">
+<tr><td style="padding:20px 24px">
+<div style="font-size:18px;font-weight:600;margin-bottom:8px">{{.Title}}</div>
+{{if .Why}}<p style="margin:0 0 16px;font-size:13px;color:#5b6475">{{.Why}}</p>{{end}}
+<table role="presentation" width="100%" style="font-size:13px;border-collapse:collapse">
+{{range .Lines}}<tr style="border-top:1px solid #e6e8ec">
+<td style="padding:8px 8px 8px 0;vertical-align:top;white-space:nowrap"><span style="background:{{.Color}};color:#fff;border-radius:4px;padding:1px 6px;font-size:11px">{{.Severity}}</span></td>
+<td style="padding:8px;vertical-align:top;white-space:nowrap;font-weight:600">{{.Count}}</td>
+<td style="padding:8px;vertical-align:top"><div style="font-weight:600">{{.What}}</div>
+<div style="font-family:Menlo,Consolas,monospace;font-size:12px;color:#3a4150;word-break:break-word">{{if .Link}}<a href="{{.Link}}" style="color:#3a4150">{{.Sample}}</a>{{else}}{{.Sample}}{{end}}</div></td>
+<td style="padding:8px;vertical-align:top;white-space:nowrap;color:#5b6475">{{.When}}</td>
+<td style="padding:8px 0 8px 8px;vertical-align:top;font-size:11px;color:#5b6475">{{.Flags}}</td>
+</tr>{{end}}
+</table>
+{{if .More}}<p style="margin:12px 0 0;font-size:13px;color:#5b6475">{{.More}}</p>{{end}}
+{{if .Link}}<p style="margin:20px 0 0"><a href="{{.Link}}" style="background:#1d2330;color:#fff;text-decoration:none;padding:8px 14px;border-radius:6px;font-size:13px">Open digest in Lissandra</a></p>{{end}}
+</td></tr></table>
+<p style="text-align:center;font-size:11px;color:#8a8f98">Sent by Lissandra</p>
+</body></html>`))
+
+// digestHTML renders a digest as a table: one row per entry.
+func digestHTML(m *Message) (string, error) {
+	type row struct{ Color, Severity, Count, What, Sample, Link, When, Flags string }
+	lines, more := m.digestLines(maxDigestListed)
+	rows := make([]row, 0, len(lines))
+	for _, l := range lines {
+		rows = append(rows, row{Color: severityColor(l.e.Severity), Severity: l.severity, Count: l.count, What: l.what,
+			Sample: l.sample, Link: l.link, When: l.when, Flags: l.flags})
+	}
+	var b bytes.Buffer
+	err := emailDigestHTML.Execute(&b, map[string]any{
+		"Color": severityColor(m.Digest.Highest), "Title": m.Title(), "Why": m.Reason.Text, "Lines": rows, "More": more, "Link": m.Link,
 	})
-	if err != nil {
-		return nil, err
+	return b.String(), err
+}
+
+// subject is the email subject: the headline and the message for alerts,
+// the size for digests.
+func (e *email) subject(m *Message) string {
+	if dg := m.Digest; dg != nil {
+		test := ""
+		if m.Test {
+			test = "[TEST] "
+		}
+		if dg.Reason == ReasonSummary {
+			return strings.TrimSpace(fmt.Sprintf("%s %sSummary: %s held back (highest %s)", e.subjectPrefix, test, plural(dg.Held, "alert"), dg.Highest))
+		}
+		return strings.TrimSpace(fmt.Sprintf("%s %sDigest: %s, %s (highest %s)", e.subjectPrefix, test, plural(dg.Patterns, "problem"), plural(dg.Events, "event"), dg.Highest))
+	}
+	return strings.TrimSpace(e.subjectPrefix + " " + m.Headline() + ": " + model.Truncate(strings.Join(strings.Fields(m.Event.Message), " "), 120))
+}
+
+func (e *email) compose(m *Message) ([]byte, error) {
+	var html string
+	if m.Digest != nil {
+		var err error
+		if html, err = digestHTML(m); err != nil {
+			return nil, err
+		}
+	} else {
+		var htmlBody bytes.Buffer
+		err := emailHTML.Execute(&htmlBody, map[string]any{
+			"Color": severityColor(m.Event.Severity), "Title": m.Headline(), "Excerpt": m.Excerpt(8000),
+			"Facts": m.Facts(), "Link": m.Link,
+		})
+		if err != nil {
+			return nil, err
+		}
+		html = htmlBody.String()
 	}
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	subject := strings.TrimSpace(e.subjectPrefix + " " + m.Title() + ": " + model.Truncate(strings.Join(strings.Fields(m.Event.Message), " "), 120))
 	toList := make([]string, len(e.to))
 	for i, a := range e.to {
 		toList[i] = a.String()
@@ -168,19 +230,22 @@ func (e *email) compose(m *Message) ([]byte, error) {
 	hdr := []string{
 		"From: " + e.from.String(),
 		"To: " + strings.Join(toList, ", "),
-		"Subject: " + mime.QEncoding.Encode("utf-8", subject),
+		"Subject: " + mime.QEncoding.Encode("utf-8", e.subject(m)),
 		"Date: " + time.Now().Format(time.RFC1123Z),
 		fmt.Sprintf("Message-ID: <%s@lissandra>", model.NewID()),
 		"MIME-Version: 1.0",
 		"Content-Type: multipart/alternative; boundary=" + mw.Boundary(),
-		"X-Lissandra-Severity: " + string(m.Event.Severity),
-		"X-Lissandra-Fingerprint: " + m.Event.Fingerprint,
+	}
+	if dg := m.Digest; dg != nil {
+		hdr = append(hdr, "X-Lissandra-Kind: digest", "X-Lissandra-Digest: "+dg.ID, "X-Lissandra-Severity: "+string(dg.Highest))
+	} else {
+		hdr = append(hdr, "X-Lissandra-Kind: alert", "X-Lissandra-Severity: "+string(m.Event.Severity), "X-Lissandra-Fingerprint: "+m.Event.Fingerprint)
 	}
 	head := strings.Join(hdr, "\r\n") + "\r\n\r\n"
 
 	for _, part := range []struct{ ctype, body string }{
 		{"text/plain; charset=utf-8", m.PlainText()},
-		{"text/html; charset=utf-8", htmlBody.String()},
+		{"text/html; charset=utf-8", html},
 	} {
 		pw, err := mw.CreatePart(textproto.MIMEHeader{
 			"Content-Type":              {part.ctype},
