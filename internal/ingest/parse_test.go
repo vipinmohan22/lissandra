@@ -60,7 +60,7 @@ func TestParseWrappersAndRecordsPath(t *testing.T) {
 }
 
 func TestParseNDJSONAndFallbacks(t *testing.T) {
-	body := []byte("{\"msg\":\"one\",\"level\":30}\nnot json at all\n\n{\"log\":\"three\",\"date\":1791720000.5}\n")
+	body := []byte("{\"msg\":\"one\",\"level\":30,\"pid\":1,\"hostname\":\"h\"}\nnot json at all\n\n{\"log\":\"three\",\"date\":1791720000.5}\n")
 	evs, err := Parse(body, "application/x-ndjson", src(config.Parse{}), now)
 	if err != nil || len(evs) != 3 {
 		t.Fatalf("got %d, err %v", len(evs), err)

@@ -384,8 +384,8 @@ func TestImportAsksEngineWhenRequested(t *testing.T) {
 	st.Engine.URL = fake.URL
 	e.admin("PUT", "/api/settings", st, nil)
 
-	log := "2026-10-11T10:00:00Z ERROR replica lag on the database is 40s\n" +
-		"2026-10-11T10:00:01Z ERROR replica lag on the database is 41s\n" +
+	log := "2026-10-11T10:00:00Z ERROR the database quorum shrank to 40 members\n" +
+		"2026-10-11T10:00:01Z ERROR the database quorum shrank to 41 members\n" +
 		"2026-10-11T10:00:02Z ERROR certificate x509 expired for upstream network peer\n" +
 		"2026-10-11T10:00:03Z INFO started\n"
 	var rep importer.Report

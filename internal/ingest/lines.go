@@ -1,11 +1,30 @@
 package ingest
 
 import (
+	"bytes"
 	"regexp"
 	"strings"
 )
 
 var continuation = regexp.MustCompile(`^(\s+\S|at\s|Caused by:|\.\.\. \d+ more)`)
+
+// Records whose next lines are not indented, which fold joins all the same:
+var (
+	// java.util.logging's SimpleFormatter: a header line, then the level and
+	// the message ("Oct 11, 2026 10:00:00 AM org.example.Foo run" + "SEVERE: …").
+	julHeader = regexp.MustCompile(`^[A-Z][a-z]{2} \d{1,2}, \d{4} \d{1,2}:\d\d:\d\d [AP]M \S+(?: \S+)?$`)
+	julLevel  = regexp.MustCompile(`^(?:SEVERE|WARNING|INFO|CONFIG|FINE|FINER|FINEST): `)
+	// A Go panic or runtime fatal error and its goroutine dump.
+	goPanic = regexp.MustCompile(`^(?:panic: |fatal error: )`)
+	goTrace = regexp.MustCompile(`^(?:\[signal |goroutine \d+ \[|created by |exit status \d+$|\[recovered\]|panic: |\.\.\.additional frames elided\.\.\.$|[\w\-./]+\.(?:\(\*?[\w\[\]]+\)\.)?[\w\[\]·.-]+\(.*\)$)`)
+	// A Python traceback after the record that logged it, its chained
+	// tracebacks and its closing exception line; a Java exception header
+	// after the record that logged it ("… with root cause" + "java.lang.…").
+	pyTraceback = regexp.MustCompile(`^(?:Traceback \(most recent call last\):|During handling of the above exception, another exception occurred:|The above exception was the direct cause of the following exception:)$`)
+	pyException = regexp.MustCompile(`^(?:[A-Za-z_][\w]*\.)*[A-Z]\w*(?:Error|Exception|Warning|Exit|Interrupt|Iteration)(?::|$)`)
+	javaExc     = regexp.MustCompile(`^(?:[a-z_$][\w$]*\.)+[A-Z][\w$]*(?:Exception|Error|Throwable)(?::|$)`)
+	loggedIssue = regexp.MustCompile(`\b(?:ERROR|CRITICAL|FATAL|SEVERE|WARN|WARNING|EXCEPTION)\b|\bwith root cause$`)
+)
 
 // lineSplitter turns lines into log records.
 //
@@ -61,7 +80,7 @@ func (s *lineSplitter) push(line string, emit func(rec any, startLine int)) {
 		if s.startsRecord != nil {
 			cont = !s.startsRecord(line)
 		} else {
-			cont = continuation.MatchString(line)
+			cont = continuation.MatchString(line) || s.joins(line)
 		}
 	}
 	if cont {
@@ -80,6 +99,29 @@ func (s *lineSplitter) push(line string, emit func(rec any, startLine int)) {
 	s.flush(emit)
 	s.pending = append(s.pending[:0], line...)
 	s.start, s.conts, s.has = s.line, 0, true
+}
+
+// joins reports whether line, not indented, continues the pending record
+// all the same (see julHeader and the patterns after it).
+func (s *lineSplitter) joins(line string) bool {
+	p := s.pending
+	first, last := p, p
+	if i := bytes.IndexByte(p, '\n'); i >= 0 {
+		first, last = p[:i], p[bytes.LastIndexByte(p, '\n')+1:]
+	}
+	switch {
+	case s.conts == 0 && julLevel.MatchString(line):
+		return julHeader.Match(first)
+	case goPanic.Match(first):
+		return goTrace.MatchString(line)
+	case pyTraceback.MatchString(line):
+		return bytes.Contains(p, []byte("Traceback (most recent call last):")) || s.conts == 0 && loggedIssue.Match(first)
+	case pyException.MatchString(line) && bytes.Contains(p, []byte("Traceback (most recent call last):")):
+		return len(last) > 0 && (last[0] == ' ' || last[0] == '\t')
+	case javaExc.MatchString(line):
+		return s.conts == 0 && loggedIssue.Match(first)
+	}
+	return false
 }
 
 // flush emits the pending text record, if any.

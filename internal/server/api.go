@@ -16,6 +16,7 @@ import (
 	"github.com/vipinmohan22/lissandra/internal/engine"
 	"github.com/vipinmohan22/lissandra/internal/events"
 	"github.com/vipinmohan22/lissandra/internal/ingest"
+	"github.com/vipinmohan22/lissandra/internal/learn"
 	"github.com/vipinmohan22/lissandra/internal/model"
 	"github.com/vipinmohan22/lissandra/internal/notify"
 	"github.com/vipinmohan22/lissandra/internal/poller"
@@ -865,6 +866,7 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 		next.Version = c.Version
 		next.Onboarding = c.Onboarding
 		*c = next
+		learn.MigratePatterns(c) // a backup from before may hold old patterns
 		return nil
 	}) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})

@@ -346,14 +346,15 @@ func TestHTTPParseUnchangedForTimestampedTraces(t *testing.T) {
 	// HTTP ingest keeps indent folding (no anchoring) and ISO-only times.
 	body := "2026-10-11 10:00:05,120 ERROR Request failed\njava.lang.IllegalStateException: boom\n\tat x(X.java:1)\nOct 11 10:15:02 host x\n"
 	evs, err := Parse([]byte(body), "text/plain", &config.Source{ID: "s", Name: "s", Parse: config.Parse{Format: config.FormatText}}, streamNow)
-	if err != nil || len(evs) != 3 {
+	if err != nil || len(evs) != 2 {
 		t.Fatalf("%v %q", err, messages(evs))
 	}
-	if evs[1].Message != "java.lang.IllegalStateException: boom\n\tat x(X.java:1)" || !evs[1].Timestamp.Equal(streamNow) {
-		t.Errorf("HTTP folding changed: %+v", evs[1])
+	// The exception header joins the ERROR record that logged it.
+	if evs[0].Message != "2026-10-11 10:00:05,120 ERROR Request failed\njava.lang.IllegalStateException: boom\n\tat x(X.java:1)" {
+		t.Errorf("HTTP folding changed: %+v", evs[0])
 	}
-	if !evs[2].Timestamp.Equal(streamNow) {
-		t.Errorf("HTTP ingest should not parse syslog times: %v", evs[2].Timestamp)
+	if !evs[1].Timestamp.Equal(streamNow) {
+		t.Errorf("HTTP ingest should not parse syslog times: %v", evs[1].Timestamp)
 	}
 	if evs[0].Line != 0 || evs[0].TimeSource != "" {
 		t.Errorf("HTTP events must not carry file fields: %+v", evs[0])

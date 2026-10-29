@@ -116,6 +116,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Learned rules saved under an older message pattern: rewrite them and
+	// merge the ones that now coincide, once, before anything uses them.
+	if rw, rm := learn.MigratePatterns(cfg.Get()); rw+rm > 0 {
+		if err := cfg.Update(func(c *config.Config) error { learn.MigratePatterns(c); return nil }); err != nil {
+			log.Warn("updating learned rules to the new message patterns failed; they still match", "err", err)
+		} else {
+			log.Info("updated learned rules to the new message patterns", "rewritten", rw, "merged_away", rm)
+		}
+	}
+	if missing, changed := config.DefaultRuleChanges(cfg.Get()); len(missing)+len(changed) > 0 {
+		log.Info("this version's default rules differ from the configured ones; review them in Rules → Default rules", "missing", len(missing), "changed", len(changed))
+	}
 	for _, w := range config.FileRefWarnings(cfg.Get()) {
 		log.Warn("config refers to a file Lissandra may not read", "detail", w)
 	}

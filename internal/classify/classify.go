@@ -50,6 +50,11 @@ func New(rules []config.Rule) *Engine {
 			if !c.CaseSensitive {
 				cc.value = strings.ToLower(c.Value)
 			}
+			if c.Field == "pattern" && (c.Op == config.OpEquals || c.Op == config.OpNotEquals) {
+				// A pattern saved by an older version (learned rules)
+				// keeps matching: normalize it as messages are now.
+				cc.value = Renormalize(c.Value)
+			}
 			if c.Op == config.OpRegex || c.Op == config.OpNotRegex {
 				pat := c.Value
 				if !c.CaseSensitive {
@@ -102,7 +107,7 @@ func (e *Engine) Classify(ev *model.Event) bool {
 		for _, t := range r.Tags {
 			ev.AddTag(t)
 		}
-		if r.Severity != "" {
+		if r.Severity != "" && !(r.KeepStated && stated) {
 			ev.SeverityGuessed = false
 			if r.SeverityMode == config.SeverityAtLeast {
 				if !ev.Severity.AtLeast(r.Severity) {

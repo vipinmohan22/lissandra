@@ -146,9 +146,13 @@ type Rule struct {
 	Category     string         `json:"category,omitempty"`
 	Severity     model.Severity `json:"severity,omitempty"`
 	SeverityMode string         `json:"severity_mode,omitempty"`
-	Tags         []string       `json:"tags,omitempty"`
-	Drop         bool           `json:"drop,omitempty"`
-	Stop         bool           `json:"stop,omitempty"`
+	// KeepStated applies Severity only to records that state no level of
+	// their own (the detector guessed one): a record logged at WARN that
+	// mentions an exception stays a warning.
+	KeepStated bool     `json:"keep_stated,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	Drop       bool     `json:"drop,omitempty"`
+	Stop       bool     `json:"stop,omitempty"`
 	// SkipEngine keeps matching events from the engine, so they keep
 	// the rules' result. A rejected learned rule sets it, so the engine's
 	// answer isn't applied (or learned) again.

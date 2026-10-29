@@ -194,7 +194,8 @@ func TestDefaultRulesCompileAndClassify(t *testing.T) {
 		"kernel: Out of memory: Killed process 1 (java)": "resource",
 		"login failed for user bob":                      "auth",
 		"ERROR: deadlock detected":                       "database",
-		"dial tcp 10.0.0.1:5432: connection refused":     "network",
+		"dial tcp 10.0.0.1:5432: connection refused":     "database",
+		"dial tcp 10.0.0.1:443: connection refused":      "network",
 		"deployment v1.2 rolled out":                     "deployment",
 	}
 	for msg, want := range cases {

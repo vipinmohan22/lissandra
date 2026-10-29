@@ -1,6 +1,11 @@
 package config
 
-import "github.com/vipinmohan22/lissandra/internal/model"
+import (
+	"encoding/json"
+	"slices"
+
+	"github.com/vipinmohan22/lissandra/internal/model"
+)
 
 // DefaultEngineModel is the engine checkpoint used unless the operator
 // picks another one.
@@ -49,42 +54,97 @@ func Defaults() *Config {
 				Stop:        true,
 			},
 			{
-				Name:         "Crash / panic",
+				Name:         "PostgreSQL client rejected",
+				Description:  "A client's bad password, missing pg_hba.conf entry or unknown role: PostgreSQL logs it as FATAL for that session, not for the server.",
 				Enabled:      true,
 				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `(?i)(panic:|fatal error:|segmentation fault|sigsegv|core dumped|unhandled exception|uncaught exception|process exited with code [1-9])`)},
+				Conditions:   []Condition{cond("message", OpRegex, `(?-i:FATAL):  (?:password authentication failed for user|no pg_hba\.conf entry for|role "[^"]*" does not exist)|,FATAL,28(?:P01|000),`)},
+				Category:     "auth",
+				Severity:     model.SeverityError,
+				SeverityMode: SeveritySet,
+				Tags:         []string{"auth"},
+			},
+			{
+				Name:         "Resource exhaustion",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\bout of memory: kill(?:ed)? process\b|\boom[-_ ]?kill|\bno space left on device\b|\b(?:disk|file ?system|volume) (?:is )?full\b|\btoo many open files\b`)},
+				Category:     "resource",
+				Severity:     model.SeverityCritical,
+				SeverityMode: SeverityAtLeast,
+			},
+			{
+				Name:         "Resource limits",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\bout ?of ?memory\b|\bOutOfMemoryError\b|\bresource[_ ]exhausted\b|\bquota exceeded\b|\bmemory limit\b|\bmemory size of \d+ bytes exhausted\b|\bcannot allocate memory\b`)},
+				Category:     "resource",
+				Severity:     model.SeverityError,
+				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
+			},
+			{
+				Name:    "Crash / panic",
+				Enabled: true,
+				Match:   MatchAll,
+				Conditions: []Condition{
+					cond("message", OpRegex, `(?:^|\s)panic: |(?:^|\n)fatal error: |\bsegmentation (?:fault|violation)\b|\bsigsegv\b|\bsegfault at [0-9a-f]+ ip [0-9a-f]+ sp [0-9a-f]+ error\b|\btraps: \S+\[\d+\] (?:general protection|trap (?:divide error|invalid opcode|stack segment))|\bkernel panic\b|\bcore dumped\b`),
+					cond("message", OpNotRegex, `\bchild\b[^\n]{0,40}\b(?:died|exit signal)\b`),
+				},
 				Category:     "application",
 				Severity:     model.SeverityCritical,
 				SeverityMode: SeverityAtLeast,
 				Tags:         []string{"crash"},
 			},
 			{
-				Name:         "Resource exhaustion",
-				Enabled:      true,
-				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `(?i)(out ?of ?memory|oom[- ]?kill|no space left on device|disk (is )?full|too many open files|resource exhausted|quota exceeded|memory limit)`)},
-				Category:     "resource",
+				Name:    "Service down",
+				Enabled: true,
+				Match:   MatchAll,
+				Conditions: []Condition{
+					cond("message", OpRegex, `\b(?:service|site|website|api|database|db|cluster|backend|upstream)s? (?:is |are |went |seems |appears )?(?:completely |currently |now )?(?:down|offline|unreachable)\b|\bhealth ?checks? (?:are |is )?failing\b|\b(?:all|every) (?:replicas|instances|backends|upstreams|endpoints|targets|pods|nodes|servers)(?: are| is)? (?:unhealthy|down|unavailable|failing|unreachable)\b|\bhas no server available\b`),
+					cond("message", OpNotRegex, `\b(?:shut(?:ting)?|bring(?:ing)?|brought|tak(?:e|ing)|took|turn(?:ing|ed)?|spin(?:ning)?|scal(?:e|ing|ed)|wind(?:ing)?|slow(?:ing|ed)?|count(?:ing)?)\b[^\n]{0,30}\bdown\b|\bfor maintenance\b|\bscheduled (?:downtime|maintenance)\b`),
+				},
+				Category:     "application",
 				Severity:     model.SeverityCritical,
 				SeverityMode: SeverityAtLeast,
+				Tags:         []string{"outage"},
 			},
 			{
-				Name:         "Security: attacks",
-				Enabled:      true,
-				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `(?i)(sql injection|xss|csrf|brute[- ]?force|malicious|intrusion|blocked by waf|path traversal|\.\./\.\./)`)},
+				Name:    "Security: attacks",
+				Enabled: true,
+				Match:   MatchAny,
+				Conditions: []Condition{
+					cond("message", OpRegex, `(sql injection|xss|csrf|brute[- ]?force|malicious|intrusion|blocked by waf|path traversal|"(?:GET|POST|HEAD|PUT|DELETE|PATCH|OPTIONS) [^"]*(?:\.\./|\.\.%2f|%2e%2e%2f|%2e%2e/|\.\.\\){2})`),
+					cond("message", OpRegex, `"(?:GET|POST|HEAD|PUT|DELETE|PATCH|OPTIONS) [^"]*(?:union(?:%20|\+|\s|/\*\*/)+(?:all(?:%20|\+|\s|/\*\*/)+)?select\b|(?:%27|')(?:%20|\+|\s)*(?:or|and)(?:%20|\+|\s)+(?:%27|')?\d+(?:%27|')?(?:%20|\+|\s)*(?:%3d|=)|\b(?:sleep|benchmark|pg_sleep)(?:%20|\+)*(?:\(|%28)\d|waitfor(?:%20|\+|\s)+delay|information_schema|(?:%3b|;)(?:%20|\+|\s)*(?:drop|delete|insert|update)(?:%20|\+|\s)+)`),
+					cond("message", OpRegex, `\b(?:sqlmap|nikto|wpscan|havij)/\d|\(nuclei\b|projectdiscovery/nuclei|\bacunetix\b`),
+				},
 				Category:     "security",
 				Severity:     model.SeverityError,
 				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
 				Tags:         []string{"attack"},
+			},
+			{
+				Name:         "Login failures",
+				Description:  "A wrong password or unknown user: routine one at a time, so a warning even when the words read like an error.",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `(?i)(failed password|invalid user|authentication (failed|failure)|login (failed|denied)|invalid (password|credentials))`)},
+				Category:     "auth",
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeveritySet,
+				KeepStated:   true,
+				Tags:         []string{"auth"},
 			},
 			{
 				Name:         "Auth failures",
 				Enabled:      true,
 				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `(?i)(unauthori[sz]ed|forbidden|authentication (failed|failure)|failed password|invalid (user|password|token|credentials|api key)|permission denied|access denied|login failed|jwt (expired|invalid))`)},
+				Conditions:   []Condition{cond("message", OpRegex, `(?i)(unauthori[sz]ed|forbidden|permission denied|access denied|invalid (token|api key)|jwt (expired|invalid))`)},
 				Category:     "auth",
 				Severity:     model.SeverityWarning,
 				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
 				Tags:         []string{"auth"},
 			},
 			{
@@ -95,17 +155,18 @@ func Defaults() *Config {
 					cond("status", OpRegex, `^5\d\d$`),
 					cond("status_code", OpRegex, `^5\d\d$`),
 					cond("http.status_code", OpRegex, `^5\d\d$`),
-					cond("message", OpRegex, `"\s5\d\d\s`),
+					cond("message", OpRegex, `"[A-Z]{3,10} [^"]* HTTP/[\d.]+" 5\d\d\b|\[GIN\] [^|]*\| 5\d\d \|`),
 				},
 				Category:     "http",
 				Severity:     model.SeverityError,
 				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
 			},
 			{
 				Name:       "Database",
 				Enabled:    true,
 				Match:      MatchAny,
-				Conditions: []Condition{cond("message", OpRegex, `(?i)(deadlock|sqlstate|postgres|mysql|mariadb|mongo(db)?|redis|connection pool|duplicate key|constraint violation|ORA-\d{4,5}|too many connections)`)},
+				Conditions: []Condition{cond("message", OpRegex, `(?i)(deadlock|sqlstate|postgres|mysql|mariadb|mongo(db)?|redis|connection pool|duplicate key|constraint violation|ORA-\d{4,5}|too many connections|\bjdbc\b|\bdb (?:query|connection|pool|error)\b|:(?:5432|3306|27017|6379|1433|1521)\b|\bthe database system is\b)`)},
 				Category:   "database",
 			},
 			{
@@ -116,6 +177,67 @@ func Defaults() *Config {
 				Category:   "network",
 			},
 			{
+				Name:         "TLS certificate expired",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\bcert(?:ificate)?s?\b[^\n]{0,80}?\b(?:has|have) expired\b|\bcert(?:ificate)? (?:is |has )?expired\b|\bexpired (?:tls |ssl |x509 )?cert(?:ificate)?\b|\bCERT_HAS_EXPIRED\b`)},
+				Category:     "network",
+				Severity:     model.SeverityError,
+				SeverityMode: SeverityAtLeast,
+				Tags:         []string{"tls"},
+			},
+			{
+				Name:         "TLS certificate expiring",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\bcert(?:ificate)?s?\b[^\n]{0,80}?\b(?:expires?|expiring|will expire)(?: in| within)? (?:(?:[0-9]|[12][0-9]|30) ?(?:days?|d)\b|\d+ ?(?:hours?|h|minutes?|m)\b|today\b|tomorrow\b|soon\b)`)},
+				Category:     "network",
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
+				Tags:         []string{"tls"},
+			},
+			{
+				Name:         "Replication lag",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\breplica(?:tion)?\b[^\n]{0,40}?\blag(?:ging)?\b|\bseconds_behind_(?:master|source)\b|\breplication delay\b|\bslave (?:lag|delay)\b`)},
+				Category:     "database",
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
+			},
+			{
+				Name:         "Queue backlog",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\bqueue\b[^\n]{0,60}?\b(?:depth|backlog|length|size)\b[^\n]{0,20}?\b\d{4,}\b|\b(?:0|no) (?:active )?consumers\b|\bconsumer lag\b|\bbacklog (?:of|is|at|grew to) \d{3,}\b`)},
+				Category:     "performance",
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
+			},
+			{
+				Name:         "Circuit breaker open",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\bcircuit[- ]?breaker\b[^\n]{0,60}?\b(?:open(?:ed)?|tripped)\b|\bcircuit (?:is )?(?:open|opened|tripped)\b`)},
+				Category:     "network",
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
+			},
+			{
+				Name:         "Disk usage high",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\b(?:disk|filesystem|file system|volume|partition|inode)s? (?:usage|space|utili[sz]ation|use|used)\b[^\n]{0,30}?\b(?:8[5-9]|9\d|100)(?:\.\d+)? ?%|\b(?:8[5-9]|9\d|100)(?:\.\d+)? ?% (?:full|used)\b|\blow (?:disk|free) space\b|\bdisk space (?:is )?(?:low|running out)\b|\bdisk watermark\b`)},
+				Category:     "resource",
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
+			},
+			{
 				Name:       "Slow operations",
 				Enabled:    true,
 				Match:      MatchAny,
@@ -123,13 +245,34 @@ func Defaults() *Config {
 				Category:   "performance",
 			},
 			{
+				Name:         "PostgreSQL slow statements",
+				Description:  "log_min_duration_statement lines of a second or more. PostgreSQL logs them as LOG.",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `\bLOG:\s+duration: \d{4,}(?:\.\d+)? ms\s+(?:statement|execute|parse|bind)\b`)},
+				Category:     "performance",
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeverityAtLeast,
+			},
+			{
 				Name:         "Exceptions / stack traces",
 				Enabled:      true,
 				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `(?i)(exception|traceback \(most recent call last\)|stack ?trace|\bat [\w.$]+\([\w]+\.(java|kt|scala):\d+\))`)},
+				Conditions:   []Condition{cond("message", OpRegex, `(?:^|[\s:(\[{"'=])[\w$.]*exception\b|traceback \(most recent call last\)|\bstack ?trace\b`)},
 				Category:     "application",
 				Severity:     model.SeverityError,
 				SeverityMode: SeverityAtLeast,
+				KeepStated:   true,
+			},
+			{
+				Name:         "Webpack critical dependency",
+				Description:  "webpack's \"Critical dependency:\" is a build warning, not a critical error.",
+				Enabled:      true,
+				Match:        MatchAny,
+				Conditions:   []Condition{cond("message", OpRegex, `^Critical dependency: `)},
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeveritySet,
+				KeepStated:   true,
 			},
 			{
 				Name:       "Deployments",
@@ -160,4 +303,66 @@ func Defaults() *Config {
 			},
 		},
 	}
+}
+
+// DefaultRuleChanges compares c's rules with this version's default rules,
+// by name: missing are defaults c has no rule of that name for, changed
+// those whose rule of that name differs in what it does (its ID and whether
+// it is enabled aside). A default an operator renamed is theirs.
+func DefaultRuleChanges(c *Config) (missing, changed []string) {
+	d := Defaults()
+	Normalize(d)
+	for _, def := range d.Rules {
+		i := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == def.Name })
+		switch {
+		case i < 0:
+			missing = append(missing, def.Name)
+		case !sameRule(c.Rules[i], def):
+			changed = append(changed, def.Name)
+		}
+	}
+	return missing, changed
+}
+
+// RestoreDefaultRules gives c this version's default rules named in names
+// (all when names is empty): a rule of that name gets the default's
+// definition, keeping its ID and whether it is enabled; a missing one is
+// inserted after the closest default before it that c has, or first. It
+// returns how many rules it changed or added.
+func RestoreDefaultRules(c *Config, names []string) int {
+	d := Defaults()
+	Normalize(d)
+	n := 0
+	for k, def := range d.Rules {
+		if len(names) > 0 && !slices.Contains(names, def.Name) {
+			continue
+		}
+		if i := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == def.Name }); i >= 0 {
+			if !sameRule(c.Rules[i], def) {
+				def.ID, def.Enabled = c.Rules[i].ID, c.Rules[i].Enabled
+				c.Rules[i] = def
+				n++
+			}
+			continue
+		}
+		at := 0
+		for j := k - 1; j >= 0; j-- {
+			if i := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == d.Rules[j].Name }); i >= 0 {
+				at = i + 1
+				break
+			}
+		}
+		def.ID = ""
+		c.Rules = slices.Insert(c.Rules, at, def)
+		n++
+	}
+	return n
+}
+
+// sameRule reports whether a and b do the same, IDs and Enabled aside.
+func sameRule(a, b Rule) bool {
+	a.ID, b.ID, a.Enabled, b.Enabled = "", "", false, false
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
 }

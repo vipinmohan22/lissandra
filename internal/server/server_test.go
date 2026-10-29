@@ -420,7 +420,7 @@ func TestEngineTrainingDataAndRulesView(t *testing.T) {
 	}
 	push("ERROR java.lang.OutOfMemoryError: Java heap space\n") // rule: resource
 	push("ERROR java.lang.OutOfMemoryError: Java heap space\n") // same pattern
-	push("ERROR the replica of the database is lagging\n")      // engine: database
+	push("ERROR the database quorum shrank\n")                  // engine: database
 	deadline := time.Now().Add(5 * time.Second)
 	var evs []model.Event
 	for len(evs) < 3 && time.Now().Before(deadline) {

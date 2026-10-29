@@ -55,8 +55,8 @@ func logLines(n int, every func(i int) string) string {
 
 func TestReportAggregates(t *testing.T) {
 	input := "2026-10-11T10:00:00Z INFO started\n" +
-		"2026-10-11T10:00:05Z ERROR payment failed: connection refused to db:5432\n" +
-		"2026-10-11T10:00:06Z ERROR payment failed: connection refused to db:5433\n" +
+		"2026-10-11T10:00:05Z ERROR payment failed: connection refused to payments:8443\n" +
+		"2026-10-11T10:00:06Z ERROR payment failed: connection refused to payments:8444\n" +
 		"2026-10-11T10:01:00Z WARN login failed for user bob\n" +
 		"{\"msg\":\"GET /healthz 200\"}\n"
 	routes := func(ev *model.Event) []string {

@@ -224,8 +224,8 @@ func TestAnalyzeWithEngine(t *testing.T) {
 	fake := enginetest.New()
 	defer fake.Close()
 	dir := t.TempDir()
-	f := writeFile(t, dir, "app.log", "2026-10-11 10:00:00 ERROR replica lag on the database is 40s\n"+
-		"2026-10-11 10:00:01 ERROR replica lag on the database is 41s\n"+
+	f := writeFile(t, dir, "app.log", "2026-10-11 10:00:00 ERROR the database quorum shrank to 40 members\n"+
+		"2026-10-11 10:00:01 ERROR the database quorum shrank to 41 members\n"+
 		"2026-10-11 10:00:02 INFO started\n")
 	code, out, errOut := analyze(t, "", "-engine", fake.URL, f)
 	if code != 0 {

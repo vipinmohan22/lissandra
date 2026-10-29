@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -87,7 +88,7 @@ func (l *Learner) Configure(cfg *config.Config) {
 	for i := range cfg.Rules {
 		r := &cfg.Rules[i]
 		if p := patternOf(r); p != "" {
-			known[key(r.Learned.SourceID, p)] = true
+			known[key(r.Learned.SourceID, classify.Renormalize(p))] = true
 		}
 		if r.Status == config.RuleReview {
 			review++
@@ -152,7 +153,7 @@ func (l *Learner) Observe(ev *model.Event) {
 func newRule(ev *model.Event, pattern string) config.Rule {
 	e := ev.Engine
 	r := config.Rule{
-		Name:       fmt.Sprintf("Learned: %s — %s", e.Category, model.Truncate(pattern, 60)),
+		Name:       ruleName(e.Category, pattern),
 		Enabled:    true,
 		Match:      config.MatchAll,
 		Conditions: []config.Condition{{Field: "pattern", Op: config.OpEquals, Value: pattern}},
@@ -175,6 +176,99 @@ func newRule(ev *model.Event, pattern string) config.Rule {
 		r.Learned.Severity, r.Learned.SeverityConfidence = e.Severity, e.SeverityConfidence
 	}
 	return r
+}
+
+// MigratePatterns brings learned rules saved under an older
+// classify.Pattern up to date, in c: a rule that still holds the pattern
+// of its example gets the example's pattern now; any other gets its
+// pattern renormalized. Learned rules that then share a source and a
+// pattern are merged into one: an approved rule wins over a rejected one,
+// which wins over one awaiting review, the earliest on a tie; it takes the
+// place of the first of them. It returns how many rules were rewritten and
+// how many removed. Running it again changes nothing.
+func MigratePatterns(c *config.Config) (rewritten, removed int) {
+	for i := range c.Rules {
+		r := &c.Rules[i]
+		old := patternOf(r)
+		if old == "" {
+			continue
+		}
+		next := classify.Renormalize(old)
+		if ex := r.Learned.Example; ex != "" && classify.LegacyPattern(ex) == old {
+			next = classify.Pattern(ex)
+		}
+		if next == old || next == "" {
+			continue
+		}
+		if r.Name == ruleName(r.Learned.Category, old) {
+			r.Name = ruleName(r.Learned.Category, next)
+		}
+		r.Conditions[0].Value = next
+		rewritten++
+	}
+	rank := func(r *config.Rule) int {
+		switch r.Status {
+		case config.RuleActive:
+			return 0
+		case config.RuleRejected:
+			return 1
+		}
+		return 2
+	}
+	type group struct{ first, keep, n int }
+	groups := map[string]*group{}
+	var order []string
+	for i := range c.Rules {
+		r := &c.Rules[i]
+		p := patternOf(r)
+		if p == "" {
+			continue
+		}
+		k := strings.Join(r.SourceIDs, ",") + "\x00" + key(r.Learned.SourceID, p)
+		g := groups[k]
+		if g == nil {
+			groups[k] = &group{first: i, keep: i, n: 1}
+			order = append(order, k)
+			continue
+		}
+		g.n++
+		if rank(r) < rank(&c.Rules[g.keep]) {
+			g.keep = i
+		}
+	}
+	drop := map[int]bool{}
+	for _, k := range order {
+		g := groups[k]
+		if g.n == 1 {
+			continue
+		}
+		keep := c.Rules[g.keep]
+		if keep.Description == "" {
+			keep.Description = fmt.Sprintf("Merged from %d learned rules when message patterns changed.", g.n)
+		}
+		c.Rules[g.first] = keep
+		for i := range c.Rules {
+			if i != g.first && patternOf(&c.Rules[i]) != "" && strings.Join(c.Rules[i].SourceIDs, ",")+"\x00"+key(c.Rules[i].Learned.SourceID, patternOf(&c.Rules[i])) == k {
+				drop[i] = true
+			}
+		}
+	}
+	if len(drop) > 0 {
+		out := c.Rules[:0]
+		for i, r := range c.Rules {
+			if !drop[i] {
+				out = append(out, r)
+			}
+		}
+		c.Rules = out
+		removed = len(drop)
+	}
+	return rewritten, removed
+}
+
+// ruleName is the name a rule learned for pattern gets.
+func ruleName(category, pattern string) string {
+	return fmt.Sprintf("Learned: %s — %s", category, model.Truncate(pattern, 60))
 }
 
 // Run writes proposed rules until ctx ends.
@@ -213,7 +307,7 @@ func (l *Learner) write(batch []config.Rule) {
 		have := map[string]bool{}
 		for i := range c.Rules {
 			if p := patternOf(&c.Rules[i]); p != "" {
-				have[key(c.Rules[i].Learned.SourceID, p)] = true
+				have[key(c.Rules[i].Learned.SourceID, classify.Renormalize(p))] = true
 			}
 		}
 		sources := map[string]bool{}

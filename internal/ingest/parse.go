@@ -171,15 +171,23 @@ func toEvent(rec any, p config.Parse, now time.Time, tp timeParser) (ev model.Ev
 		for k, v := range r {
 			fields[k] = v
 		}
-		if key, v, ok := pick(r, p.MessageField, messageKeys); ok {
+		key, v, hasMessage := pick(r, p.MessageField, messageKeys)
+		if hasMessage {
 			ev.Message = model.ToString(v)
 			delete(fields, key)
 		} else {
 			b, _ := json.Marshal(r)
 			ev.Message = string(b)
 		}
-		if _, v, ok := pick(r, p.LevelField, levelKeys); ok {
+		if key, v, ok := pick(r, p.LevelField, levelKeys); ok {
 			ev.Level = model.ToString(v)
+			// A number is a level only on a scale the record's shape names:
+			// a sensor's or a game's "level": 60 is not pino's fatal.
+			if n, err := strconv.Atoi(strings.TrimSpace(ev.Level)); err == nil && p.LevelField == "" && !numericLevelOK(key, n, r, hasMessage) {
+				ev.Level = ""
+			}
+		} else if lv, ok := mongoLevel(r); ok && p.LevelField == "" {
+			ev.Level = lv
 		}
 		if _, v, ok := pick(r, p.TimestampField, timestampKeys); ok {
 			if ts, ok := tp.valueTime(v); ok {
@@ -192,6 +200,51 @@ func toEvent(rec any, p config.Parse, now time.Time, tp timeParser) (ev model.Ev
 	}
 	ev.Message = model.Truncate(strings.TrimSpace(ev.Message), MaxMessageBytes)
 	return ev, hasTime
+}
+
+// numericLevelOK reports whether n, the value of the level key key in r,
+// is a log level: syslog's 0-7 (journald's PRIORITY, GELF's level) in a
+// record with a message, pino's and bunyan's 10-60 and Monolog's 100-600
+// only in a record shaped as theirs. A sensor's or a game's "level": 60 is
+// not pino's fatal; a record without a message is data.
+func numericLevelOK(key string, n int, r map[string]any, hasMessage bool) bool {
+	has := func(k string) bool { _, ok := r[k]; return ok }
+	switch {
+	case key == "PRIORITY" || key == "priority":
+		return n >= 0 && n <= 7
+	case key != "level" && key != "severity" && key != "lvl":
+		return false
+	case n >= 0 && n <= 7:
+		return hasMessage
+	case has("channel") && (has("datetime") || has("level_name")): // Monolog
+		switch n {
+		case 100, 200, 250, 300, 400, 500, 550, 600:
+			return true
+		}
+		return false
+	}
+	_, epoch := r["time"].(json.Number)
+	if has("pid") && has("hostname") || has("v") && has("name") || epoch && has("msg") { // pino, bunyan
+		return n%10 == 0 && n >= 10 && n <= 60
+	}
+	return false
+}
+
+// mongoLevel reads the severity of MongoDB 4.4+'s structured log
+// ({"t":{"$date":…},"s":"W","c":"CONTROL",…}): F, E, W, I or D1-D5.
+func mongoLevel(r map[string]any) (string, bool) {
+	t, ok := r["t"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	if _, ok := t["$date"]; !ok {
+		return "", false
+	}
+	s, ok := r["s"].(string)
+	if !ok || len(s) == 0 || len(s) > 2 || !strings.ContainsRune("FEWID", rune(s[0])) || len(s) == 2 && (s[0] != 'D' || s[1] < '1' || s[1] > '5') {
+		return "", false
+	}
+	return s, true
 }
 
 // pick finds a field by explicit path, or by the first matching candidate.
