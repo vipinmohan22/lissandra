@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vipinmohan22/lissandra/internal/classify"
 	"github.com/vipinmohan22/lissandra/internal/config"
 )
 
@@ -20,6 +21,12 @@ func TestNumericLevelNeedsALogRecord(t *testing.T) {
 		`{"MESSAGE":"started","PRIORITY":"6"}`:                                                                    "6",
 		`{"message":"disk almost full","level":4}`:                                                                "4",
 		`{"level":"warn","msg":"string levels are kept"}`:                                                         "warn",
+		// pino with base: null, an ISO time, no time, or messageKey "message"
+		`{"level":60,"time":"2026-10-29T10:00:00.000Z","msg":"cannot continue: config store unavailable, exiting"}`: "60",
+		`{"level":50,"time":"2026-10-29T10:00:00.000Z","msg":"charge request to stripe returned 402"}`:              "50",
+		`{"level":50,"time":1793268000000,"message":"charge request to stripe returned 402"}`:                       "50",
+		`{"level":50,"msg":"charge request to stripe returned 402"}`:                                                "50",
+		`{"level":30,"time":1793268000000,"msg":"tank reading","sensor":"t3"}`:                                      "",
 	} {
 		evs, err := Parse([]byte(body), "application/json", src, time.Now())
 		if err != nil || len(evs) != 1 || evs[0].Level != want {
@@ -54,10 +61,43 @@ func TestTextFoldsUnindentedContinuations(t *testing.T) {
 		"python not after info":          {"INFO done\nTraceback (most recent call last):\n  File \"a.py\", line 1, in f\nKeyError: 'x'\n", 2},
 		"java header":                    {"2026-10-29 07:00:09.293 ERROR 1 --- [nio-8080-exec-10] o.a.c.c.C.[.[.[/].[dispatcherServlet] : Servlet.service() threw exception with root cause\njava.lang.NullPointerException: Cannot invoke \"x()\"\n\tat com.shop.TaxService.computeTax(TaxService.java:87)\n", 1},
 		"exception word is not a header": {"ERROR failed\nException handling is configured\n", 2},
+		"two tracebacks":                 {"Traceback (most recent call last):\n  File \"/app/worker.py\", line 42, in process\n    handle(job)\nValueError: bad payload\nTraceback (most recent call last):\n  File \"/app/db.py\", line 5, in connect\n    conn = psycopg2.connect(dsn)\npsycopg2.OperationalError: could not connect to server: Connection refused\n", 2},
+		"warning then a crash":           {"2026-10-29 10:00:00,000 WARNING worker: transient failure, retrying\nTraceback (most recent call last):\n  File \"/app/worker.py\", line 10, in run\n    fetch()\nrequests.exceptions.ConnectionError: timeout\nTraceback (most recent call last):\n  File \"/app/main.py\", line 3, in <module>\n    main()\nMemoryError\n", 2},
+		"jul with its throwable":         {"Oct 29, 2026 10:00:00 AM com.shop.OrderService place\nSEVERE: Order placement failed\njava.lang.IllegalStateException: ledger closed\n\tat com.shop.OrderService.place(OrderService.java:42)\n\tat com.shop.Api.handle(Api.java:10)\n", 1},
+		"jul info then an exception":     {"Oct 29, 2026 10:00:00 AM com.shop.OrderService place\nINFO: placed\nOct 29, 2026 10:00:01 AM com.shop.OrderService place\nSEVERE: failed\njava.lang.IllegalStateException: x\n\tat a.B.c(B.java:1)\n", 2},
 	} {
 		evs, _ := Parse([]byte(c.body), "text/plain", src, time.Now())
 		if len(evs) != c.n {
 			t.Errorf("%s: %d events, want %d: %q", name, len(evs), c.n, messages(evs))
+		}
+	}
+}
+
+// A level journald, Docker's GELF driver or a syslog PRI gives a whole
+// stream (6 for stdout, 3 for stderr) is not the program's: rules that keep
+// a stated level still apply to the text.
+func TestStreamDefaultLevelKeepsRules(t *testing.T) {
+	src := &config.Source{ID: "s", Name: "s", Parse: config.Parse{Format: config.FormatAuto}}
+	c := config.Defaults()
+	if err := config.Normalize(c); err != nil {
+		t.Fatal(err)
+	}
+	e := classify.New(c.Rules)
+	for _, tc := range []struct{ body, want string }{
+		{`{"MESSAGE":"Exception in thread \"main\" java.lang.IllegalStateException: ledger closed\n\tat com.shop.App.main(App.java:10)","PRIORITY":"6","_SYSTEMD_UNIT":"shop.service"}`, "error"},
+		{`{"MESSAGE":"java.lang.OutOfMemoryError: Java heap space","PRIORITY":"6","_SYSTEMD_UNIT":"shop.service"}`, "error"},
+		{`{"version":"1.1","host":"web1","short_message":"10.0.0.1 - - [29/Oct/2026:10:00:00 +0000] \"GET /api/orders HTTP/1.1\" 502 157 \"-\" \"curl/8.5.0\"","level":6,"_container_name":"nginx"}`, "error"},
+		{`{"MESSAGE":"Failed password for invalid user admin from 203.0.113.9 port 52212 ssh2","PRIORITY":"6","SYSLOG_IDENTIFIER":"sshd"}`, "warning"},
+		{`{"MESSAGE":"2026-10-29 10:00:00 INFO Exception mapper registered","PRIORITY":"6"}`, "info"}, // the text states its level
+	} {
+		evs, err := Parse([]byte(tc.body), "application/json", src, time.Now())
+		if err != nil || len(evs) != 1 {
+			t.Fatalf("%v %d", err, len(evs))
+		}
+		ev := evs[0]
+		e.Classify(&ev)
+		if string(ev.Severity) != tc.want {
+			t.Errorf("got %s, want %s (level %q, rules %v): %.90s", ev.Severity, tc.want, ev.Level, ev.MatchedRules, ev.Message)
 		}
 	}
 }

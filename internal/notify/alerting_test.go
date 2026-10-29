@@ -260,9 +260,9 @@ func wantDecision(t *testing.T, decs []Decision, nid, action, code string) Decis
 }
 
 func (e *env) rightAway(code string) uint64 {
-	return e.d.RightAway[indexOf(RightAwayReasons, code)].Load()
+	return e.d.RightAway[indexOf(RightAwayReasons[:], code)].Load()
 }
-func (e *env) decided(action string) uint64 { return e.d.Decided[indexOf(Actions, action)].Load() }
+func (e *env) decided(action string) uint64 { return e.d.Decided[indexOf(Actions[:], action)].Load() }
 
 // 1. A route saved before delivery modes existed sends as it always did.
 func TestImmediateZeroValueKeepsBehaviour(t *testing.T) {
@@ -290,8 +290,10 @@ func TestImmediateZeroValueKeepsBehaviour(t *testing.T) {
 		t.Fatalf("messages = %d", len(msgs))
 	}
 	last := msgs[2]
-	if last.Suppressed != 1 || last.Reason.Text != "Still happening: 1 more since the alert at 09:00 UTC." || !last.Since.Equal(t0) {
-		t.Errorf("after the window: %d %q %v", last.Suppressed, last.Reason.Text, last.Since)
+	// the repeat was 2 h ago: the problem is back rather than still happening
+	if last.Suppressed != 1 || last.Reason.Text != "Happening again: 1 more after the alert at 09:00 UTC, the last at 09:01 UTC." ||
+		!last.Since.Equal(t0) || !last.LastRepeat.Equal(t0.Add(time.Minute)) || last.Headline() != "[ERROR] database · api · happening again" {
+		t.Errorf("after the window: %d %q %v %v %q", last.Suppressed, last.Reason.Text, last.Since, last.LastRepeat, last.Headline())
 	}
 	if e.buffer("n1") != nil || e.decided(ActionDigest) != 0 || len(e.sinks["n1"].digests()) != 0 {
 		t.Error("an immediate route batched something")
@@ -339,7 +341,7 @@ func TestSmartBatchesLesserEvents(t *testing.T) {
 	if eb.Fingerprint != "b" || eb.Count != 2 {
 		t.Errorf("entry b = %+v", eb)
 	}
-	if m.Reason.Text != `Batched every 30 min on "dev-slack". Right away: critical and up, and errors that are new, spiking or getting worse. Everything else from warning up: one digest every 30 min.` {
+	if m.Reason.Text != `Batched every 30 min on "dev-slack". Right away: critical and up, errors that are new, spiking or getting worse, and bursts of auth or security warnings. Everything else from warning up: one digest every 30 min.` {
 		t.Errorf("why: %q", m.Reason.Text)
 	}
 	if e.buffer("slack") != nil {
@@ -476,7 +478,7 @@ func TestNoveltyAndWarmup(t *testing.T) {
 		t.Errorf("status = %+v", st)
 	}
 	dec := wantDecision(t, e.at(t0.Add(61*time.Minute), e.ev("api", "app", "e3", model.SeverityError)), "slack", ActionSent, ReasonNew)
-	if dec.Reason.Text != "New problem: first seen just now; nothing like it in the last 7 days." {
+	if dec.Reason.Text != "New problem: first seen just now; nothing like it since Lissandra started watching api at 09:00 UTC." {
 		t.Errorf("new: %q", dec.Reason.Text)
 	}
 	wantDecision(t, e.at(t0.Add(62*time.Minute), e.ev("api", "app", "e3", model.SeverityError)), "slack", ActionDigest, ReasonDigest) // a repeat is batched
@@ -488,7 +490,10 @@ func TestNoveltyAndWarmup(t *testing.T) {
 	}
 	// A source added to a warm system warms up on its own.
 	wantDecision(t, e.at(back.Add(time.Minute), e.ev("billing", "app", "b1", model.SeverityError)), "slack", ActionDigest, ReasonDigest)
-	wantDecision(t, e.at(back.Add(2*time.Minute), e.ev("api", "network", "e9", model.SeverityError)), "slack", ActionSent, ReasonNew)
+	dec = wantDecision(t, e.at(back.Add(2*time.Minute), e.ev("api", "network", "e9", model.SeverityError)), "slack", ActionSent, ReasonNew)
+	if dec.Reason.Text != "New problem: first seen just now; nothing like it in the last 7 days." { // watched for 8 days
+		t.Errorf("new: %q", dec.Reason.Text)
+	}
 
 	e = newEnv(t, Options{Warmup: -1}, cfg())
 	wantDecision(t, e.at(t0, e.ev("api", "app", "e1", model.SeverityError)), "slack", ActionSent, ReasonNew)
@@ -597,12 +602,12 @@ func TestSpikeAgainstBaseline(t *testing.T) {
 			wantDecision(t, e.at(now, ev), "slack", ActionDigest, ReasonDigest)
 		}
 	})
-	t.Run("clock backwards", func(t *testing.T) {
+	t.Run("clock backwards", func(t *testing.T) { // a little: a step back of more than a minute moves alert state (TestClockStepBack)
 		e := newEnv(t, Options{}, cfg())
 		e.at(t0.Add(time.Hour), e.ev("api", "app", "other", model.SeverityError))
 		for i := 0; i < 30; i++ {
-			d := wantDecision(t, e.at(t0.Add(-time.Duration(i)*time.Minute), e.ev("api", "app", "p", model.SeverityError)), "slack", ActionDigest, ReasonDigest)
-			if d.Due.Before(t0.Add(time.Hour)) {
+			d := wantDecision(t, e.at(t0.Add(time.Hour-time.Duration(i)*2*time.Second), e.ev("api", "app", "p", model.SeverityError)), "slack", ActionDigest, ReasonDigest)
+			if d.Due.Before(t0.Add(90 * time.Minute)) {
 				t.Fatalf("due went backwards: %v", d.Due)
 			}
 		}
@@ -618,7 +623,7 @@ func TestWorseThanUsual(t *testing.T) {
 	wantDecision(t, e.at(t0, e.ev("api", "app", "w", model.SeverityWarning)), "slack", ActionDigest, ReasonDigest)
 	wantDecision(t, e.at(t0.Add(time.Minute), e.ev("api", "app", "w", model.SeverityWarning)), "slack", ActionDigest, ReasonDigest)
 	dec := wantDecision(t, e.at(t0.Add(2*time.Minute), e.ev("api", "app", "w", model.SeverityError)), "slack", ActionSent, ReasonWorse)
-	if dec.Reason.Text != "Got worse: now error; it was at most warning in the last 7 days." {
+	if dec.Reason.Text != "Got worse: now error; it was at most warning since Lissandra started watching api at 09:00 UTC." {
 		t.Errorf("worse: %q", dec.Reason.Text)
 	}
 }
@@ -1005,15 +1010,15 @@ func TestDecisionsAndReasons(t *testing.T) {
 		}
 	}
 	decs := e.at(t0, e.ev("checkout-api", "database", "c", model.SeverityCritical))
-	check(text(decs, "dev-slack"), `Critical: at or above "right away" (critical) on "dev-slack: error and above". It is also new: nothing like it in the last 7 days. Repeats for the next 1 h go into the digest.`)
-	check(text(decs, "oncall-pager"), `Critical: at or above "right away" (critical) on "dev-slack: error and above". It is also new: nothing like it in the last 7 days. Repeats for the next 1 h are counted and reported with the next alert.`)
+	check(text(decs, "dev-slack"), `Critical: at or above "right away" (critical) on "dev-slack: error and above". It is also new: nothing like it since Lissandra started watching checkout-api at 09:00 UTC. Repeats for the next 1 h go into the digest.`)
+	check(text(decs, "oncall-pager"), `Critical: at or above "right away" (critical) on "dev-slack: error and above". It is also new: nothing like it since Lissandra started watching checkout-api at 09:00 UTC. Repeats for the next 1 h are counted and reported with the next alert.`)
 	check(text(decs, "ops"), `Matches "dev-errors", which sends every matching event right away. Repeats are held back for 15 min.`)
 	decs = e.at(t0.Add(time.Minute), e.ev("checkout-api", "database", "c", model.SeverityCritical))
 	check(text(decs, "dev-slack"), "Repeat of the alert at 09:00 UTC: in the digest due 09:31 UTC.")
 	check(text(decs, "oncall-pager"), "Repeat of the alert at 09:00 UTC: counted, and reported with the next alert after 10:00 UTC.")
 	check(text(decs, "ops"), "Repeat of the alert at 09:00 UTC: counted, and reported with the next alert after 09:15 UTC.")
 	decs = e.at(t0.Add(2*time.Minute), e.ev("checkout-api", "network", "n", model.SeverityError))
-	check(text(decs, "dev-slack"), "New problem: first seen just now; nothing like it in the last 7 days.")
+	check(text(decs, "dev-slack"), "New problem: first seen just now; nothing like it since Lissandra started watching checkout-api at 09:00 UTC.")
 	decs = e.at(t0.Add(3*time.Minute), e.ev("checkout-api", "network", "n", model.SeverityError))
 	check(text(decs, "dev-slack"), "In the digest due 09:31 UTC. Right away: critical and up, and errors that are new, spiking or getting worse. Everything else from error up: one digest every 30 min.")
 	check(text(decs, "oncall-pager"), "oncall-pager is Pager (test): it gets only what is sent right away (here: critical and up), never digests.")
@@ -1032,9 +1037,9 @@ func TestDecisionsAndReasons(t *testing.T) {
 		!slices.Equal(del.Routes, []string{"dev-errors"}) || del.ID == "" {
 		t.Errorf("alert delivery = %+v", del)
 	}
-	id, ok := e.d.FlushDigest("dev-slack")
-	if !ok {
-		t.Fatal("nothing to flush")
+	id, err := e.d.FlushDigest("dev-slack")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if del, dg, ok := e.d.DeliveryDetail(id); !ok || del.Status != "queued" || dg == nil || dg.ID != id {
 		t.Errorf("queued digest detail: %+v %v", del, ok)
@@ -1049,8 +1054,8 @@ func TestDecisionsAndReasons(t *testing.T) {
 	if ds := e.d.Deliveries(0, KindDigest); len(ds) != 1 || ds[0].ID != id {
 		t.Errorf("kind filter: %+v", ds)
 	}
-	if _, ok := e.d.FlushDigest("dev-slack"); ok {
-		t.Error("flushed an empty buffer")
+	if _, err := e.d.FlushDigest("dev-slack"); !errors.Is(err, ErrNothingBatched) {
+		t.Errorf("flushed an empty buffer: %v", err)
 	}
 
 	// Preview reads no state: a critical, an error and the pager.
@@ -1092,9 +1097,11 @@ func TestPolicySentence(t *testing.T) {
 		want     string
 	}{
 		{smart(model.SeverityCritical, 30), model.SeverityError, time.Hour, "Right away: critical and up, and errors that are new, spiking or getting worse. Everything else from error up: one digest every 30 min."},
-		{smart(model.SeverityCritical, 60), model.SeverityWarning, time.Hour, "Right away: critical and up, and errors that are new, spiking or getting worse. Everything else from warning up: one digest every 1 h."},
+		{smart(model.SeverityCritical, 60), model.SeverityWarning, time.Hour, "Right away: critical and up, errors that are new, spiking or getting worse, and bursts of auth or security warnings. Everything else from warning up: one digest every 1 h."},
 		{smart(model.SeverityError, 30), model.SeverityError, time.Hour, "Everything from error up right away, with flood protection; repeats in a digest every 30 min."},
-		{smart(model.SeverityError, 90), model.SeverityWarning, time.Hour, "Right away: error and up. Everything else from warning up: one digest every 1 h 30 min."},
+		{smart(model.SeverityError, 90), model.SeverityWarning, time.Hour, "Right away: error and up, and bursts of auth or security warnings. Everything else from warning up: one digest every 1 h 30 min."},
+		{smart(model.SeverityWarning, 30), model.SeverityInfo, time.Hour, "Right away: warning and up. Everything else from info up: one digest every 30 min."},
+		{smart(model.SeverityCritical, 30), model.SeverityCritical, time.Hour, "Everything from critical up right away, with flood protection; repeats in a digest every 30 min."},
 		{config.DeliveryPolicy{Delivery: config.DeliveryDigest, DigestMinutes: 60}, model.SeverityError, 0, "Everything this route matches: one digest every 1 h."},
 		{config.DeliveryPolicy{Delivery: config.DeliveryImmediate}, model.SeverityError, 15 * time.Minute, "Every matching event right away; repeats of a problem are held back for 15 min."},
 		{config.DeliveryPolicy{}, model.SeverityError, 0, "Every matching event right away."},

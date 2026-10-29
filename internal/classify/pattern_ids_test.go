@@ -50,12 +50,77 @@ func TestPatternGeneratedIDs(t *testing.T) {
 	}
 }
 
+// Letters-only ids after an id prefix, in any case, and pod names.
+func TestPatternPrefixedIDsAndPods(t *testing.T) {
+	same := [][2]string{
+		// one capital (not enough for markCaseIDs), all small, all capitals
+		{"[req_pxvjxvmUpm] could not get JDBC connection", "[req_QEPeJPPoTB] could not get JDBC connection"},
+		{"[req_pxvjxvmupm] could not get JDBC connection", "[req_lvuxzawnwl] could not get JDBC connection"},
+		{"session sess_KQZVTWPMXB expired", "session sess_ydpmkasyma expired"},
+		{"charge failed for cus_gltbdfnsfr", "charge failed for cus_xkqzvbwmrt"}, // no vowel at all
+		{"trace-xjqvkzplmw dropped", "trace-bvcxzwqklp dropped"},
+		{`{"msg":"retry","job":"job_wqpxkzvbnm"}`, `{"msg":"retry","job":"job_hgfdsqwrtz"}`},
+		// a Deployment's pods: hash and suffix in any mix of letters and
+		// digits, a hash that reads as hex, another ReplicaSet
+		{"Container orders-java in pod orders-java-5b7c9d-ktfjq was OOMKilled (exit code 137)", "Container orders-java in pod orders-java-5b7c9d-rvfj5 was OOMKilled (exit code 137)"},
+		{"Container orders-java in pod orders-java-5b7c9d-x2k4p was OOMKilled (exit code 137)", "Container orders-java in pod orders-java-5b7c9d-ktfjq was OOMKilled (exit code 137)"},
+		{"Back-off restarting failed container web in pod web-7d9f8b6c4-x2x9z_default(0b8f1c2d-3e4f-5a6b-7c8d-9e0f1a2b3c4d)", "Back-off restarting failed container web in pod web-56cf7bd9qm-wq7zn_default(1a2b3c4d-5e6f-7081-92a3-b4c5d6e7f809)"},
+		{"Warning BackOff pod/coredns-7db6d8ff4d-pkhwz restarting", "Warning BackOff pod/coredns-7db6d8ff4d-mx2nq restarting"},
+		{`"hostname":"api-bcdfghjk-ktfjq","msg":"slow query"`, `"hostname":"api-5d8f9c7b6-2bq4z","msg":"slow query"`},
+		// a StatefulSet's pods
+		{"pod kafka-0 restarted", "pod kafka-12 restarted"},
+	}
+	for _, p := range same {
+		if a, b := Pattern(p[0]), Pattern(p[1]); a != b {
+			t.Errorf("want one pattern:\n  %q -> %q\n  %q -> %q", p[0], a, p[1], b)
+		}
+	}
+	differ := [][2]string{
+		// words after an id prefix
+		{"upstream request-timeout after 30s", "upstream request-received after 30s"},
+		{"session_expired for the cart", "session_started for the cart"},
+		{"job-scheduler stopped", "job-controller stopped"},
+		{"trace-enabled in config", "trace-disabled in config"},
+		{"span_context missing", "span_exporter missing"},
+		{"msg_handler failed", "msg_dispatcher failed"},
+		{"tx_packets dropped", "tx_carrier dropped"},
+		{"order_created received", "order_cancelled received"}, // not an id prefix
+		// an id prefix inside a longer name
+		{"max_req_pxvjxvmupm reached", "max_req_lvuxzawnwl reached"},
+		// hyphenated words and numbers that are no pod names
+		{"kube-scheduler-leader elected", "kube-controller-leader elected"},
+		{"check-in-progress", "check-in-complete"},
+		{"listening on port-8443-https", "listening on port-8443-smtps"},
+		{"retry-3-10s scheduled", "retry-3-10m scheduled"},
+		{"nginx-ingress-backend-bcdfg up", "nginx-ingress-frontend-bcdfg up"},
+	}
+	for _, p := range differ {
+		if Pattern(p[0]) == Pattern(p[1]) {
+			t.Errorf("want two patterns: %q and %q -> %q", p[0], p[1], Pattern(p[0]))
+		}
+	}
+	// A pattern saved before (letter case gone) renormalizes to today's,
+	// so learned rules keep matching and migrate.
+	for old, msg := range map[string]string{
+		"[req_pxvjxvmupm] could not get jdbc connection":                          "[req_lvuXzawnWL] could not get JDBC connection",
+		"container orders-java in pod orders-java-<id>-ktfjq was oomkilled":       "Container orders-java in pod orders-java-5b7c9d-x2k4p was OOMKilled",
+		"container orders-java in pod orders-java-<id>-rvfj<n> was oomkilled":     "Container orders-java in pod orders-java-5b7c9d-x2k4p was OOMKilled",
+		"back-off restarting failed container web in pod web-<hex>-<id>_default(": "Back-off restarting failed container web in pod web-56cf7bd9qm-wq7zn_default(",
+	} {
+		if got, want := Renormalize(old), Pattern(msg); got != want {
+			t.Errorf("Renormalize(%q) = %q, want %q", old, got, want)
+		}
+	}
+}
+
 func TestPatternIdempotentAndRenormalizes(t *testing.T) {
 	for _, m := range []string{
 		"[req_e3LK2IIpMb] could not get JDBC connection: Connection to db:5432 refused",
 		"Accepted publickey for deploy from 10.0.0.27 port 44257 ssh2: ED25519 SHA256:RNprkcmel7aeoQBLfbAxjNPvhyBTV97GR7tHQU2Cr2D",
 		"user=<alice@example.com> session=<dGVzdHNlc3Npb24> pc=0x4ad370",
 		strings.Repeat("order 42 failed for user=alice ", 30),
+		"[req_pxvjxvmUpm] trace-xjqvkzplmw sess_KQZVTWPMXB failed",
+		"Container orders-java in pod orders-java-5b7c9d-ktfjq was OOMKilled; pod/web-7d9f8b6c4-x2x9z and kafka-0",
 	} {
 		p := Pattern(m)
 		if Pattern(p) != p || Normalize(p) != p || Renormalize(p) != p {
@@ -95,6 +160,37 @@ func TestKeepStated(t *testing.T) {
 		e.Classify(ev)
 		if ev.Severity != c.want || ev.Category != "application" {
 			t.Errorf("%q: %s/%s, want %s/application", c.msg, ev.Severity, ev.Category, c.want)
+		}
+	}
+}
+
+// An account under attack is not its own problem; how a login went is.
+func TestPatternAccountsAndOutcomes(t *testing.T) {
+	same := [][2]string{
+		{"Failed password for root from 203.0.113.9 port 52211 ssh2", "Failed password for admin from 203.0.113.9 port 52211 ssh2"},
+		{"Accepted publickey for deploy from 10.0.0.5 port 50000 ssh2", "Accepted publickey for alice from 10.0.0.5 port 50000 ssh2"},
+		{"auth event login=failed user=bob", "auth event login=failed user=carol"},
+		{`{"event":"login","user":"bob","result":"denied"}`, `{"event":"login","user":"carol","result":"denied"}`},
+	}
+	for _, p := range same {
+		if a, b := Pattern(p[0]), Pattern(p[1]); a != b {
+			t.Errorf("want one pattern:\n  %q -> %q\n  %q -> %q", p[0], a, p[1], b)
+		}
+	}
+	differ := [][2]string{
+		{"auth event login=failed user=bob", "auth event login=success user=bob"},
+		{`{"login":"failed","user":"bob"}`, `{"login":"ok","user":"bob"}`},
+		{"mail email=bounced to=<x>", "mail email=delivered to=<x>"},
+		{"account=locked after 5 attempts", "account=active after 5 attempts"},
+	}
+	for _, p := range differ {
+		if Pattern(p[0]) == Pattern(p[1]) {
+			t.Errorf("want two patterns: %q and %q -> %q", p[0], p[1], Pattern(p[0]))
+		}
+	}
+	for _, msg := range []string{"Failed password for root from 203.0.113.9 port 52211 ssh2", "auth event login=failed user=bob"} {
+		if p := Pattern(msg); Pattern(p) != p || Renormalize(p) != p {
+			t.Errorf("not idempotent: %q", p)
 		}
 	}
 }

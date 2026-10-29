@@ -30,6 +30,7 @@ type savedState struct {
 	Critical       map[string][]time.Time   `json:"critical"`
 	Promoted       map[string]time.Time     `json:"promoted"`
 	Summaries      map[string]time.Time     `json:"summaries"`
+	Bursts         map[string]*burstState   `json:"bursts,omitempty"` // by source and category, not fingerprint
 }
 
 // loadState reads d.statePath into d.al. A missing file is a fresh start;
@@ -56,14 +57,21 @@ func (d *Dispatcher) loadState() {
 		return
 	}
 	if s.PatternVersion != classify.PatternVersion {
+		lost := 0 // repeats no alert will report: their problems have new fingerprints
+		for _, st := range s.Alerts {
+			if st != nil {
+				lost += st.Pending
+			}
+		}
+		d.LostEvents.Add(uint64(lost))
 		s.Sources, s.Patterns, s.Alerts = nil, nil, nil
-		d.log.Info("message patterns changed: alert history reset; sources warm up for 1 h", "was", s.PatternVersion, "now", classify.PatternVersion)
+		d.log.Info("message patterns changed: alert history reset; sources warm up for 1 h", "was", s.PatternVersion, "now", classify.PatternVersion, "lost_events", lost)
 	}
 	now := d.now()
 	clampState(&s, now)
 	a := &d.al
 	a.sources, a.patterns, a.alerts, a.digests = s.Sources, s.Patterns, s.Alerts, s.Digests
-	a.recent, a.critical, a.promoted, a.summaries = s.Recent, s.Critical, s.Promoted, s.Summaries
+	a.recent, a.critical, a.promoted, a.summaries, a.bursts = s.Recent, s.Critical, s.Promoted, s.Summaries, s.Bursts
 	for _, st := range a.alerts {
 		a.seq = max(a.seq, st.Seq)
 	}
@@ -86,6 +94,7 @@ func clampState(s *savedState, now time.Time) {
 	s.Critical = orEmpty(s.Critical)
 	s.Promoted = orEmpty(s.Promoted)
 	s.Summaries = orEmpty(s.Summaries)
+	s.Bursts = orEmpty(s.Bursts)
 	for k, v := range s.Sources {
 		if v == nil {
 			delete(s.Sources, k)
@@ -100,7 +109,7 @@ func clampState(s *savedState, now time.Time) {
 			delete(s.Patterns, k)
 			continue
 		}
-		for _, t := range []*time.Time{&v.First, &v.Last, &v.MaxSevAt, &v.SpikeAt} {
+		for _, t := range []*time.Time{&v.First, &v.Last, &v.MaxSevAt, &v.SpikeAt, &v.PeakAt, &v.LastPeakAt} {
 			clamp(t)
 		}
 		v.Hour, v.Minute = min(v.Hour, hour), min(v.Minute, minute)
@@ -112,6 +121,16 @@ func clampState(s *savedState, now time.Time) {
 		}
 		clamp(&v.LastSent)
 		clamp(&v.Updated)
+		clamp(&v.LastRepeat)
+	}
+	for k, b := range s.Bursts {
+		if b == nil {
+			delete(s.Bursts, k)
+			continue
+		}
+		clamp(&b.Last)
+		clamp(&b.At)
+		b.Minute = min(b.Minute, minute)
 	}
 	for k, b := range s.Digests {
 		if b == nil {
@@ -132,14 +151,16 @@ func clampState(s *savedState, now time.Time) {
 				delete(b.Entries, fp)
 				continue
 			}
-			for _, t := range []*time.Time{&e.First, &e.Last, &e.FirstSeen, &e.AlertedAt} {
+			for _, t := range []*time.Time{&e.First, &e.Last, &e.FirstSeen, &e.AlertedAt, &e.LastRepeat} {
 				clamp(t)
 			}
 		}
 		for fp, o := range b.Other {
 			if o == nil {
 				delete(b.Other, fp)
+				continue
 			}
+			clamp(&o.LastRepeat)
 		}
 	}
 	for _, m := range []map[string][]time.Time{s.Recent, s.Critical} {
@@ -215,7 +236,11 @@ func (a *alerting) snapshotState(now time.Time) *savedState {
 		Sources: make(map[string]*sourceState, len(a.sources)), Patterns: make(map[string]*patternState, len(a.patterns)),
 		Alerts: make(map[string]*alertState, len(a.alerts)), Digests: make(map[string]*digestBuffer, len(a.digests)),
 		Recent: map[string][]time.Time{}, Critical: map[string][]time.Time{},
-		Promoted: maps.Clone(a.promoted), Summaries: maps.Clone(a.summaries),
+		Promoted: maps.Clone(a.promoted), Summaries: maps.Clone(a.summaries), Bursts: make(map[string]*burstState, len(a.bursts)),
+	}
+	for k, v := range a.bursts {
+		cp := *v
+		s.Bursts[k] = &cp
 	}
 	for k, v := range a.sources {
 		cp := *v
@@ -237,6 +262,16 @@ func (a *alerting) snapshotState(now time.Time) *savedState {
 	}
 	for k, ts := range a.critical {
 		s.Critical[k] = slices.Clone(ts)
+	}
+	// Alerts not delivered yet are saved as if they had failed, newest
+	// first: if Lissandra stops (or crashes) before they go out, the next
+	// event alerts again, and their events are reported. A delivery that
+	// completes is saved as such the next time.
+	if len(a.inflight) > 0 {
+		saved := &alerting{alerts: s.Alerts, digests: s.Digests, patterns: s.Patterns, summaries: s.Summaries}
+		for _, seq := range slices.Backward(slices.Sorted(maps.Keys(a.inflight))) {
+			saved.undelivered(a.inflight[seq], now)
+		}
 	}
 	return s
 }

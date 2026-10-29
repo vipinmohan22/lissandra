@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -21,12 +22,17 @@ func (s *Server) getAlerting(w http.ResponseWriter, r *http.Request) {
 
 // sendDigest sends a channel's pending digest now, with reason "manual".
 func (s *Server) sendDigest(w http.ResponseWriter, r *http.Request) {
-	id, ok := s.dispatcher.FlushDigest(r.PathValue("notifier_id"))
-	if !ok {
-		writeError(w, http.StatusNotFound, "nothing is batched for this notifier")
-		return
+	id, err := s.dispatcher.FlushDigest(r.PathValue("notifier_id"))
+	switch {
+	case errors.Is(err, notify.ErrNotifierDisabled):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, notify.ErrQueueFull):
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+	case err != nil:
+		writeError(w, http.StatusNotFound, err.Error())
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]string{"id": id})
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": id})
 }
 
 // getDelivery returns one delivery record and, for one of the last 50
@@ -51,10 +57,9 @@ func (s *Server) listDeliveries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.dispatcher.Deliveries(limit, kind))
 }
 
-// decisions is what an event did on each channel, [] when none is known.
+// decisions is what an event did on each channel: [] when its routes
+// reached no enabled channel, null when nothing is known (it matched no
+// route, or it is older than the last 5,000 events).
 func (s *Server) decisions(eventID string) []notify.Decision {
-	if decs := s.dispatcher.Decisions(eventID); decs != nil {
-		return decs
-	}
-	return []notify.Decision{}
+	return s.dispatcher.Decisions(eventID)
 }

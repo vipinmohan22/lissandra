@@ -37,7 +37,12 @@ func (m *Message) Headline() string {
 		return m.Title() + " · spiking"
 	case ReasonWorse:
 		return m.Title() + " · got worse"
+	case ReasonBurst:
+		return m.Title() + " · burst"
 	case ReasonRepeat:
+		if quietSince(m.LastRepeat, m.today()) {
+			return m.Title() + " · happening again"
+		}
 		return m.Title() + " · still happening"
 	}
 	return m.Title()
@@ -124,9 +129,12 @@ func (m *Message) Facts() []Fact {
 		facts = append(facts, Fact{"Route", m.RouteName})
 	}
 	if m.Suppressed > 0 {
-		if !m.Since.IsZero() {
-			facts = append(facts, Fact{"Suppressed", fmt.Sprintf("%d more since the alert at %s", m.Suppressed, fmtClock(m.Since, m.today()))})
-		} else {
+		switch {
+		case !m.Since.IsZero() && quietSince(m.LastRepeat, m.today()):
+			facts = append(facts, Fact{"Suppressed", repeatsAfter(m.Suppressed, m.Since, m.SinceDigest, m.LastRepeat, m.today())})
+		case !m.Since.IsZero():
+			facts = append(facts, Fact{"Suppressed", fmt.Sprintf("%d more since %s", m.Suppressed, sinceWhat(m.Since, m.SinceDigest, m.today()))})
+		default:
 			facts = append(facts, Fact{"Suppressed", fmt.Sprintf("%d similar event(s) since the last alert", m.Suppressed)})
 		}
 	}
@@ -178,7 +186,7 @@ type digestLine struct {
 	what     string // "checkout-api · database"
 	when     string // "10:02–10:29 UTC"
 	head     string // the four above
-	flags    string // "NEW | HELD (new) | REPEATS of 10:02 | 2 UNDELIVERED"
+	flags    string // "NEW | HELD (new) | REPEATS of 10:02 | ALERTED at 10:02 as new | 2 UNDELIVERED"
 	sample   string
 	link     string
 }
@@ -204,11 +212,14 @@ func (m *Message) digestLines(n int) ([]digestLine, string) {
 		if e.New {
 			flags = append(flags, "NEW")
 		}
-		if e.Held != "" {
+		if e.Held != "" && e.HeldBy != ReasonUndelivered { // flagged UNDELIVERED below
 			flags = append(flags, "HELD ("+e.Held+")")
 		}
-		if e.Repeats > 0 {
+		switch {
+		case e.Repeats > 0:
 			flags = append(flags, "REPEATS of "+strings.TrimSuffix(fmtClock(e.AlertedAt, now), " UTC"))
+		case !e.AlertedAt.IsZero(): // its events came after it, below its right-away level
+			flags = append(flags, alertedFlag(e, now))
 		}
 		if e.Undelivered > 0 {
 			flags = append(flags, fmt.Sprintf("%d UNDELIVERED", e.Undelivered))
@@ -224,6 +235,23 @@ func (m *Message) digestLines(n int) ([]digestLine, string) {
 		more = fmt.Sprintf("+ %s", plural(moreEvents, "more event"))
 	}
 	return lines, more
+}
+
+// alertedFlag says that an entry's problem was alerted right away before:
+// "ALERTED at 10:02 as new".
+func alertedFlag(e *DigestEntry, now time.Time) string {
+	f := "ALERTED at " + strings.TrimSuffix(fmtClock(e.AlertedAt, now), " UTC")
+	switch e.AlertedAs {
+	case ReasonNew:
+		f += " as new"
+	case ReasonSpike:
+		f += " as spiking"
+	case ReasonWorse:
+		f += " as worse"
+	case ReasonBurst:
+		f += " as a burst"
+	}
+	return f
 }
 
 // severityColor returns a hex color per severity.

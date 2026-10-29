@@ -1069,6 +1069,8 @@ function alertDecisions(data, ev) {
   const decs = data.alerts || [];
   if (!decs.length) {
     if (!(data.routes || []).length) return `No route or alert group matches (${ev.severity} from ${ev.source_name}).`;
+    // [] is known: the routes reached no enabled channel; null is not
+    if (data.alerts) return `Matches ${data.routes.join(', ')}, but none of their channels is enabled: nothing was sent.`;
     return `${data.routes.join(', ')} (decision no longer in memory)`;
   }
   return h('div', { class: 'decisions' }, decs.map((d) => {
@@ -1333,14 +1335,18 @@ function previewTable(items) {
 }
 
 // previewAlerts says where a tested sample would be sent, per channel, as
-// if it were neither new nor spiking: "dev-slack: right away".
+// if it were neither new, spiking nor a burst: "dev-slack: right away".
 function previewAlerts(it) {
   if (it.dropped) return '—';
   const decs = it.alerts || [];
   if (!decs.length) return (it.routes || []).join(', ') || '—';
   const words = (d) => {
     if (d.action === 'right_away') return 'right away';
-    if (d.action === 'digest') return d.reason.text.includes('unless') ? 'in the next digest unless new, spiking or getting worse' : 'in the next digest';
+    if (d.action === 'digest') {
+      // "In the next digest (every 30 min), unless it is new, spiking or getting worse."
+      const unless = /, unless (.*)\.$/.exec(d.reason.text);
+      return unless ? `in the next digest unless ${unless[1]}` : 'in the next digest';
+    }
     return 'not sent (never gets digests)';
   };
   return decs.map((d) => h('div', { title: d.reason.text }, `${d.notifier_name}: ${words(d)}`));
@@ -1551,8 +1557,10 @@ function ruleActions(r) {
   if (r.drop) acts.push(h('span', { class: 'badge bad' }, 'drop'));
   if (r.category) acts.push(h('span', { class: 'badge' }, `category: ${r.category}`));
   if (r.severity) {
-    acts.push(h('span', { class: 'badge', title: r.keep_stated ? 'Only for records that state no level of their own' : null },
-      `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}${r.keep_stated ? ' (if unstated)' : ''}`));
+    const keep = r.keep_stated ? ' (if unstated)' : r.keep_stated_below_warning ? ' (not on stated info)' : '';
+    acts.push(h('span', { class: 'badge', title: r.keep_stated ? 'Only for records that state no level of their own'
+      : r.keep_stated_below_warning ? 'Not for records that state a level below warning' : null },
+      `${r.severity_mode === 'at_least' ? 'severity ≥' : 'severity ='} ${r.severity}${keep}`));
   }
   if (r.skip_engine) acts.push(h('span', { class: 'badge', title: 'Matching events are not sent to the engine' }, 'no engine'));
   if (r.stop) acts.push(h('span', { class: 'badge' }, 'stop'));
@@ -1640,6 +1648,7 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
   const stop = checkbox('Stop evaluating later rules', rule.stop);
   const skipEngine = checkbox('Don\'t ask the engine about matching events', rule.skip_engine);
   const keepStated = checkbox('Only when the record states no level', rule.keep_stated);
+  const keepQuiet = checkbox('Not when the record states a level below warning', rule.keep_stated_below_warning);
   const srcChecks = cache.sources.map((x) => ({ id: x.id, box: checkbox(x.name, (rule.source_ids || []).includes(x.id)) }));
 
   const testIn = h('textarea', { rows: 3, placeholder: 'Sample log to try this rule on…' }, fromEvent ? fromEvent.message : '');
@@ -1651,6 +1660,7 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
     conditions: conds.map((c) => ({ field: c.field.trim(), op: c.op, value: c.value || '', case_sensitive: Boolean(c.case_sensitive) })),
     category: catIn.value.trim(), severity: sev.value, severity_mode: sevMode.value, tags: splitList(tagsIn.value),
     drop: drop.input.checked, stop: stop.input.checked, skip_engine: skipEngine.input.checked, keep_stated: keepStated.input.checked,
+    keep_stated_below_warning: keepQuiet.input.checked,
     source_ids: srcChecks.filter((x) => x.box.input.checked).map((x) => x.id),
   });
   const status = ruleStatus(rule);
@@ -1670,7 +1680,9 @@ function editRule(rule, fromEvent, { onSaved } = {}) {
     h('fieldset', null, h('legend', null, 'Then'),
       h('div', { class: 'fields-3' }, field('Category', catIn), field('Severity', sev), field('Severity mode', sevMode)),
       h('div', { class: 'field' }, keepStated.el,
-        h('div', { class: 'help' }, 'A level the record states (a level field, or one written in the line) then wins: the severity above applies only where the level was guessed from the words. The category always applies.')),
+        h('div', { class: 'help' }, 'A level the record states (a level field, or one written in the line) then wins: the severity above applies only where the level was guessed from the words. The category always applies. The level journald, Docker or syslog gives a whole stream (6 for stdout, 3 for stderr) is not stated by the record.')),
+      h('div', { class: 'field' }, keepQuiet.el,
+        h('div', { class: 'help' }, 'A record that states debug, info or notice keeps it: a rule that pages on what a line says leaves routine lines alone.')),
       field('Add tags', tagsIn, 'Comma-separated.'),
       h('div', { class: 'row' }, drop.el, stop.el, skipEngine.el)),
     h('fieldset', null, h('legend', null, 'Try it'),
@@ -1881,13 +1893,16 @@ function policyText(p, minSev, throttle) {
     const imm = SEVERITIES.includes(p.immediate_severity) ? p.immediate_severity : 'critical';
     const every = fmtDuration((p.digest_minutes || 30) * 60);
     const floor = sevRank(min) < sevRank('error') ? 'error' : min;
+    // bursts of warnings reach routes that match warnings and don't send them right away anyway
+    const bursts = sevRank(min) <= sevRank('warning') && sevRank(imm) > sevRank('warning');
     if (sevRank(imm) > sevRank(floor)) {
       let s = `Right away: ${imm} and up`;
-      if (sevRank(min) <= sevRank('error')) s += ', and errors that are new, spiking or getting worse';
+      if (bursts) s += ', errors that are new, spiking or getting worse, and bursts of auth or security warnings';
+      else if (sevRank(min) <= sevRank('error')) s += ', and errors that are new, spiking or getting worse';
       return `${s}. Everything else from ${min} up: one digest every ${every}.`;
     }
     if (sevRank(imm) <= sevRank(min)) return `Everything from ${min} up right away, with flood protection; repeats in a digest every ${every}.`;
-    return `Right away: ${imm} and up. Everything else from ${min} up: one digest every ${every}.`;
+    return `Right away: ${imm} and up${bursts ? ', and bursts of auth or security warnings' : ''}. Everything else from ${min} up: one digest every ${every}.`;
   }
   if (p.delivery === 'digest') return `Everything this route matches: one digest every ${fmtDuration((p.digest_minutes || 60) * 60)}.`;
   if (throttle > 0) return `Every matching event right away; repeats of a problem are held back for ${fmtDuration(throttle)}.`;
@@ -1980,7 +1995,7 @@ function deliveryFields(p, { notifierIds, minSev, noun = 'route' }) {
   const el = h('div', null,
     h('div', { class: 'field' }, h('label', { id: labelId }, 'When to send'),
       h('div', { class: 'checks', role: 'radiogroup', 'aria-labelledby': labelId },
-        radio('smart', 'Smart (recommended)', 'Critical problems, and errors that are new, spiking or getting worse, right away; the rest in one digest per channel.'),
+        radio('smart', 'Smart (recommended)', 'Critical problems, errors that are new, spiking or getting worse, and bursts of failed logins or attacks, right away; the rest in one digest per channel.'),
         radio('immediate', 'Every alert right away', 'Every matching event as it happens; repeats of a problem are throttled.'),
         radio('digest', 'Digest only', 'Nothing right away: everything in one digest per channel.'))),
     smartBox, immBox, digestBox, policy);
@@ -2242,7 +2257,7 @@ function editGroup(g, { onSaved } = {}) {
 // REASON_LABELS name why a message was sent, for its badge.
 const REASON_LABELS = {
   every: 'right away', severity: 'right away', new: 'right away · new', spike: 'right away · spiking', worse: 'right away · got worse',
-  repeat: 'right away · still happening', digest: 'digest', summary: 'summary', manual: 'digest · sent now', shutdown: 'digest · at shutdown', test: 'test',
+  burst: 'right away · burst', repeat: 'right away · with repeats', digest: 'digest', summary: 'summary', manual: 'digest · sent now', shutdown: 'digest · at shutdown', test: 'test',
 };
 // HELD_BY says which limit held an alert back into a summary.
 const HELD_BY = {
@@ -2280,13 +2295,20 @@ function dueIn(iso) {
   return sec < 60 ? 'within a minute' : `in ${fmtDuration(Math.round(sec / 60) * 60)}`;
 }
 
+// ALERTED_AS names why a problem in a digest was alerted right away before.
+const ALERTED_AS = { new: 'new', spike: 'spiking', worse: 'worse', burst: 'a burst' };
+
 // digestFlags marks a digest entry: new, held back (and why), repeats of
-// an alert, events of alerts that failed to deliver.
+// an alert or an alert before its events, events of alerts that failed to
+// deliver.
 function digestFlags(e) {
   return [
     e.new ? h('span', { class: 'badge reason reason-new' }, 'new') : null,
-    e.held ? h('span', { class: 'badge reason reason-held', title: HELD_BY[e.held_by] || e.held_by || '' }, `held (${e.held})`) : null,
+    // an alert that failed to deliver is flagged undelivered, not held
+    e.held && e.held_by !== 'undelivered' ? h('span', { class: 'badge reason reason-held', title: HELD_BY[e.held_by] || e.held_by || '' }, `held (${e.held})`) : null,
     e.repeats ? h('span', { class: 'badge reason reason-repeat' }, `${num(e.repeats)} ${e.repeats === 1 ? 'repeat' : 'repeats'} of ${clockTime(e.alerted_at)}`) : null,
+    !e.repeats && e.alerted_at ? h('span', { class: 'badge reason reason-repeat' },
+      `alerted at ${clockTime(e.alerted_at)}${ALERTED_AS[e.alerted_as] ? ` as ${ALERTED_AS[e.alerted_as]}` : ''}`) : null,
     e.undelivered ? h('span', { class: 'badge bad' }, `${num(e.undelivered)} undelivered`) : null,
   ].filter(Boolean);
 }
@@ -2376,14 +2398,17 @@ function renderPendingDigests(root, al, refresh) {
     const top = h('details', { class: 'pending-top', 'data-nid': p.notifier_id, open: open.has(p.notifier_id) }, h('summary', { class: 'small' }, `Top ${plural(p.top.length, 'problem')}`),
       p.top.map((e) => h('div', { class: 'small' }, sevBadge(e.severity), ` ×${num(e.count)} `, h('strong', null, `${e.source_name} · ${e.category || 'uncategorized'}`), ' ',
         h('span', { class: 'mono', title: e.sample }, e.sample), ' ', digestFlags(e))));
+    // A disabled notifier's digest waits for it (a week at most): nothing to send it with.
+    const when = p.disabled ? 'sent when the notifier is enabled again (kept for a week)' : `due ${clockTime(p.due)} (${dueIn(p.due)})`;
     root.append(h('div', { class: 'list-item' },
       h('div', { class: 'main' },
         h('div', { class: 'title' }, p.notifier_name || p.notifier_id,
-          p.summary ? h('span', { class: 'badge reason reason-summary' }, `summary · ${num(p.held)} held`) : null),
-        h('div', { class: 'meta' }, `${plural(p.patterns, 'problem')}, ${plural(p.events, 'event')} · highest ${p.highest_severity} · due ${clockTime(p.due)} (${dueIn(p.due)})`,
+          p.summary ? h('span', { class: 'badge reason reason-summary' }, `summary · ${num(p.held)} held`) : null,
+          p.disabled ? h('span', { class: 'badge warn' }, 'notifier disabled') : null),
+        h('div', { class: 'meta' }, `${plural(p.patterns, 'problem')}, ${plural(p.events, 'event')} · highest ${p.highest_severity} · ${when}`,
           p.routes.length ? ` · ${p.routes.join(', ')}` : ''),
         p.top.length ? top : null),
-      h('div', { class: 'actions' }, h('button', {
+      p.disabled ? null : h('div', { class: 'actions' }, h('button', {
         type: 'button', class: 'small',
         onclick: (e) => busy(e.currentTarget, async () => {
           await api('POST', `/api/alerting/digests/${encodeURIComponent(p.notifier_id)}/send`);
@@ -4638,11 +4663,19 @@ function notifyCard(n, routes, draft, onRouteSaved) {
   // Editing the route keeps its on/off as shown, so a repaint (after an
   // alert group is added, say) can't switch it off underneath the edit.
   const policy = h('p', { class: 'small muted' });
-  const showPolicy = () => { policy.textContent = policyText(whenPolicy(v('when'), own), v('sev'), v('throttle')); };
+  // PagerDuty never gets digests: what it gets is sent right away. A smart
+  // or digest-only route (made in the route editor) sends it only its
+  // right-away severities, or nothing; say so, as the route editor does.
+  const pager = Boolean(type.no_digest);
+  const showPolicy = () => {
+    const p = whenPolicy(v('when'), own);
+    const imm = sevRank(p.immediate_severity || 'critical') < sevRank(v('sev')) ? v('sev') : p.immediate_severity || 'critical';
+    if (pager && p.delivery === 'smart') policy.textContent = `${n.name} is ${type.label}: it gets only ${imm} and up, right away, never digests.`;
+    else if (pager && p.delivery === 'digest') policy.textContent = `${n.name} is ${type.label}: it never gets digests, so this route sends it nothing.`;
+    else policy.textContent = policyText(p, v('sev'), v('throttle'));
+  };
   const edit = (k, x) => { if (!('on' in draft)) draft.on = v('on'); draft[k] = x; showPolicy(); };
   const sev = select(SEVERITIES, v('sev'), { onchange: (e) => edit('sev', e.target.value) });
-  // PagerDuty never gets digests: what it gets is sent right away.
-  const pager = Boolean(type.no_digest);
   const when = pager ? h('div', { class: 'fixed-choice' }, `Right away (${type.label} never gets digests)`)
     : select(whenChoices(n.type, v('when')), v('when'), { onchange: (e) => edit('when', e.target.value) });
   const catBoxes = [...new Set([...categories(), 'uncategorized', ...v('cats')])].map((c) => ({

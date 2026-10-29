@@ -3,6 +3,8 @@ package notify
 import (
 	"fmt"
 	"math"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,7 +28,11 @@ const (
 	ewmaAlpha            = 0.1
 	spikeEvery           = time.Hour        // one spike decision per pattern per hour
 	spikeRealert         = 15 * time.Minute // a (non-flood) spike breaks a window this old
-	backlogAge           = 5 * time.Minute  // events stamped older don't count toward spikes
+	routineFactor        = 1.5              // a burst at the time of the last one on an earlier day spikes only above this times its peak
+	backlogAge           = 5 * time.Minute  // events stamped older don't count toward spikes or bursts
+	burstMin             = 20               // auth or security events at warning and up from one source in spikeWindow
+	burstEvery           = time.Hour        // one burst per source and category per hour
+	quietAfter           = time.Hour        // repeats reported this long after the last one read "the last at …"
 	limitWindow          = 10 * time.Minute
 	channelLimit         = 10 // non-critical Smart right-away alerts per channel per window
 	sourceLimit          = 1  // promotions per channel per (source, category) per window
@@ -38,6 +44,7 @@ const (
 	maxAlertStates       = 20000
 	alertStateTTL        = 24 * time.Hour     // nothing pending
 	pendingTTL           = 7 * 24 * time.Hour // repeats pending (no-digest channels)
+	idleDigestTTL        = 7 * 24 * time.Hour // a disabled notifier's digest waits this long for it
 	maxDigestEntries     = 200                // per buffer; then per-fingerprint counts only
 	maxDigestOther       = 5000               // fingerprints counted beyond the entries; then totals only
 	maxDigestListed      = 50                 // entries kept in a sent Digest (renderers show fewer)
@@ -54,16 +61,21 @@ const (
 	defaultDigestDigest = 60
 )
 
-// Reason codes. Right away: every, severity, new, spike, worse, repeat.
-// Digest messages: digest, summary, manual, shutdown, test. Decisions only:
-// throttled, source_limit, channel_limit, critical_limit, queue_full,
-// no_digest.
+// burstCategories are the categories whose warnings count toward a burst:
+// failed logins and attacks matter in numbers, one at a time they don't.
+var burstCategories = map[string]bool{"auth": true, "security": true}
+
+// Reason codes. Right away: every, severity, new, spike, worse, burst,
+// repeat. Digest messages: digest, summary, manual, shutdown, test.
+// Decisions only: throttled, source_limit, channel_limit, critical_limit,
+// queue_full, no_digest. Digest entries only (HeldBy): undelivered.
 const (
 	ReasonEvery    = "every"
 	ReasonSeverity = "severity"
 	ReasonNew      = "new"
 	ReasonSpike    = "spike"
 	ReasonWorse    = "worse"
+	ReasonBurst    = "burst"
 	ReasonRepeat   = "repeat"
 
 	ReasonDigest   = "digest"
@@ -78,6 +90,7 @@ const (
 	ReasonCriticalLimit = "critical_limit"
 	ReasonQueueFull     = "queue_full"
 	ReasonNoDigest      = "no_digest"
+	ReasonUndelivered   = "undelivered" // a right-away alert failed to deliver: its summary sends it again
 )
 
 // Decision actions. Preview uses ActionRightAway, ActionDigest and
@@ -93,19 +106,12 @@ const (
 )
 
 // Actions names Dispatcher.Decided's counters, in order.
-var Actions = [6]string{ActionSent, ActionDigest, ActionThrottled, ActionHeld, ActionSkipped, ActionDropped}
+var Actions = [...]string{ActionSent, ActionDigest, ActionThrottled, ActionHeld, ActionSkipped, ActionDropped}
 
 // RightAwayReasons names Dispatcher.RightAway's counters, in order.
-var RightAwayReasons = [6]string{ReasonEvery, ReasonSeverity, ReasonNew, ReasonSpike, ReasonWorse, ReasonRepeat}
+var RightAwayReasons = [...]string{ReasonEvery, ReasonSeverity, ReasonNew, ReasonSpike, ReasonWorse, ReasonBurst, ReasonRepeat}
 
-func indexOf(names [6]string, s string) int {
-	for i, n := range names {
-		if n == s {
-			return i
-		}
-	}
-	return -1
-}
+func indexOf(names []string, s string) int { return slices.Index(names, s) }
 
 // Reason says why a message was sent, or a decision made.
 type Reason struct {
@@ -183,6 +189,9 @@ func (r *route) want(ev *model.Event, s *signal, noDigest bool) (tier, string) {
 				return tierNow, ReasonWorse
 			}
 		}
+		if !noDigest && s.Burst {
+			return tierNow, ReasonBurst
+		}
 		if noDigest {
 			return tierSkip, ""
 		}
@@ -196,10 +205,12 @@ func (r *route) want(ev *model.Event, s *signal, noDigest bool) (tier, string) {
 func reasonRank(code string) int {
 	switch code {
 	case ReasonNew:
-		return 5
+		return 6
 	case ReasonSpike:
-		return 4
+		return 5
 	case ReasonWorse:
+		return 4
+	case ReasonBurst:
 		return 3
 	case ReasonSeverity:
 		return 2
@@ -213,7 +224,7 @@ func reasonRank(code string) int {
 // channel gets at most one message per event.
 type plan struct {
 	tier      tier
-	reason    string        // strongest right-away reason: new > spike > worse > severity > every
+	reason    string        // strongest right-away reason: new > spike > worse > burst > severity > every
 	route     *route        // the route that gave it (texts)
 	routes    []string      // every matching route/group name for this notifier, config order, deduplicated
 	throttle  time.Duration // min ThrottleSeconds over routes wanting tierNow
@@ -288,25 +299,30 @@ func containsString(list []string, s string) bool {
 	return false
 }
 
-// decide applies p to one channel and reports whether a spike was the
-// reason told (sent or held). d.mu (read) and d.amu are held.
-func (d *Dispatcher) decide(ev *model.Event, sig *signal, nid string, ch *channel, p *plan, now time.Time) (Decision, bool) {
+// decide applies p to one channel and reports the right-away reason it
+// told (sent or held; "" when it batched, counted or skipped the event).
+// d.mu (read) and d.amu are held.
+func (d *Dispatcher) decide(ev *model.Event, sig *signal, nid string, ch *channel, p *plan, now time.Time) (Decision, string) {
 	a := &d.al
 	dec := Decision{NotifierID: nid, NotifierName: ch.n.Name, NotifierType: ch.n.Type, Routes: p.routes}
+	key := nid + "|" + ev.Fingerprint
 	switch p.tier {
 	case tierSkip:
 		d.decided(ActionSkipped)
 		dec.Action, dec.Reason = ActionSkipped, Reason{ReasonNoDigest, skippedText(ch, p)}
-		return dec, false
+		return dec, ""
 	case tierDigest:
-		buf := a.addToDigest(nid, ev, sig, p.digestMin, p.routes, entryAdd{}, now)
+		add := entryAdd{}
+		if st := a.alerts[key]; st != nil && !st.LastSent.IsZero() { // the digest says it was alerted
+			add.alertedAt, add.alertedAs = st.LastSent, st.Reason
+		}
+		buf := a.addToDigest(nid, ev, sig, p.digestMin, p.routes, add, now)
 		d.decided(ActionDigest)
 		dec.Action, dec.Due = ActionDigest, buf.Due
 		dec.Reason = Reason{ReasonDigest, fmt.Sprintf("In the digest due %s. %s", fmtClock(buf.Due, now), routePolicy(p.digestRt))}
-		return dec, false
+		return dec, ""
 	}
 
-	key := nid + "|" + ev.Fingerprint
 	st := a.alerts[key]
 	code := p.reason
 	windowWorse := false
@@ -314,33 +330,32 @@ func (d *Dispatcher) decide(ev *model.Event, sig *signal, nid string, ch *channe
 		switch {
 		case ev.Severity.Rank() > st.LastSeverity.Rank():
 			code, windowWorse = ReasonWorse, true
-		case p.smart && sig.Spike && !sig.Flood && now.Sub(st.LastSent) >= spikeRealert:
+		case p.smart && !ch.noDigest && sig.Spike && !sig.Flood && now.Sub(st.LastSent) >= spikeRealert: // PagerDuty gets no promotions
 			code = ReasonSpike
 		default: // a repeat: reported once, in the digest or with the next alert
 			d.Throttled.Add(1)
 			d.decided(ActionThrottled)
 			dec.Action = ActionThrottled
 			if p.digestMin > 0 && !ch.noDigest {
-				buf := a.addToDigest(nid, ev, sig, p.digestMin, p.routes, entryAdd{repeat: true, alertedAt: st.LastSent}, now)
+				buf := a.addToDigest(nid, ev, sig, p.digestMin, p.routes, entryAdd{repeat: true, alertedAt: st.LastSent, alertedAs: st.Reason}, now)
 				dec.Due = buf.Due
 				dec.Reason = Reason{ReasonThrottled, fmt.Sprintf("Repeat of the alert at %s: in the digest due %s.", fmtClock(st.LastSent, now), fmtClock(buf.Due, now))}
 			} else {
-				st.Pending++
-				st.Updated = now
+				st.addPending(1, now, now)
 				dec.Reason = Reason{ReasonThrottled, fmt.Sprintf("Repeat of the alert at %s: counted, and reported with the next alert after %s.",
 					fmtClock(st.LastSent, now), fmtClock(st.LastSent.Add(p.throttle), now))}
 			}
-			return dec, false
+			return dec, ""
 		}
 	}
 	if p.holdable && !ch.noDigest {
 		if by := d.limit(nid, ev, code, now); by != "" {
-			return d.hold(nid, ev, sig, p, code, by, now), code == ReasonSpike
+			return d.hold(nid, ev, sig, p, code, by, now), code
 		}
 	}
-	n := a.peekRepeats(nid, ev.Fingerprint)
-	if st != nil {
-		n += st.Pending
+	n, last := a.peekRepeats(nid, ev.Fingerprint)
+	if st != nil && st.Pending > 0 {
+		n, last = n+st.Pending, laterOf(last, st.LastRepeat)
 	}
 	if st != nil && n > 0 && (code == ReasonEvery || code == ReasonSeverity) {
 		code = ReasonRepeat
@@ -350,18 +365,24 @@ func (d *Dispatcher) decide(ev *model.Event, sig *signal, nid string, ch *channe
 		Suppressed: n, Link: d.eventLink(ev.ID),
 		at: now, nid: nid, fp: ev.Fingerprint, seq: a.seq + 1,
 	}
+	if n > 0 {
+		msg.LastRepeat = last
+	}
 	if st != nil {
-		msg.Since, msg.prevSent, msg.prevSev = st.LastSent, st.LastSent, st.LastSeverity
+		msg.Since, msg.prevSent, msg.prevSev, msg.prevWhy, msg.prevSeq, msg.prev = st.LastSent, st.LastSent, st.LastSeverity, st.Reason, st.Seq, a.inflight[st.Seq]
+		if n > 0 && st.Digested.After(st.LastSent) {
+			msg.SinceDigest = st.Digested
+		}
 	}
 	if p.digestMin > 0 && !ch.noDigest {
 		msg.digestMin = p.digestMin
 	}
-	msg.Reason = Reason{code, d.alertText(code, ev, sig, p, ch, st, windowWorse, n, now)}
+	msg.Reason = Reason{code, d.alertText(code, ev, sig, p, ch, st, windowWorse, n, last, now)}
 	d.pending.Add(1)
 	if !d.enqueue(nid, job{ch: ch, msg: msg}) {
 		d.pending.Add(-1)
 		if !ch.noDigest { // no window opens: the next event alerts
-			return d.hold(nid, ev, sig, p, code, ReasonQueueFull, now), code == ReasonSpike
+			return d.hold(nid, ev, sig, p, code, ReasonQueueFull, now), code
 		}
 		if n := d.Dropped.Add(1); n == 1 || n%100 == 0 {
 			d.log.Warn("notification queue full: alerts dropped", "notifier", ch.n.Name, "dropped_total", n)
@@ -371,15 +392,15 @@ func (d *Dispatcher) decide(ev *model.Event, sig *signal, nid string, ch *channe
 			st = &alertState{}
 			a.alerts[key] = st
 		}
-		st.Pending++
-		st.Updated = now
+		st.addPending(1, now, now)
 		d.decided(ActionDropped)
 		dec.Action, dec.Reason = ActionDropped, Reason{ReasonQueueFull, "Not sent: the notification queue was full. Counted, and reported with the next alert."}
-		return dec, false
+		return dec, ""
 	}
 	a.seq++
+	a.inflight[a.seq] = msg
 	a.foldRepeats(nid, ev.Fingerprint) // reported by this alert's Suppressed
-	a.alerts[key] = &alertState{LastSent: now, LastSeverity: ev.Severity, Seq: a.seq, Updated: now}
+	a.alerts[key] = &alertState{LastSent: now, LastSeverity: ev.Severity, Reason: code, Seq: a.seq, Updated: now}
 	if len(a.alerts) > maxAlertStates {
 		a.evictAlerts(d)
 	}
@@ -393,22 +414,22 @@ func (d *Dispatcher) decide(ev *model.Event, sig *signal, nid string, ch *channe
 			}
 		}
 	}
-	if i := indexOf(RightAwayReasons, code); i >= 0 {
+	if i := indexOf(RightAwayReasons[:], code); i >= 0 {
 		d.RightAway[i].Add(1)
 	}
 	d.decided(ActionSent)
 	dec.Action, dec.Reason = ActionSent, msg.Reason
-	return dec, code == ReasonSpike
+	return dec, code
 }
 
 func (d *Dispatcher) decided(action string) {
-	if i := indexOf(Actions, action); i >= 0 {
+	if i := indexOf(Actions[:], action); i >= 0 {
 		d.Decided[i].Add(1)
 	}
 }
 
 func promotes(code string) bool {
-	return code == ReasonNew || code == ReasonSpike || code == ReasonWorse
+	return code == ReasonNew || code == ReasonSpike || code == ReasonWorse || code == ReasonBurst
 }
 
 func promotedKey(nid string, ev *model.Event) string {
@@ -450,19 +471,7 @@ func (d *Dispatcher) limit(nid string, ev *model.Event, code string, now time.Ti
 // hold puts a right-away alert a limit held back into the channel's
 // buffer, and brings the buffer forward so it waits at most 10 minutes.
 func (d *Dispatcher) hold(nid string, ev *model.Event, sig *signal, p *plan, code, by string, now time.Time) Decision {
-	a := &d.al
-	buf := a.addToDigest(nid, ev, sig, p.interval(), p.routes, entryAdd{held: code, heldBy: by}, now)
-	buf.Held++
-	due := now.Add(summaryDelay)
-	if by == ReasonCriticalLimit {
-		buf.CriticalHeld++
-		due = now.Add(criticalSummaryDelay)
-	} else if next := a.summaries[nid].Add(limitWindow); next.After(due) {
-		due = next
-	}
-	if due.Before(buf.Due) {
-		buf.Due, buf.Summary = due, true
-	}
+	buf := d.al.holdIn(nid, ev, sig, p.interval(), p.routes, entryAdd{held: code, heldBy: by}, by == ReasonCriticalLimit, now)
 	d.decided(ActionHeld)
 	ch := d.channels[nid]
 	dec := Decision{NotifierID: nid, NotifierName: ch.n.Name, NotifierType: ch.n.Type, Routes: p.routes, Action: ActionHeld, Due: buf.Due}
@@ -478,6 +487,41 @@ func (d *Dispatcher) hold(nid string, ev *model.Event, sig *signal, p *plan, cod
 		dec.Reason = Reason{by, fmt.Sprintf("Held back: the channel's queue was full. In the summary due %s.", dueAt)}
 	}
 	return dec
+}
+
+// holdIn adds an alert that didn't go out right away (held, or
+// undelivered) to nid's buffer, counting its problem once in Held, and
+// brings the buffer forward: a summary due in 2 minutes and at least 10
+// after the channel's last one, or in 1 minute for a critical.
+func (a *alerting) holdIn(nid string, ev *model.Event, sig *signal, interval int, routes []string, add entryAdd, critical bool, now time.Time) *digestBuffer {
+	held := false
+	if b := a.digests[nid]; b != nil && b.Entries[ev.Fingerprint] != nil {
+		held = b.Entries[ev.Fingerprint].Held != ""
+	}
+	buf := a.addToDigest(nid, ev, sig, interval, routes, add, now)
+	if !held {
+		buf.Held++
+	}
+	if critical {
+		buf.CriticalHeld++
+	}
+	a.summarize(buf, nid, critical, now)
+	return buf
+}
+
+// summarize makes nid's buffer a summary due in 2 minutes, and at least 10
+// after the channel's last summary, or in 1 minute for held criticals,
+// unless it is due sooner.
+func (a *alerting) summarize(buf *digestBuffer, nid string, critical bool, now time.Time) {
+	due := now.Add(summaryDelay)
+	if critical {
+		due = now.Add(criticalSummaryDelay)
+	} else if next := a.summaries[nid].Add(limitWindow); next.After(due) {
+		due = next
+	}
+	if due.Before(buf.Due) {
+		buf.Due, buf.Summary = due, true
+	}
 }
 
 func sourceCategory(source, category string) string {
@@ -503,8 +547,9 @@ func skippedText(ch *channel, p *plan) string {
 	return fmt.Sprintf("%s is %s: it gets only what is sent right away (here: %s), never digests.", ch.n.Name, label, here)
 }
 
-// alertText is the Why of a right-away alert.
-func (d *Dispatcher) alertText(code string, ev *model.Event, sig *signal, p *plan, ch *channel, st *alertState, windowWorse bool, n int, now time.Time) string {
+// alertText is the Why of a right-away alert; n repeats are reported with
+// it, the newest at last.
+func (d *Dispatcher) alertText(code string, ev *model.Event, sig *signal, p *plan, ch *channel, st *alertState, windowWorse bool, n int, last, now time.Time) string {
 	var b strings.Builder
 	switch code {
 	case ReasonEvery:
@@ -517,29 +562,49 @@ func (d *Dispatcher) alertText(code string, ev *model.Event, sig *signal, p *pla
 		fmt.Fprintf(&b, "%s: at or above \"right away\" (%s) on %q.", capitalize(string(ev.Severity)), imm, routeName(p.route))
 		switch {
 		case sig.New:
-			fmt.Fprintf(&b, " It is also new: nothing like it in the last %s.", fmtDays(newAfter))
+			fmt.Fprintf(&b, " It is also new: nothing like it %s.", lookedBack(ev, sig, now))
 		case sig.Spike:
 			fmt.Fprintf(&b, " It is also spiking: %d in the last %d minutes.", sig.C5, int(spikeWindow/time.Minute))
+		case sig.Burst:
+			fmt.Fprintf(&b, " It is also part of a burst: %s.", burstCount(ev, sig))
 		}
 		b.WriteString(repeatsSentence(p, ch))
 	case ReasonNew:
 		if !sig.LastSeen.IsZero() {
 			fmt.Fprintf(&b, "Back after %s: last seen %s.", fmtDays(now.Sub(sig.LastSeen)), fmtClock(sig.LastSeen, now))
 		} else {
-			fmt.Fprintf(&b, "New problem: first seen just now; nothing like it in the last %s.", fmtDays(newAfter))
+			fmt.Fprintf(&b, "New problem: first seen just now; nothing like it %s.", lookedBack(ev, sig, now))
 		}
 	case ReasonSpike:
 		b.WriteString(spikeText(sig, now))
+	case ReasonBurst:
+		fmt.Fprintf(&b, "Burst: %s.", burstCount(ev, sig))
 	case ReasonWorse:
 		if windowWorse && st != nil {
 			fmt.Fprintf(&b, "Got worse: now %s; the alert at %s was %s.", ev.Severity, fmtClock(st.LastSent, now), st.LastSeverity)
 		} else {
-			fmt.Fprintf(&b, "Got worse: now %s; it was at most %s in the last %s.", ev.Severity, sig.PrevMax, fmtDays(newAfter))
+			fmt.Fprintf(&b, "Got worse: now %s; it was at most %s %s.", ev.Severity, sig.PrevMax, lookedBack(ev, sig, now))
 		}
 	case ReasonRepeat:
-		b.WriteString(stillHappening(n, st, now))
+		b.WriteString(stillHappening(n, st, last, now))
 	}
 	return b.String()
+}
+
+// lookedBack is how far back "new" and "worse" look: 7 days, or since
+// Lissandra first saw the source, when that is more recent (a fresh
+// install, a reset alert state).
+func lookedBack(ev *model.Event, sig *signal, now time.Time) string {
+	if !sig.Watched.IsZero() && now.Sub(sig.Watched) < newAfter {
+		return fmt.Sprintf("since Lissandra started watching %s at %s", ev.SourceName, fmtClock(sig.Watched, now))
+	}
+	return "in the last " + fmtDays(newAfter)
+}
+
+// burstCount says how many events made a burst: "20 auth warnings or worse
+// from node-syslog in the last 5 minutes".
+func burstCount(ev *model.Event, sig *signal) string {
+	return fmt.Sprintf("%d %s warnings or worse from %s in the last %d minutes", sig.BurstN, ev.Category, ev.SourceName, int(spikeWindow/time.Minute))
 }
 
 // repeatsSentence says where repeats of a severity alert go.
@@ -564,11 +629,40 @@ func spikeText(sig *signal, now time.Time) string {
 	return fmt.Sprintf("Spiking: %d in the last %d minutes, usually %s.", sig.C5, int(spikeWindow/time.Minute), usual)
 }
 
-func stillHappening(n int, st *alertState, now time.Time) string {
+// stillHappening reports n repeats, the newest at last. Repeats that
+// stopped long ago are not "still happening": the problem is back. They
+// count from the digest that reported the earlier ones, if any.
+func stillHappening(n int, st *alertState, last, now time.Time) string {
 	if st == nil || st.LastSent.IsZero() {
 		return fmt.Sprintf("Still happening: %d more since the last alert.", n)
 	}
-	return fmt.Sprintf("Still happening: %d more since the alert at %s.", n, fmtClock(st.LastSent, now))
+	var digested time.Time
+	if st.Digested.After(st.LastSent) {
+		digested = st.Digested
+	}
+	if quietSince(last, now) {
+		return "Happening again: " + repeatsAfter(n, st.LastSent, digested, last, now) + "."
+	}
+	return fmt.Sprintf("Still happening: %d more since %s.", n, sinceWhat(st.LastSent, digested, now))
+}
+
+// sinceWhat is "the alert at 11:00 UTC", or "the digest at 11:32 UTC" when
+// a digest reported the repeats before it.
+func sinceWhat(alert, digest, now time.Time) string {
+	if !digest.IsZero() {
+		return "the digest at " + fmtClock(digest, now)
+	}
+	return "the alert at " + fmtClock(alert, now)
+}
+
+// quietSince reports whether the newest repeat, at last, was long enough
+// before now that the repeats read as over.
+func quietSince(last, now time.Time) bool { return !last.IsZero() && now.Sub(last) >= quietAfter }
+
+// repeatsAfter is "11 more after the alert at Oct 27 11:18 UTC, the last
+// at Oct 27 11:19 UTC" (after the digest at …, when digest isn't zero).
+func repeatsAfter(n int, alert, digest, last, now time.Time) string {
+	return fmt.Sprintf("%d more after %s, the last at %s", n, sinceWhat(alert, digest, now), fmtClock(last, now))
 }
 
 func routeName(r *route) string {
@@ -598,7 +692,18 @@ func digestText(dg *Digest, r *route) string {
 	case ReasonTest:
 		return "Test notification."
 	}
-	return strings.TrimSpace(fmt.Sprintf("Batched every %s on %q. %s", fmtDur(time.Duration(dg.IntervalMinutes)*time.Minute), routeName(r), routePolicy(r)))
+	every := fmtDur(time.Duration(dg.IntervalMinutes) * time.Minute)
+	if r == nil { // its route changed since: name the routes that filled it
+		if len(dg.Routes) == 0 {
+			return fmt.Sprintf("Batched every %s.", every)
+		}
+		names := make([]string, len(dg.Routes))
+		for i, n := range dg.Routes {
+			names[i] = strconv.Quote(n)
+		}
+		return fmt.Sprintf("Batched every %s for %s.", every, joinAnd(names))
+	}
+	return strings.TrimSpace(fmt.Sprintf("Batched every %s on %q. %s", every, routeName(r), routePolicy(r)))
 }
 
 // summaryText names what held a summary's alerts back, one clause per
@@ -636,9 +741,16 @@ func summaryText(dg *Digest) string {
 	if by[ReasonQueueFull] {
 		clauses = append(clauses, "the channel's queue was full")
 	}
+	const retried = "Sent again: right-away alerts that failed to deliver."
+	if by[ReasonUndelivered] && len(clauses) == 0 {
+		return retried
+	}
 	head := "Held back so this channel isn't flooded"
 	if len(clauses) > 0 {
 		head += ": " + strings.Join(clauses, "; ")
+	}
+	if by[ReasonUndelivered] {
+		head += ". " + strings.TrimSuffix(retried, ".")
 	}
 	return fmt.Sprintf("%s. The first %d critical alerts in any %d minutes are never held.", head, criticalLimit, int(limitWindow/time.Minute))
 }
@@ -667,17 +779,27 @@ func policySentence(p config.DeliveryPolicy, minSev model.Severity, throttle tim
 		if floor.Rank() < promoteFloor.Rank() {
 			floor = promoteFloor
 		}
+		// bursts of warnings reach routes that match warnings and don't
+		// send them right away anyway
+		bursts := minSev.Rank() <= model.SeverityWarning.Rank() && imm.Rank() > model.SeverityWarning.Rank()
 		switch {
 		case imm.Rank() > floor.Rank():
 			s := fmt.Sprintf("Right away: %s and up", imm)
-			if minSev.Rank() <= promoteFloor.Rank() {
+			switch {
+			case bursts:
+				s += ", errors that are new, spiking or getting worse, and bursts of auth or security warnings"
+			case minSev.Rank() <= promoteFloor.Rank():
 				s += ", and errors that are new, spiking or getting worse"
 			}
 			return fmt.Sprintf("%s. Everything else from %s up: one digest every %s.", s, minSev, every)
 		case imm.Rank() <= minSev.Rank():
 			return fmt.Sprintf("Everything from %s up right away, with flood protection; repeats in a digest every %s.", minSev, every)
 		default:
-			return fmt.Sprintf("Right away: %s and up. Everything else from %s up: one digest every %s.", imm, minSev, every)
+			s := fmt.Sprintf("Right away: %s and up", imm)
+			if bursts {
+				s += ", and bursts of auth or security warnings"
+			}
+			return fmt.Sprintf("%s. Everything else from %s up: one digest every %s.", s, minSev, every)
 		}
 	case config.DeliveryDigest:
 		return fmt.Sprintf("Everything this route matches: one digest every %s.", fmtDur(time.Duration(cmp0(p.DigestMinutes, defaultDigestDigest))*time.Minute))

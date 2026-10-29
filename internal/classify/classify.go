@@ -83,6 +83,16 @@ func (e *Engine) Classify(ev *model.Event) bool {
 	var stated bool
 	ev.Severity, stated = detectSeverity(ev.Level, ev.Message)
 	ev.SeverityGuessed = !stated
+	// keep_stated keeps a level the record states, not a transport's
+	// default for a stream (journald's or GELF's 6 and 3, a syslog PRI of
+	// info or err): worked out once, when a rule asks.
+	own, ownKnown, statedSev := false, false, ev.Severity
+	ownLevel := func() bool {
+		if !ownKnown {
+			own, ownKnown = stated && !streamDefault(ev.Level, ev.Message), true
+		}
+		return own
+	}
 	ev.Classifier = ByHeuristic
 	ev.Category = ""
 	ev.MatchedRules = nil
@@ -107,7 +117,7 @@ func (e *Engine) Classify(ev *model.Event) bool {
 		for _, t := range r.Tags {
 			ev.AddTag(t)
 		}
-		if r.Severity != "" && !(r.KeepStated && stated) {
+		if r.Severity != "" && !(r.KeepStated && ownLevel()) && !(r.KeepStatedBelowWarning && ownLevel() && statedSev.Rank() < model.SeverityWarning.Rank()) {
 			ev.SeverityGuessed = false
 			if r.SeverityMode == config.SeverityAtLeast {
 				if !ev.Severity.AtLeast(r.Severity) {
@@ -601,6 +611,33 @@ func detectSeverity(level, message string) (model.Severity, bool) {
 		}
 	}
 	return textSeverity(message, false)
+}
+
+// streamDefault reports whether the level detectSeverity reads for level
+// and message is only a transport's default for a stream: journald's or
+// GELF's 6 or 3, or a syslog PRI of info or err, with no level in the text.
+func streamDefault(level, message string) bool {
+	if n, err := strconv.Atoi(strings.TrimSpace(level)); err == nil {
+		if n != 3 && n != 6 {
+			return false
+		}
+		_, ok := textSeverity(message, true)
+		return !ok
+	}
+	if level != "" {
+		return false
+	}
+	if strings.IndexByte(message, 0x1b) >= 0 {
+		message = ansiCodes.ReplaceAllString(message, "")
+	}
+	body := collectorPrefix.ReplaceAllString(message, "")
+	if m := priHeader.FindStringSubmatch(body); m != nil {
+		if n, _ := strconv.Atoi(m[1]); n <= 191 && (n%8 == 3 || n%8 == 6) {
+			_, ok := textSeverity(body[strings.IndexByte(body, '>')+1:], true)
+			return !ok
+		}
+	}
+	return false
 }
 
 // textSeverity detects the severity a message states, or guesses one. An

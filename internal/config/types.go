@@ -149,10 +149,15 @@ type Rule struct {
 	// KeepStated applies Severity only to records that state no level of
 	// their own (the detector guessed one): a record logged at WARN that
 	// mentions an exception stays a warning.
-	KeepStated bool     `json:"keep_stated,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Drop       bool     `json:"drop,omitempty"`
-	Stop       bool     `json:"stop,omitempty"`
+	KeepStated bool `json:"keep_stated,omitempty"`
+	// KeepStatedBelowWarning keeps the level of a record that states one
+	// below warning (debug, info, notice): a rule that pages on what a
+	// line says doesn't page on a routine line ("INFO … site is offline
+	// until 11:00"). It also applies to records that state no level.
+	KeepStatedBelowWarning bool     `json:"keep_stated_below_warning,omitempty"`
+	Tags                   []string `json:"tags,omitempty"`
+	Drop                   bool     `json:"drop,omitempty"`
+	Stop                   bool     `json:"stop,omitempty"`
 	// SkipEngine keeps matching events from the engine, so they keep
 	// the rules' result. A rejected learned rule sets it, so the engine's
 	// answer isn't applied (or learned) again.

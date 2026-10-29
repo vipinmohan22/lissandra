@@ -248,8 +248,8 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-// An event no route matched has no decisions: "alerts" is [] (not null),
-// and notifier types say which never get digests.
+// An event no route matched has no decisions: "alerts" is null (nothing
+// known), and notifier types say which never get digests.
 func TestEventAlertsAndNotifierTypes(t *testing.T) {
 	e := newEnv(t)
 	var sources []config.Source
@@ -260,7 +260,7 @@ func TestEventAlertsAndNotifierTypes(t *testing.T) {
 		t.Fatalf("decisions for an unrouted event: %+v", e.dispatcher.Decisions(ev.ID))
 	}
 	_, body := e.do("GET", "/api/events/"+ev.ID, nil, map[string]string{"Authorization": "Bearer " + adminToken})
-	if !bytes.Contains(body, []byte(`"alerts":[]`)) || !bytes.Contains(body, []byte(`"routes":null`)) && !bytes.Contains(body, []byte(`"routes":[]`)) {
+	if !bytes.Contains(body, []byte(`"alerts":null`)) || !bytes.Contains(body, []byte(`"routes":null`)) && !bytes.Contains(body, []byte(`"routes":[]`)) {
 		t.Errorf("event without routes: %s", body)
 	}
 
@@ -345,5 +345,51 @@ func TestDefaultRulesEndpoints(t *testing.T) {
 	}
 	if code := e.admin("POST", "/api/rules/defaults", `{"names":`, nil); code != 400 {
 		t.Errorf("invalid JSON: %d", code)
+	}
+}
+
+// A disabled notifier keeps its pending digest: "Send now" answers 409
+// and leaves it, and an event whose routes reach only that notifier says
+// so ("alerts": []), unlike one nothing is known about (null).
+func TestDisabledNotifierDigestAndDecisions(t *testing.T) {
+	e := newEnvFrom(t, envConfig{notify: notify.Options{Warmup: -1}})
+	rc := newReceiver(t)
+	var hook config.Notifier
+	if code := e.admin("POST", "/api/notifiers", map[string]any{"name": "dev-hook", "type": "webhook", "enabled": true, "settings": map[string]string{"url": rc.URL}}, &hook); code != 201 {
+		t.Fatalf("create notifier: %d", code)
+	}
+	if code := e.admin("POST", "/api/routes", map[string]any{"name": "dev digest", "enabled": true, "min_severity": "error", "notifier_ids": []string{hook.ID},
+		"delivery": "digest", "digest_minutes": 60}, nil); code != 201 {
+		t.Fatalf("create route: %d", code)
+	}
+	var sources []config.Source
+	e.admin("GET", "/api/sources", nil, &sources)
+	e.ingest(sources[0], `{"level":"error","message":"batched one"}`)
+	e.latest(1)
+	hook.Enabled = false
+	if code := e.admin("PUT", "/api/notifiers/"+hook.ID, hook, nil); code != 200 {
+		t.Fatalf("disable: %d", code)
+	}
+	var al notify.Alerting
+	e.admin("GET", "/api/alerting", nil, &al)
+	if len(al.Pending) != 1 || !al.Pending[0].Disabled || al.Pending[0].NotifierName != "dev-hook" {
+		t.Fatalf("pending: %+v", al.Pending)
+	}
+	code, body := e.do("POST", "/api/alerting/digests/"+hook.ID+"/send", nil, map[string]string{"Authorization": "Bearer " + adminToken})
+	if code != 409 || !bytes.Contains(body, []byte("disabled")) {
+		t.Errorf("send now: %d %s", code, body)
+	}
+	if code := e.admin("POST", "/api/alerting/digests/nope/send", nil, nil); code != 404 {
+		t.Errorf("send now, nothing batched: %d", code)
+	}
+	if e.dispatcher.LostEvents.Load() != 0 || len(e.dispatcher.PendingDigests()) != 1 {
+		t.Error("send now discarded the digest")
+	}
+
+	e.ingest(sources[0], `{"level":"error","message":"no channel takes this"}`)
+	ev := e.latest(2)
+	_, body = e.do("GET", "/api/events/"+ev.ID, nil, map[string]string{"Authorization": "Bearer " + adminToken})
+	if !bytes.Contains(body, []byte(`"alerts":[]`)) || !bytes.Contains(body, []byte(`"routes":["dev digest"]`)) {
+		t.Errorf("event whose routes reach no enabled channel: %s", body)
 	}
 }

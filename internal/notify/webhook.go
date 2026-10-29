@@ -27,7 +27,7 @@ func init() {
 			{Key: "headers", Label: "Headers", Type: "textarea", Secret: true, Placeholder: "Authorization: Bearer ${env:HOOK_TOKEN}\nX-Team: platform", Help: "One \"Name: value\" per line."},
 			{Key: "content_type", Label: "Content type", Type: "text", Default: "application/json"},
 			{Key: "body_template", Label: "Body template", Type: "textarea", Placeholder: `{"text": {{ json .Title }}, "severity": {{ json .Event.Severity }}}`,
-				Help: "Fields: .Title .Text .Link .Kind (alert or digest) .ID .Reason (.Code .Text) .Routes .RouteName .Suppressed .Since .Test .Event (.Message .Severity .Category .SourceName .Tags .Engine .Fingerprint .Fields …), .Digest (digests only: .Events .Patterns .Highest .Entries …) and .Payload. For a digest .Event summarizes it (.Severity is the highest). Functions: json, upper, lower, truncate."},
+				Help: "Fields: .Title .Text .Link .Kind (alert or digest) .ID .Reason (.Code .Text) .Routes .RouteName .Suppressed .Since .SinceDigest .LastRepeat .Test .Event (.Message .Severity .Category .SourceName .Tags .Engine .Fingerprint .Fields …), .Digest (digests only: .Events .Patterns .Highest .Entries …) and .Payload. For a digest .Event summarizes it (.Severity is the highest). Functions: json, upper, lower, truncate."},
 		},
 		New: newWebhook,
 	})
@@ -115,6 +115,9 @@ func StandardPayload(m *Message) map[string]any {
 		"test":       m.Test,
 		"sent_at":    time.Now().UTC().Format(time.RFC3339),
 		"event":      m.Event,
+	}
+	if !m.LastRepeat.IsZero() { // the newest of the suppressed repeats
+		p["last_repeat"] = m.LastRepeat.UTC().Format(time.RFC3339)
 	}
 	if m.Digest != nil {
 		p["digest"] = m.Digest

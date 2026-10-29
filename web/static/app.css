@@ -309,7 +309,7 @@ div.tile { display: flex; border: 1px solid var(--border); border-radius: var(--
 .smart-switch .muted { overflow-wrap: anywhere; }
 .badge.reason { background: transparent; border-color: currentColor; }
 .badge.reason-new { color: var(--accent); }
-.badge.reason-spike, .badge.reason-held, .badge.reason-summary { color: var(--warn); }
+.badge.reason-spike, .badge.reason-burst, .badge.reason-held, .badge.reason-summary { color: var(--warn); }
 .badge.reason-worse { color: var(--sev-error); }
 .badge.reason-severity { color: var(--sev-critical); }
 .badge.reason-every, .badge.reason-repeat { color: var(--muted); }

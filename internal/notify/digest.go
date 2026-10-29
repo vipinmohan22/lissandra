@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"errors"
 	"maps"
 	"slices"
 	"strings"
@@ -26,9 +27,11 @@ type DigestEntry struct {
 	EventID     string         `json:"event_id"`   // the sample's event
 	Link        string         `json:"link,omitempty"`
 	New         bool           `json:"new,omitempty"`
-	Held        string         `json:"held,omitempty"`    // would-be reason: new|spike|worse|severity|every|repeat
-	HeldBy      string         `json:"held_by,omitempty"` // source_limit|channel_limit|critical_limit|queue_full
-	AlertedAt   time.Time      `json:"alerted_at,omitzero"`
+	Held        string         `json:"held,omitempty"`       // would-be reason: new|spike|worse|burst|severity|every|repeat
+	HeldBy      string         `json:"held_by,omitempty"`    // source_limit|channel_limit|critical_limit|queue_full|undelivered
+	AlertedAt   time.Time      `json:"alerted_at,omitzero"`  // the last right-away alert on this channel for this problem
+	AlertedAs   string         `json:"alerted_as,omitempty"` // its reason: new|spike|worse|burst|severity|every|repeat
+	LastRepeat  time.Time      `json:"last_repeat,omitzero"` // the newest of Repeats
 }
 
 // Digest is one channel's batched events, sent as one message.
@@ -53,8 +56,9 @@ type Digest struct {
 }
 
 type otherCount struct {
-	Events  int `json:"events"`
-	Repeats int `json:"repeats"`
+	Events     int       `json:"events"`
+	Repeats    int       `json:"repeats"`
+	LastRepeat time.Time `json:"last_repeat,omitzero"`
 }
 
 // digestBuffer is a channel's digest being collected. It is persisted.
@@ -85,6 +89,7 @@ type PendingDigest struct {
 	Patterns     int            `json:"patterns"`
 	Held         int            `json:"held"`
 	Summary      bool           `json:"summary"`
+	Disabled     bool           `json:"disabled,omitempty"` // the notifier is disabled: sent when it is enabled again
 	Highest      model.Severity `json:"highest_severity"`
 	Top          []DigestEntry  `json:"top"` // ≤ 5, with links
 }
@@ -92,8 +97,9 @@ type PendingDigest struct {
 // entryAdd says how an event is added to a buffer.
 type entryAdd struct {
 	repeat      bool      // a repeat of the alert at alertedAt
-	alertedAt   time.Time //
-	held        string    // the would-be right-away reason a limit held back
+	alertedAt   time.Time // the last alert for the problem, if any
+	alertedAs   string    // its reason
+	held        string    // the would-be right-away reason a limit held back (or of an undelivered alert)
 	heldBy      string    //
 	undelivered int       // > 0: this many events of an alert that failed to deliver
 }
@@ -148,6 +154,7 @@ func (a *alerting) addToDigest(nid string, ev *model.Event, sig *signal, interva
 		o.Events += n
 		if add.repeat {
 			o.Repeats += n
+			o.LastRepeat = now
 		}
 		return buf
 	}
@@ -160,35 +167,44 @@ func (a *alerting) addToDigest(nid string, ev *model.Event, sig *signal, interva
 		e.FirstSeen = sig.FirstSeen
 		e.New = e.New || sig.New
 	}
+	if !add.alertedAt.IsZero() && !add.alertedAt.Before(e.AlertedAt) {
+		e.AlertedAt, e.AlertedAs = add.alertedAt, add.alertedAs
+	}
 	switch {
 	case add.repeat:
 		e.Repeats += n
-		e.AlertedAt = add.alertedAt
+		e.LastRepeat = now
 	case add.undelivered > 0:
 		e.Undelivered += n
-	case add.held != "":
-		if e.Held == "" {
-			e.Held, e.HeldBy = add.held, add.heldBy
-		}
+	}
+	if add.held != "" && e.Held == "" {
+		e.Held, e.HeldBy = add.held, add.heldBy
 	}
 	return buf
 }
 
-// peekRepeats counts the repeats of fp in nid's buffer: the next alert
-// for fp reports them.
-func (a *alerting) peekRepeats(nid, fp string) int {
+// peekRepeats counts the repeats of fp in nid's buffer, and when the
+// newest was: the next alert for fp reports them.
+func (a *alerting) peekRepeats(nid, fp string) (int, time.Time) {
 	buf := a.digests[nid]
 	if buf == nil {
-		return 0
+		return 0, time.Time{}
 	}
-	n := 0
-	if e := buf.Entries[fp]; e != nil {
-		n += e.Repeats
+	n, last := 0, time.Time{}
+	if e := buf.Entries[fp]; e != nil && e.Repeats > 0 {
+		n, last = n+e.Repeats, laterOf(last, e.LastRepeat)
 	}
-	if o := buf.Other[fp]; o != nil {
-		n += o.Repeats
+	if o := buf.Other[fp]; o != nil && o.Repeats > 0 {
+		n, last = n+o.Repeats, laterOf(last, o.LastRepeat)
 	}
-	return n
+	return n, last
+}
+
+func laterOf(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // foldRepeats takes the repeats of fp out of nid's buffer: the alert being
@@ -202,7 +218,7 @@ func (a *alerting) foldRepeats(nid, fp string) {
 	if e := buf.Entries[fp]; e != nil && e.Repeats > 0 {
 		buf.Events -= e.Repeats
 		e.Count -= e.Repeats
-		e.Repeats, e.AlertedAt = 0, time.Time{}
+		e.Repeats, e.AlertedAt, e.AlertedAs, e.LastRepeat = 0, time.Time{}, "", time.Time{}
 		if e.Count <= 0 {
 			delete(buf.Entries, fp)
 		}
@@ -210,7 +226,7 @@ func (a *alerting) foldRepeats(nid, fp string) {
 	if o := buf.Other[fp]; o != nil && o.Repeats > 0 {
 		buf.Events -= o.Repeats
 		o.Events -= o.Repeats
-		o.Repeats = 0
+		o.Repeats, o.LastRepeat = 0, time.Time{}
 		if o.Events <= 0 {
 			delete(buf.Other, fp)
 		}
@@ -237,6 +253,9 @@ func (a *alerting) mergeBack(nid string, old *digestBuffer, now time.Time) {
 			cur.Due = due
 		}
 	}
+	if old.Held > 0 { // a summary keeps its promise: held criticals within a minute, the rest within minutes
+		a.summarize(cur, nid, old.CriticalHeld > 0, now)
+	}
 	cur.Retried = true
 	cur.Events += old.Events
 	cur.UntrackedEvents += old.UntrackedEvents
@@ -248,7 +267,7 @@ func (a *alerting) mergeBack(nid string, old *digestBuffer, now time.Time) {
 			cur.Routes = append(cur.Routes, r)
 		}
 	}
-	addOther := func(fp string, events, repeats int) {
+	addOther := func(fp string, events, repeats int, lastRepeat time.Time) {
 		o := cur.Other[fp]
 		if o == nil && len(cur.Other) < maxDigestOther {
 			if cur.Other == nil {
@@ -263,12 +282,13 @@ func (a *alerting) mergeBack(nid string, old *digestBuffer, now time.Time) {
 		}
 		o.Events += events
 		o.Repeats += repeats
+		o.LastRepeat = laterOf(o.LastRepeat, lastRepeat)
 	}
 	for _, fp := range slices.Sorted(maps.Keys(old.Entries)) {
 		oe := old.Entries[fp]
 		e := cur.Entries[fp]
 		if e == nil && (len(cur.Entries) >= maxDigestEntries || cur.Other[fp] != nil) {
-			addOther(fp, oe.Count, oe.Repeats)
+			addOther(fp, oe.Count, oe.Repeats, oe.LastRepeat)
 			continue
 		}
 		if e == nil {
@@ -293,11 +313,38 @@ func (a *alerting) mergeBack(nid string, old *digestBuffer, now time.Time) {
 			e.Held, e.HeldBy = oe.Held, oe.HeldBy
 		}
 		if e.AlertedAt.IsZero() {
-			e.AlertedAt = oe.AlertedAt
+			e.AlertedAt, e.AlertedAs = oe.AlertedAt, oe.AlertedAs
 		}
+		e.LastRepeat = laterOf(e.LastRepeat, oe.LastRepeat)
 	}
 	for _, fp := range slices.Sorted(maps.Keys(old.Other)) {
-		addOther(fp, old.Other[fp].Events, old.Other[fp].Repeats)
+		o := old.Other[fp]
+		if e := cur.Entries[fp]; e != nil { // listed now: one place per problem
+			e.Count += o.Events
+			e.Repeats += o.Repeats
+			e.LastRepeat = laterOf(e.LastRepeat, o.LastRepeat)
+			continue
+		}
+		addOther(fp, o.Events, o.Repeats, o.LastRepeat)
+	}
+}
+
+// digested notes when digest msg reported repeats of the alert still
+// open for each problem: the next alert counts its repeats from there.
+func (a *alerting) digested(msg *Message) {
+	if msg.buf == nil {
+		return
+	}
+	note := func(fp string, repeats int) {
+		if st := a.alerts[msg.nid+"|"+fp]; repeats > 0 && st != nil && st.LastSent.Before(msg.at) {
+			st.Digested = msg.at
+		}
+	}
+	for fp, e := range msg.buf.Entries {
+		note(fp, e.Repeats)
+	}
+	for fp, o := range msg.buf.Other {
+		note(fp, o.Repeats)
 	}
 }
 
@@ -447,40 +494,59 @@ func (d *Dispatcher) flushAll(reason string) {
 	defer d.amu.Unlock()
 	now := d.clock()
 	for _, nid := range slices.Sorted(maps.Keys(d.al.digests)) {
-		d.flushLocked(nid, d.al.digests[nid], reason, now)
+		buf := d.al.digests[nid]
+		if _, err := d.flushLocked(nid, buf, reason, now); errors.Is(err, ErrNotifierDisabled) && d.al.digests[nid] == buf {
+			d.discard(nid, buf, "digest discarded at shutdown: its notifier is disabled and alert state can't be saved")
+		}
 	}
 }
 
+// Why "Send now" sent nothing.
+var (
+	ErrNothingBatched   = errors.New("nothing is batched for this notifier")
+	ErrNotifierDisabled = errors.New("this notifier is disabled or was removed: enable it to send its digest")
+	ErrQueueFull        = errors.New("this notifier's queue is full: the digest goes out on the next tick")
+)
+
 // FlushDigest sends notifier nid's digest now ("Send now"). It reports the
-// digest's delivery ID, and false when nothing is batched for nid (or the
-// notifier's queue is full).
-func (d *Dispatcher) FlushDigest(nid string) (string, bool) {
+// digest's delivery ID, or why nothing was sent: nothing is batched for
+// nid, its notifier is disabled or gone (the digest stays), or its queue
+// is full.
+func (d *Dispatcher) FlushDigest(nid string) (string, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	d.amu.Lock()
 	defer d.amu.Unlock()
 	buf := d.al.digests[nid]
 	if buf == nil {
-		return "", false
+		return "", ErrNothingBatched
+	}
+	if ch := d.channels[nid]; ch == nil || ch.noDigest {
+		return "", ErrNotifierDisabled
 	}
 	return d.flushLocked(nid, buf, ReasonManual, d.clock())
 }
 
-// flushLocked queues nid's buffer as a digest. A buffer whose notifier is
-// gone, disabled or no-digest is discarded (its events are lost); one that
-// can't be queued stays for the next tick. d.mu (read) and d.amu are held.
-func (d *Dispatcher) flushLocked(nid string, buf *digestBuffer, reason string, now time.Time) (string, bool) {
+// flushLocked queues nid's buffer as a digest. A disabled notifier's buffer
+// waits for it; one whose notifier is gone or no-digest is discarded (its
+// events are lost); one that can't be queued stays for the next tick. When
+// the digest carries held alerts, it is their alert: their repeats in the
+// window go into later digests rather than being held again. d.mu (read)
+// and d.amu are held.
+func (d *Dispatcher) flushLocked(nid string, buf *digestBuffer, reason string, now time.Time) (string, error) {
 	a := &d.al
 	ch := d.channels[nid]
+	if _, idle := d.idle[nid]; ch == nil && idle && buf.Events > 0 {
+		return "", ErrNotifierDisabled
+	}
 	if ch == nil || ch.noDigest || buf.Events <= 0 {
-		delete(a.digests, nid)
-		a.dirty = true
-		if buf.Events > 0 {
-			d.DigestsDiscarded.Add(1)
-			d.LostEvents.Add(uint64(buf.Events))
-			d.log.Warn("digest discarded: its notifier is gone, disabled or takes no digests", "notifier", nid, "events", buf.Events)
+		if buf.Events <= 0 {
+			delete(a.digests, nid)
+			a.dirty = true
+			return "", ErrNothingBatched
 		}
-		return "", false
+		d.discard(nid, buf, "digest discarded: its notifier is gone or takes no digests")
+		return "", ErrNotifierDisabled
 	}
 	dg := d.snapshot(buf, reason, now)
 	msg := &Message{ID: dg.ID, Kind: KindDigest, Digest: dg, Routes: dg.Routes, RouteName: strings.Join(dg.Routes, ", "),
@@ -494,16 +560,40 @@ func (d *Dispatcher) flushLocked(nid string, buf *digestBuffer, reason string, n
 			a.stuck[nid] = true
 			d.log.Warn("notification queue full: the digest waits for the next tick", "notifier", ch.n.Name, "events", buf.Events)
 		}
-		return "", false
+		return "", ErrQueueFull
 	}
 	delete(a.stuck, nid)
 	delete(a.digests, nid)
 	if buf.Held > 0 {
 		a.summaries[nid] = now
+		for _, fp := range slices.Sorted(maps.Keys(buf.Entries)) {
+			if e := buf.Entries[fp]; e.Held != "" {
+				a.seq++
+				key := nid + "|" + fp
+				st := a.alerts[key]
+				if st == nil {
+					st = &alertState{}
+					a.alerts[key] = st
+				}
+				st.LastSent, st.LastSeverity, st.Reason, st.Digested, st.Seq, st.Updated = now, e.Severity, e.Held, time.Time{}, a.seq, now
+			}
+		}
+		if len(a.alerts) > maxAlertStates {
+			a.evictAlerts(d)
+		}
 	}
 	a.digestLog.put(dg)
 	a.dirty = true
-	return dg.ID, true
+	return dg.ID, nil
+}
+
+// discard drops nid's buffer, whose events are lost.
+func (d *Dispatcher) discard(nid string, buf *digestBuffer, why string) {
+	delete(d.al.digests, nid)
+	d.al.dirty = true
+	d.DigestsDiscarded.Add(1)
+	d.LostEvents.Add(uint64(buf.Events))
+	d.log.Warn(why, "notifier", nid, "events", buf.Events)
 }
 
 // digestRoute is the route a buffer's interval comes from (for its Why).
@@ -538,6 +628,8 @@ func (d *Dispatcher) PendingDigests() []PendingDigest {
 		}
 		if ch := d.channels[nid]; ch != nil {
 			pd.NotifierName, pd.NotifierType = ch.n.Name, ch.n.Type
+		} else if name, idle := d.idle[nid]; idle {
+			pd.NotifierName, pd.Disabled = name, true
 		}
 		for i, e := range sortedEntries(buf) {
 			if i == 5 {

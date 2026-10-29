@@ -24,6 +24,8 @@ var (
 	pyException = regexp.MustCompile(`^(?:[A-Za-z_][\w]*\.)*[A-Z]\w*(?:Error|Exception|Warning|Exit|Interrupt|Iteration)(?::|$)`)
 	javaExc     = regexp.MustCompile(`^(?:[a-z_$][\w$]*\.)+[A-Z][\w$]*(?:Exception|Error|Throwable)(?::|$)`)
 	loggedIssue = regexp.MustCompile(`\b(?:ERROR|CRITICAL|FATAL|SEVERE|WARN|WARNING|EXCEPTION)\b|\bwith root cause$`)
+
+	pyTracebackHead = []byte("Traceback (most recent call last):")
 )
 
 // lineSplitter turns lines into log records.
@@ -115,11 +117,18 @@ func (s *lineSplitter) joins(line string) bool {
 	case goPanic.Match(first):
 		return goTrace.MatchString(line)
 	case pyTraceback.MatchString(line):
-		return bytes.Contains(p, []byte("Traceback (most recent call last):")) || s.conts == 0 && loggedIssue.Match(first)
-	case pyException.MatchString(line) && bytes.Contains(p, []byte("Traceback (most recent call last):")):
+		if bytes.Contains(p, pyTracebackHead) {
+			// A chain marker joins its traceback; a new traceback joins
+			// only right after one, not after an unrelated traceback.
+			return !strings.HasPrefix(line, "Traceback") || pyTraceback.Match(last)
+		}
+		return s.conts == 0 && loggedIssue.Match(first)
+	case pyException.MatchString(line) && bytes.Contains(p, pyTracebackHead):
 		return len(last) > 0 && (last[0] == ' ' || last[0] == '\t')
 	case javaExc.MatchString(line):
-		return s.conts == 0 && loggedIssue.Match(first)
+		// after the record that logged it, or JUL's header and level line
+		// (logger.log(SEVERE, msg, thrown))
+		return s.conts == 0 && loggedIssue.Match(first) || s.conts == 1 && julHeader.Match(first) && julLevel.Match(last)
 	}
 	return false
 }

@@ -65,10 +65,25 @@ func Defaults() *Config {
 				Tags:         []string{"auth"},
 			},
 			{
+				Name:        "Login failures",
+				Description: "A wrong password or unknown user: routine one at a time, so a warning even when the words read like an error. Early, so the rules after it can still raise what it lowers (a brute force, a service down).",
+				Enabled:     true,
+				Match:       MatchAll,
+				Conditions: []Condition{
+					cond("message", OpRegex, `(?i)(failed password|invalid user|authentication (failed|failure)|login (failed|denied)|invalid (password|credentials))`),
+					cond("message", OpNotRegex, `\bfailed to connect\b|\bbrute[- ]?force\b|\battack`),
+				},
+				Category:     "auth",
+				Severity:     model.SeverityWarning,
+				SeverityMode: SeveritySet,
+				KeepStated:   true,
+				Tags:         []string{"auth"},
+			},
+			{
 				Name:         "Resource exhaustion",
 				Enabled:      true,
 				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `\bout of memory: kill(?:ed)? process\b|\boom[-_ ]?kill|\bno space left on device\b|\b(?:disk|file ?system|volume) (?:is )?full\b|\btoo many open files\b`)},
+				Conditions:   []Condition{cond("message", OpRegex, `\bout of memory: kill(?:ed)? process\b|\boom[- ]?kill(?:ed|er|ing)?\b|\bno space left on device\b|\b(?:disk|file ?system|volume) (?:is )?full\b|\btoo many open files\b`)},
 				Category:     "resource",
 				Severity:     model.SeverityCritical,
 				SeverityMode: SeverityAtLeast,
@@ -102,12 +117,13 @@ func Defaults() *Config {
 				Match:   MatchAll,
 				Conditions: []Condition{
 					cond("message", OpRegex, `\b(?:service|site|website|api|database|db|cluster|backend|upstream)s? (?:is |are |went |seems |appears )?(?:completely |currently |now )?(?:down|offline|unreachable)\b|\bhealth ?checks? (?:are |is )?failing\b|\b(?:all|every) (?:replicas|instances|backends|upstreams|endpoints|targets|pods|nodes|servers)(?: are| is)? (?:unhealthy|down|unavailable|failing|unreachable)\b|\bhas no server available\b`),
-					cond("message", OpNotRegex, `\b(?:shut(?:ting)?|bring(?:ing)?|brought|tak(?:e|ing)|took|turn(?:ing|ed)?|spin(?:ning)?|scal(?:e|ing|ed)|wind(?:ing)?|slow(?:ing|ed)?|count(?:ing)?)\b[^\n]{0,30}\bdown\b|\bfor maintenance\b|\bscheduled (?:downtime|maintenance)\b`),
+					cond("message", OpNotRegex, `\b(?:shut(?:ting)?|bring(?:ing)?|brought|tak(?:e|ing)|took|turn(?:ing|ed)?|spin(?:ning)?|scal(?:e|ing|ed)|wind(?:ing)?|slow(?:ing|ed)?|count(?:ing)?)\b[^\n]{0,30}\bdown\b|\bfor maintenance\b|\bscheduled (?:downtime|maintenance)\b|\b(?:resolved|recovered|back up|no longer|maintenance mode)\b|\boffline (?:backup|mode|migration)\b|\b(?:down|offline)-`),
 				},
-				Category:     "application",
-				Severity:     model.SeverityCritical,
-				SeverityMode: SeverityAtLeast,
-				Tags:         []string{"outage"},
+				Category:               "application",
+				Severity:               model.SeverityCritical,
+				SeverityMode:           SeverityAtLeast,
+				KeepStatedBelowWarning: true,
+				Tags:                   []string{"outage"},
 			},
 			{
 				Name:    "Security: attacks",
@@ -123,18 +139,6 @@ func Defaults() *Config {
 				SeverityMode: SeverityAtLeast,
 				KeepStated:   true,
 				Tags:         []string{"attack"},
-			},
-			{
-				Name:         "Login failures",
-				Description:  "A wrong password or unknown user: routine one at a time, so a warning even when the words read like an error.",
-				Enabled:      true,
-				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `(?i)(failed password|invalid user|authentication (failed|failure)|login (failed|denied)|invalid (password|credentials))`)},
-				Category:     "auth",
-				Severity:     model.SeverityWarning,
-				SeverityMode: SeveritySet,
-				KeepStated:   true,
-				Tags:         []string{"auth"},
 			},
 			{
 				Name:         "Auth failures",
@@ -157,10 +161,11 @@ func Defaults() *Config {
 					cond("http.status_code", OpRegex, `^5\d\d$`),
 					cond("message", OpRegex, `"[A-Z]{3,10} [^"]* HTTP/[\d.]+" 5\d\d\b|\[GIN\] [^|]*\| 5\d\d \|`),
 				},
+				// Not keep_stated: access loggers write every request at
+				// INFO (uvicorn, werkzeug), but a 5xx is a server error.
 				Category:     "http",
 				Severity:     model.SeverityError,
 				SeverityMode: SeverityAtLeast,
-				KeepStated:   true,
 			},
 			{
 				Name:       "Database",
@@ -177,10 +182,13 @@ func Defaults() *Config {
 				Category:   "network",
 			},
 			{
-				Name:         "TLS certificate expired",
-				Enabled:      true,
-				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `\bcert(?:ificate)?s?\b[^\n]{0,80}?\b(?:has|have) expired\b|\bcert(?:ificate)? (?:is |has )?expired\b|\bexpired (?:tls |ssl |x509 )?cert(?:ificate)?\b|\bCERT_HAS_EXPIRED\b`)},
+				Name:    "TLS certificate expired",
+				Enabled: true,
+				Match:   MatchAll,
+				Conditions: []Condition{
+					cond("message", OpRegex, `\bcert(?:ificate)?s?\b[^\n]{0,80}?\b(?:has|have) expired\b|\bcert(?:ificate)? (?:is |has )?expired\b|\bexpired (?:tls |ssl |x509 )?cert(?:ificate)?\b|\bCERT_HAS_EXPIRED\b`),
+					cond("message", OpNotRegex, `\brenew(?:ed|al succeeded)\b|\bold cert`),
+				},
 				Category:     "network",
 				Severity:     model.SeverityError,
 				SeverityMode: SeverityAtLeast,
@@ -198,20 +206,27 @@ func Defaults() *Config {
 				Tags:         []string{"tls"},
 			},
 			{
-				Name:         "Replication lag",
-				Enabled:      true,
-				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `\breplica(?:tion)?\b[^\n]{0,40}?\blag(?:ging)?\b|\bseconds_behind_(?:master|source)\b|\breplication delay\b|\bslave (?:lag|delay)\b`)},
+				Name:    "Replication lag",
+				Enabled: true,
+				Match:   MatchAll,
+				Conditions: []Condition{
+					cond("message", OpRegex, `\breplica(?:tion)?\b[^\n]{0,40}?\blag(?:ging)?\b|\bseconds_behind_(?:master|source)\b|\breplication delay\b|\bslave (?:lag|delay)\b`),
+					cond("message", OpNotRegex, `\b(?:lag|delay)\b[^\n]{0,15}?\b(?:0(?:\.\d+)? ?(?:s|secs?|seconds?)|\d+(?:\.\d+)? ?ms)\b`), // none, or under a second
+				},
 				Category:     "database",
 				Severity:     model.SeverityWarning,
 				SeverityMode: SeverityAtLeast,
 				KeepStated:   true,
 			},
 			{
-				Name:         "Queue backlog",
-				Enabled:      true,
-				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `\bqueue\b[^\n]{0,60}?\b(?:depth|backlog|length|size)\b[^\n]{0,20}?\b\d{4,}\b|\b(?:0|no) (?:active )?consumers\b|\bconsumer lag\b|\bbacklog (?:of|is|at|grew to) \d{3,}\b`)},
+				Name:    "Queue backlog",
+				Enabled: true,
+				Match:   MatchAll,
+				Conditions: []Condition{
+					cond("message", OpRegex, `\bqueue\b[^\n]{0,60}?\b(?:depth|backlog|length|size)\b[^\n]{0,20}?\b\d{4,}\b|\b(?:0|no) (?:active )?consumers\b|\bconsumer lag\b|\bbacklog (?:of|is|at|grew to) \d{3,}\b`),
+					// a queue being set up: its capacity, no consumers yet
+					cond("message", OpNotRegex, `\b(?:start(?:ed|ing)|creat(?:ed|ing)|declar(?:ed|ing)|initiali[sz](?:ed|ing)|configur(?:ed|ing))\b[^\n]{0,40}?\bqueue\b|\bqueue (?:capacity|max(?:imum)? size)\b`),
+				},
 				Category:     "performance",
 				Severity:     model.SeverityWarning,
 				SeverityMode: SeverityAtLeast,
@@ -221,7 +236,7 @@ func Defaults() *Config {
 				Name:         "Circuit breaker open",
 				Enabled:      true,
 				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `\bcircuit[- ]?breaker\b[^\n]{0,60}?\b(?:open(?:ed)?|tripped)\b|\bcircuit (?:is )?(?:open|opened|tripped)\b`)},
+				Conditions:   []Condition{cond("message", OpRegex, `\bcircuit[- ]?breaker\b[^\n]{0,60}?(?:\b(?:to|is|now|was) (?:open|opened|tripped)\b|\b(?:opened|tripped)\b)|\bcircuit (?:is )?(?:open|opened|tripped)\b`)}, // into open, not "from OPEN to CLOSED"
 				Category:     "network",
 				Severity:     model.SeverityWarning,
 				SeverityMode: SeverityAtLeast,
@@ -231,7 +246,7 @@ func Defaults() *Config {
 				Name:         "Disk usage high",
 				Enabled:      true,
 				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `\b(?:disk|filesystem|file system|volume|partition|inode)s? (?:usage|space|utili[sz]ation|use|used)\b[^\n]{0,30}?\b(?:8[5-9]|9\d|100)(?:\.\d+)? ?%|\b(?:8[5-9]|9\d|100)(?:\.\d+)? ?% (?:full|used)\b|\blow (?:disk|free) space\b|\bdisk space (?:is )?(?:low|running out)\b|\bdisk watermark\b`)},
+				Conditions:   []Condition{cond("message", OpRegex, `\b(?:disk|filesystem|file system|volume|partition|inode)s? (?:usage|space|utili[sz]ation|use|used)\b[^\n%]{0,30}?\b(?:8[5-9]|9\d|100)(?:\.\d+)? ?%|\b(?:8[5-9]|9\d|100)(?:\.\d+)? ?% (?:full|used)\b|\blow (?:disk|free) space\b|\bdisk space (?:is )?(?:low|running out)\b|\bdisk watermark\b`)},
 				Category:     "resource",
 				Severity:     model.SeverityWarning,
 				SeverityMode: SeverityAtLeast,
@@ -258,7 +273,7 @@ func Defaults() *Config {
 				Name:         "Exceptions / stack traces",
 				Enabled:      true,
 				Match:        MatchAny,
-				Conditions:   []Condition{cond("message", OpRegex, `(?:^|[\s:(\[{"'=])[\w$.]*exception\b|traceback \(most recent call last\)|\bstack ?trace\b`)},
+				Conditions:   []Condition{cond("message", OpRegex, `(?:^|[\s:(\[{"'=])[\w$.]*exception\b|traceback \(most recent call last\)|\bstack ?trace\b|\n\s*at [\w$.<>]+\([\w$]+\.(?:java|kt|scala|groovy):\d+\)`)},
 				Category:     "application",
 				Severity:     model.SeverityError,
 				SeverityMode: SeverityAtLeast,
@@ -308,52 +323,100 @@ func Defaults() *Config {
 // DefaultRuleChanges compares c's rules with this version's default rules,
 // by name: missing are defaults c has no rule of that name for, changed
 // those whose rule of that name differs in what it does (its ID and whether
-// it is enabled aside). A default an operator renamed is theirs.
+// it is enabled aside), or sits out of this version's order (the first
+// rule with a category sets it). A default an operator renamed is theirs.
 func DefaultRuleChanges(c *Config) (missing, changed []string) {
 	d := Defaults()
 	Normalize(d)
+	moved := outOfOrder(c, d)
 	for _, def := range d.Rules {
-		i := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == def.Name })
+		i := ruleIndex(c.Rules, def.Name)
 		switch {
 		case i < 0:
 			missing = append(missing, def.Name)
-		case !sameRule(c.Rules[i], def):
+		case !sameRule(c.Rules[i], def) || moved[def.Name]:
 			changed = append(changed, def.Name)
 		}
 	}
 	return missing, changed
 }
 
+// outOfOrder names the defaults c has out of d's order: those outside the
+// longest run of them c has in that order (fewest to move).
+func outOfOrder(c, d *Config) map[string]bool {
+	var names []string
+	var pos []int
+	for _, def := range d.Rules {
+		if i := ruleIndex(c.Rules, def.Name); i >= 0 {
+			names, pos = append(names, def.Name), append(pos, i)
+		}
+	}
+	best, prev, end := make([]int, len(pos)), make([]int, len(pos)), -1
+	for i := range pos {
+		best[i], prev[i] = 1, -1
+		for j := 0; j < i; j++ {
+			if pos[j] < pos[i] && best[j]+1 > best[i] {
+				best[i], prev[i] = best[j]+1, j
+			}
+		}
+		if end < 0 || best[i] > best[end] {
+			end = i
+		}
+	}
+	out := map[string]bool{}
+	for _, n := range names {
+		out[n] = true
+	}
+	for i := end; i >= 0; i = prev[i] {
+		delete(out, names[i])
+	}
+	return out
+}
+
+func ruleIndex(rules []Rule, name string) int {
+	return slices.IndexFunc(rules, func(r Rule) bool { return r.Name == name })
+}
+
+// prevDefault is the index in c of the closest default before d.Rules[k]
+// that c has, or -1.
+func prevDefault(c, d *Config, k int) int {
+	for j := k - 1; j >= 0; j-- {
+		if i := ruleIndex(c.Rules, d.Rules[j].Name); i >= 0 {
+			return i
+		}
+	}
+	return -1
+}
+
 // RestoreDefaultRules gives c this version's default rules named in names
 // (all when names is empty): a rule of that name gets the default's
-// definition, keeping its ID and whether it is enabled; a missing one is
-// inserted after the closest default before it that c has, or first. It
-// returns how many rules it changed or added.
+// definition, keeping its ID and whether it is enabled, and moves after
+// the closest default before it that c has when it came before that one;
+// a missing one is inserted after that default, or first. It returns how
+// many rules it changed, moved or added.
 func RestoreDefaultRules(c *Config, names []string) int {
 	d := Defaults()
 	Normalize(d)
+	moved := outOfOrder(c, d)
 	n := 0
 	for k, def := range d.Rules {
 		if len(names) > 0 && !slices.Contains(names, def.Name) {
 			continue
 		}
-		if i := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == def.Name }); i >= 0 {
-			if !sameRule(c.Rules[i], def) {
+		if i := ruleIndex(c.Rules, def.Name); i >= 0 {
+			if !sameRule(c.Rules[i], def) || moved[def.Name] {
 				def.ID, def.Enabled = c.Rules[i].ID, c.Rules[i].Enabled
 				c.Rules[i] = def
 				n++
 			}
+			if moved[def.Name] {
+				c.Rules = slices.Delete(c.Rules, i, i+1)
+				c.Rules = slices.Insert(c.Rules, prevDefault(c, d, k)+1, def)
+			}
 			continue
 		}
-		at := 0
-		for j := k - 1; j >= 0; j-- {
-			if i := slices.IndexFunc(c.Rules, func(r Rule) bool { return r.Name == d.Rules[j].Name }); i >= 0 {
-				at = i + 1
-				break
-			}
-		}
 		def.ID = ""
-		c.Rules = slices.Insert(c.Rules, at, def)
+		c.Rules = slices.Insert(c.Rules, prevDefault(c, d, k)+1, def)
 		n++
 	}
 	return n

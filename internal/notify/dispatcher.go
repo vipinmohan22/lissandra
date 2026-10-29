@@ -93,9 +93,12 @@ type alerting struct {
 	critical  map[string][]time.Time   // notifier → critical Smart right-away sends, last 10 min
 	promoted  map[string]time.Time     // notifierID|sourceID|category → last promotion sent
 	summaries map[string]time.Time     // notifier → last summary flushed
+	bursts    map[string]*burstState   // sourceID|category (auth, security) → recent events
 	decisions decisionRing             // event ID → []Decision (memory only)
 	digestLog digestLog                // last 50 sent digests in full, by ID (memory only)
+	inflight  map[uint64]*Message      // right-away alerts queued or being delivered, by seq (memory only)
 	dirty     bool
+	saveSoon  bool // a digest was delivered: save on the next tick, so a crash doesn't send it again
 	seq       uint64
 	stuck     map[string]bool // notifiers whose digest couldn't be queued (logged once per streak)
 }
@@ -104,8 +107,9 @@ func newAlerting() alerting {
 	return alerting{
 		sources: map[string]*sourceState{}, patterns: map[string]*patternState{}, alerts: map[string]*alertState{},
 		digests: map[string]*digestBuffer{}, recent: map[string][]time.Time{}, critical: map[string][]time.Time{},
-		promoted: map[string]time.Time{}, summaries: map[string]time.Time{}, stuck: map[string]bool{},
-		decisions: decisionRing{m: map[string][]Decision{}}, digestLog: digestLog{m: map[string]*Digest{}},
+		promoted: map[string]time.Time{}, summaries: map[string]time.Time{}, bursts: map[string]*burstState{}, stuck: map[string]bool{},
+		decisions: decisionRing{m: map[string][]Decision{}}, digestLog: digestLog{m: map[string]*Digest{}, out: map[string]Delivery{}},
+		inflight: map[uint64]*Message{},
 	}
 }
 
@@ -113,9 +117,21 @@ func newAlerting() alerting {
 type alertState struct {
 	LastSent     time.Time      `json:"last_sent,omitzero"`
 	LastSeverity model.Severity `json:"last_severity,omitempty"`
-	Pending      int            `json:"pending,omitempty"` // repeats since LastSent not reported yet (no-digest channels)
+	Reason       string         `json:"reason,omitempty"`     // why the alert at LastSent went right away
+	Pending      int            `json:"pending,omitempty"`    // repeats since LastSent not reported yet (no-digest channels)
+	LastRepeat   time.Time      `json:"last_repeat,omitzero"` // the newest of them
+	Digested     time.Time      `json:"digested,omitzero"`    // the digest that last reported repeats of the alert at LastSent
 	Seq          uint64         `json:"seq"`
 	Updated      time.Time      `json:"updated,omitzero"` // last change, for pruning a state a failure reset
+}
+
+// addPending counts k events at t as repeats the next alert reports.
+func (st *alertState) addPending(k int, t, now time.Time) {
+	st.Pending += k
+	if t.After(st.LastRepeat) {
+		st.LastRepeat = t
+	}
+	st.Updated = now
 }
 
 // touched is when the state last changed.
@@ -151,9 +167,11 @@ func (r *decisionRing) put(id string, decs []Decision) {
 	r.m[id] = decs
 }
 
-// digestLog keeps the last digestLogSize digests queued, by ID.
+// digestLog keeps the last digestLogSize digests queued, by ID, and how
+// their delivery ended, which outlives the delivery records' ring.
 type digestLog struct {
 	m   map[string]*Digest
+	out map[string]Delivery
 	ids []string
 }
 
@@ -162,6 +180,7 @@ func (l *digestLog) put(dg *Digest) {
 	l.ids = append(l.ids, dg.ID)
 	if len(l.ids) > digestLogSize {
 		delete(l.m, l.ids[0])
+		delete(l.out, l.ids[0])
 		l.ids = slices.Delete(l.ids, 0, 1)
 	}
 }
@@ -179,6 +198,7 @@ type Dispatcher struct {
 	mu        sync.RWMutex
 	routes    []route
 	channels  map[string]*channel
+	idle      map[string]string // name of each notifier (and alert group email) configured but disabled: its digest waits
 	publicURL string
 
 	// Lock order: mu → amu → lmu → dmu. saveMu is taken holding none of
@@ -210,7 +230,8 @@ type Dispatcher struct {
 	Sent, Failed, Dropped, Throttled atomic.Uint64 // Sent and Failed include digests; Throttled counts throttled decisions
 	// Decided counts decisions by Actions; RightAway counts alerts sent
 	// right away by RightAwayReasons.
-	Decided, RightAway                                                                      [6]atomic.Uint64
+	Decided                                                                                 [len(Actions)]atomic.Uint64
+	RightAway                                                                               [len(RightAwayReasons)]atomic.Uint64
 	DigestsSent, DigestsFailed, DigestsDiscarded, DigestEvents, LostEvents, StateSaveErrors atomic.Uint64
 }
 
@@ -250,17 +271,50 @@ func NewDispatcher(log *slog.Logger) *Dispatcher { return NewDispatcherWith(log,
 // now is the clock, unclamped.
 func (d *Dispatcher) now() time.Time { return d.nowFn().UTC() }
 
+// clockStep is how far the clock may go back before alert state follows
+// it: up to it, time stands still until the clock catches up.
+const clockStep = time.Minute
+
 // clock is the decision time: read under amu and never earlier than the
 // last one, so windows and digests never see time go backwards.
 func (d *Dispatcher) clock() time.Time { return d.clampLocked(d.now()) }
 
+// clampLocked returns the decision time for a clock reading of now; amu is
+// held. When the clock itself (read again: now may be a stale reading) is
+// more than clockStep behind the last decision (it was ahead, then was
+// corrected), alert state moves to the corrected time, as loading it
+// would, rather than wait for the clock to catch up: digests, summaries
+// and windows would stall that long.
 func (d *Dispatcher) clampLocked(now time.Time) time.Time {
 	now = now.UTC()
 	if now.Before(d.al.last) {
-		return d.al.last
+		cur := d.now()
+		back := d.al.last.Sub(cur)
+		if back <= clockStep {
+			return d.al.last
+		}
+		d.log.Warn("the clock went back: alert state moved to the corrected time", "by", back.Round(time.Second).String())
+		d.al.rebase(d.al.last, cur)
+		now = laterOf(now, cur)
 	}
 	d.al.last = now
 	return now
+}
+
+// rebase moves alert state decided up to last to now, an earlier time:
+// digests keep the time they had left, and other times later than now
+// become now.
+func (a *alerting) rebase(last, now time.Time) {
+	for _, b := range a.digests {
+		if b.Due.After(now) {
+			b.Due = now.Add(max(b.Due.Sub(last), 0))
+		}
+	}
+	clampState(&savedState{
+		Sources: a.sources, Patterns: a.patterns, Alerts: a.alerts, Digests: a.digests, Recent: a.recent, Critical: a.critical,
+		Promoted: a.promoted, Summaries: a.summaries, Bursts: a.bursts,
+	}, now)
+	a.dirty = true
 }
 
 // enqueue queues j on notifier id's lane, creating the lane (and, once Run
@@ -352,8 +406,21 @@ func (d *Dispatcher) Configure(c *config.Config) {
 		channels[id] = &channel{n: n, sender: s, err: err, noDigest: noDigest(n.Type)}
 	}
 	routes := compileRoutes(append(slices.Clone(c.Routes), groupRoutes...))
+	// A disabled notifier's digest waits for it to be enabled again (a
+	// week at most); a removed one's is discarded when due.
+	idle := map[string]string{}
+	for _, n := range c.Notifiers {
+		if channels[n.ID] == nil {
+			idle[n.ID] = n.Name
+		}
+	}
+	for _, g := range c.AlertGroups {
+		if id := groupEmailID(g.ID); channels[id] == nil {
+			idle[id] = "Alert group: " + g.Name + " (email)"
+		}
+	}
 	d.mu.Lock()
-	d.channels, d.routes, d.publicURL = channels, routes, c.Settings.PublicURL
+	d.channels, d.routes, d.idle, d.publicURL = channels, routes, idle, c.Settings.PublicURL
 	d.mu.Unlock()
 }
 
@@ -507,14 +574,20 @@ func (d *Dispatcher) Handle(ev model.Event) {
 	}
 	ps, order := d.plans(&ev, sig, matching)
 	decs := make([]Decision, 0, len(order))
-	spikeUsed := false
+	spikeUsed, burstUsed := false, false
 	for _, nid := range order {
-		dec, used := d.decide(&ev, sig, nid, d.channels[nid], ps[nid], now)
+		dec, told := d.decide(&ev, sig, nid, d.channels[nid], ps[nid], now)
 		decs = append(decs, dec)
-		spikeUsed = spikeUsed || used
+		spikeUsed = spikeUsed || told == ReasonSpike
+		// a burst is told by a burst alert (sent or held), or a severity
+		// alert that says so
+		burstUsed = burstUsed || sig.Burst && (told == ReasonBurst || told == ReasonSeverity && dec.Action == ActionSent && !sig.New && !sig.Spike)
 	}
 	if p := a.patterns[ev.Fingerprint]; spikeUsed && p != nil {
 		p.SpikeAt = now
+	}
+	if b := a.bursts[burstKey(&ev)]; burstUsed && b != nil {
+		b.At = now
 	}
 	a.decisions.put(ev.ID, decs)
 }
@@ -539,11 +612,14 @@ func (d *Dispatcher) completed(ch *channel, msg *Message, err error) {
 	now := d.clock()
 	a := &d.al
 	retry := err != nil && retryable(err) && ch.err == nil
+	msg.failed = retry
 	if dg := msg.Digest; dg != nil {
 		switch {
 		case err == nil:
 			d.DigestsSent.Add(1)
 			d.DigestEvents.Add(uint64(dg.Events))
+			a.digested(msg)
+			a.saveSoon = true
 		case retry && msg.buf != nil && !msg.buf.Retried:
 			a.mergeBack(msg.nid, msg.buf, now)
 			a.dirty = true
@@ -554,31 +630,45 @@ func (d *Dispatcher) completed(ch *channel, msg *Message, err error) {
 		}
 		return
 	}
+	delete(a.inflight, msg.seq)
 	if !retry {
 		return // sent, or a failure retrying can't fix: the window stays
 	}
+	a.undelivered(msg, now)
+	a.dirty = true
+}
+
+// undelivered applies a right-away alert that was not delivered: when it
+// is still its problem's last alert, the window re-arms (the next event
+// alerts), and its events go back to be reported once. On a channel with
+// a digest they go into it, which then goes out as a summary within a
+// minute (2 for less than critical), as for an alert flood protection
+// held; otherwise the next alert reports them.
+func (a *alerting) undelivered(msg *Message, now time.Time) {
 	key := msg.nid + "|" + msg.fp
 	st := a.alerts[key]
-	if st != nil && st.Seq == msg.seq { // re-arm: the next event alerts
-		st.LastSent, st.LastSeverity, st.Updated = msg.prevSent, msg.prevSev, now
+	if st != nil && st.Seq == msg.seq { // re-arm, to before the alerts in a row that failed
+		r := msg
+		for r.prev != nil && r.prev.failed {
+			r = r.prev
+		}
+		st.LastSent, st.LastSeverity, st.Reason, st.Seq, st.Updated = r.prevSent, r.prevSev, r.prevWhy, r.prevSeq, now
 	}
-	// The alert's events go back, to be reported once.
 	k := 1 + msg.Suppressed
 	if msg.digestMin > 0 {
 		var sig *signal
 		if p := a.patterns[msg.fp]; p != nil {
 			sig = &signal{FirstSeen: p.First}
 		}
-		a.addToDigest(msg.nid, &msg.Event, sig, msg.digestMin, msg.Routes, entryAdd{undelivered: k}, now)
-	} else {
-		if st == nil {
-			st = &alertState{}
-			a.alerts[key] = st
-		}
-		st.Pending += k
-		st.Updated = now
+		a.holdIn(msg.nid, &msg.Event, sig, msg.digestMin, msg.Routes, entryAdd{undelivered: k, held: msg.Reason.Code, heldBy: ReasonUndelivered},
+			msg.Event.Severity.AtLeast(model.SeverityCritical), now)
+		return
 	}
-	a.dirty = true
+	if st == nil {
+		st = &alertState{}
+		a.alerts[key] = st
+	}
+	st.addPending(k, msg.at, now)
 }
 
 // wait waits until every queued notification has been delivered (or has
@@ -645,7 +735,7 @@ func (d *Dispatcher) Run(ctx context.Context, workers int) {
 			d.wg.Wait()
 			return
 		case <-flush.C:
-			d.flushDue(d.now())
+			d.tick(d.now())
 		case <-save.C:
 			d.amu.Lock()
 			dirty := d.al.dirty
@@ -660,14 +750,34 @@ func (d *Dispatcher) Run(ctx context.Context, workers int) {
 	}
 }
 
+// tick sends the digests due at now, and saves alert state when a digest
+// was delivered since the last tick: a crash then can't send it again.
+func (d *Dispatcher) tick(now time.Time) {
+	d.flushDue(now)
+	d.amu.Lock()
+	soon := d.al.saveSoon
+	d.al.saveSoon = false
+	d.amu.Unlock()
+	if soon {
+		_ = d.SaveState() // logged and counted
+	}
+}
+
 // prune drops alert state nothing needs any more.
 func (d *Dispatcher) prune(now time.Time) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	d.amu.Lock()
 	defer d.amu.Unlock()
 	now = d.clampLocked(now)
 	a := &d.al
-	before := len(a.patterns) + len(a.sources) + len(a.alerts) + len(a.promoted) + len(a.summaries)
+	before := len(a.patterns) + len(a.sources) + len(a.alerts) + len(a.promoted) + len(a.summaries) + len(a.bursts)
 	a.prunePatterns(now)
+	for _, nid := range slices.Sorted(maps.Keys(a.digests)) {
+		if _, idle := d.idle[nid]; idle && now.Sub(a.digests[nid].Opened) > idleDigestTTL {
+			d.discard(nid, a.digests[nid], "digest discarded: its notifier stayed disabled for a week")
+		}
+	}
 	for k, st := range a.alerts {
 		age := now.Sub(st.touched())
 		switch {
@@ -699,7 +809,7 @@ func (d *Dispatcher) prune(now time.Time) {
 			}
 		}
 	}
-	if len(a.patterns)+len(a.sources)+len(a.alerts)+len(a.promoted)+len(a.summaries) != before {
+	if len(a.patterns)+len(a.sources)+len(a.alerts)+len(a.promoted)+len(a.summaries)+len(a.bursts) != before {
 		a.dirty = true
 	}
 }
@@ -827,6 +937,13 @@ func (d *Dispatcher) record(ch *channel, msg *Message, status, errMsg string, at
 		d.dhead = (d.dhead + 1) % maxDeliveries
 	}
 	d.dmu.Unlock()
+	if msg.Digest != nil && !msg.Test { // a digest's outcome is kept as long as the digest (only lane workers record digests: no lock held)
+		d.amu.Lock()
+		if _, ok := d.al.digestLog.m[del.ID]; ok {
+			d.al.digestLog.out[del.ID] = del
+		}
+		d.amu.Unlock()
+	}
 }
 
 // recentDeliveries calls f with delivery records, newest first, until it
@@ -890,10 +1007,12 @@ func (d *Dispatcher) Deliveries(limit int, kind ...string) []Delivery {
 
 // DeliveryDetail returns a delivery record and, for one of the last 50
 // digests, the digest in full. A digest still queued has a record with
-// status "queued".
+// status "queued"; a digest's outcome is kept after its record leaves the
+// ring.
 func (d *Dispatcher) DeliveryDetail(id string) (Delivery, *Digest, bool) {
 	d.amu.Lock()
 	dg := d.al.digestLog.m[id]
+	outcome, done := d.al.digestLog.out[id]
 	d.amu.Unlock()
 	d.dmu.Lock()
 	defer d.dmu.Unlock()
@@ -908,6 +1027,9 @@ func (d *Dispatcher) DeliveryDetail(id string) (Delivery, *Digest, bool) {
 		return *found, dg, true
 	}
 	if dg != nil {
+		if done { // its record left the ring
+			return outcome, dg, true
+		}
 		return Delivery{ID: dg.ID, Time: dg.To, Kind: KindDigest, Routes: dg.Routes, RouteName: strings.Join(dg.Routes, ", "),
 			Reason: dg.Reason, Severity: dg.Highest, Events: dg.Events, Patterns: dg.Patterns, Held: dg.Held, Status: "queued"}, dg, true
 	}
@@ -934,8 +1056,8 @@ func (d *Dispatcher) Decisions(eventID string) []Decision {
 }
 
 // Preview returns where ev would go, without reading or changing alert
-// state: it judges ev as if nothing were new, spiking or worse (for the
-// rule tester and the source test).
+// state: it judges ev as if nothing were new, spiking, worse or a burst
+// (for the rule tester and the source test).
 func (d *Dispatcher) Preview(ev *model.Event) []Decision {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -954,18 +1076,32 @@ func (d *Dispatcher) Preview(ev *model.Event) []Decision {
 			dec.Reason = Reason{p.reason, fmt.Sprintf("Right away (%s on %q).", what, routeName(p.route))}
 		case tierDigest:
 			dec.Action = ActionDigest
-			every := fmtDur(time.Duration(p.digestMin) * time.Minute)
-			text := fmt.Sprintf("In the next digest (every %s), unless it is new, spiking or getting worse.", every)
-			if p.route != nil && p.route.Delivery == config.DeliveryDigest {
-				text = fmt.Sprintf("In the next digest (every %s).", every)
-			}
-			dec.Reason = Reason{ReasonDigest, text}
+			dec.Reason = Reason{ReasonDigest, previewDigestText(ev, p)}
 		default:
 			dec.Action, dec.Reason = ActionSkipped, Reason{ReasonNoDigest, skippedText(ch, p)}
 		}
 		out = append(out, dec)
 	}
 	return out
+}
+
+// previewDigestText says that ev waits for the digest, and what would send
+// it right away instead on a smart route.
+func previewDigestText(ev *model.Event, p *plan) string {
+	text := fmt.Sprintf("In the next digest (every %s)", fmtDur(time.Duration(p.digestMin)*time.Minute))
+	if p.route == nil || p.route.Delivery != config.DeliverySmart {
+		return text + "."
+	}
+	burst := burstCategories[ev.Category] && ev.Severity.AtLeast(model.SeverityWarning)
+	switch {
+	case ev.Severity.AtLeast(promoteFloor) && burst:
+		return text + ", unless it is new, spiking, getting worse or part of a burst."
+	case ev.Severity.AtLeast(promoteFloor):
+		return text + ", unless it is new, spiking or getting worse."
+	case burst:
+		return fmt.Sprintf("%s, unless it is part of a burst: %d %s warnings or worse from one source in %d minutes.", text, burstMin, ev.Category, int(spikeWindow/time.Minute))
+	}
+	return text + "."
 }
 
 // WarmingSource is a source still learning what's normal.
@@ -985,16 +1121,18 @@ type StateStatus struct {
 
 // Limits are the decision layer's constants, for the UI.
 type Limits struct {
-	WarmupMinutes       int     `json:"warmup_minutes"`
-	NewAfterDays        int     `json:"new_after_days"`
-	SpikeFactor         float64 `json:"spike_factor"`
-	SpikeMin            int     `json:"spike_min"`
-	FloodMin            int     `json:"flood_min"`
-	ChannelAlerts       int     `json:"channel_alerts"`
-	SourceAlerts        int     `json:"source_alerts"`
-	CriticalAlerts      int     `json:"critical_alerts"`
-	WindowMinutes       int     `json:"window_minutes"`
-	SummaryDelayMinutes int     `json:"summary_delay_minutes"`
+	WarmupMinutes       int      `json:"warmup_minutes"`
+	NewAfterDays        int      `json:"new_after_days"`
+	SpikeFactor         float64  `json:"spike_factor"`
+	SpikeMin            int      `json:"spike_min"`
+	FloodMin            int      `json:"flood_min"`
+	ChannelAlerts       int      `json:"channel_alerts"`
+	SourceAlerts        int      `json:"source_alerts"`
+	CriticalAlerts      int      `json:"critical_alerts"`
+	WindowMinutes       int      `json:"window_minutes"`
+	SummaryDelayMinutes int      `json:"summary_delay_minutes"`
+	BurstEvents         int      `json:"burst_events"` // auth or security events at warning and up from one source in 5 minutes
+	BurstCategories     []string `json:"burst_categories"`
 }
 
 // Alerting is GET /api/alerting.
@@ -1041,6 +1179,7 @@ func (d *Dispatcher) AlertingStatus() Alerting {
 		WarmupMinutes: int(max(d.warmup, 0) / time.Minute), NewAfterDays: int(newAfter / (24 * time.Hour)),
 		SpikeFactor: spikeFactor, SpikeMin: spikeMin, FloodMin: floodMin, ChannelAlerts: channelLimit, SourceAlerts: sourceLimit,
 		CriticalAlerts: criticalLimit, WindowMinutes: int(limitWindow / time.Minute), SummaryDelayMinutes: int(summaryDelay / time.Minute),
+		BurstEvents: burstMin, BurstCategories: slices.Sorted(maps.Keys(burstCategories)),
 	}
 	return out
 }
@@ -1079,7 +1218,7 @@ func (d *Dispatcher) Stats() map[string]any {
 	for i, r := range RightAwayReasons {
 		right[r] = d.RightAway[i].Load()
 	}
-	decided := func(action string) uint64 { return d.Decided[indexOf(Actions, action)].Load() }
+	decided := func(action string) uint64 { return d.Decided[indexOf(Actions[:], action)].Load() }
 	return map[string]any{
 		"queue_depth": d.QueueDepth(), "sent": d.Sent.Load(), "failed": d.Failed.Load(),
 		"dropped": d.Dropped.Load(), "throttled": d.Throttled.Load(),

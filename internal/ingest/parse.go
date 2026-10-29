@@ -206,7 +206,9 @@ func toEvent(rec any, p config.Parse, now time.Time, tp timeParser) (ev model.Ev
 // is a log level: syslog's 0-7 (journald's PRIORITY, GELF's level) in a
 // record with a message, pino's and bunyan's 10-60 and Monolog's 100-600
 // only in a record shaped as theirs. A sensor's or a game's "level": 60 is
-// not pino's fatal; a record without a message is data.
+// not pino's fatal; a record without a message is data, and so is one
+// with a reading's fields. pino's base, time and message key are often
+// configured away (base: null, isoTime, messageKey "message").
 func numericLevelOK(key string, n int, r map[string]any, hasMessage bool) bool {
 	has := func(k string) bool { _, ok := r[k]; return ok }
 	switch {
@@ -223,11 +225,11 @@ func numericLevelOK(key string, n int, r map[string]any, hasMessage bool) bool {
 		}
 		return false
 	}
-	_, epoch := r["time"].(json.Number)
-	if has("pid") && has("hostname") || has("v") && has("name") || epoch && has("msg") { // pino, bunyan
-		return n%10 == 0 && n >= 10 && n <= 60
+	if n%10 != 0 || n < 10 || n > 60 { // pino, bunyan
+		return false
 	}
-	return false
+	return has("pid") && has("hostname") || has("v") && has("name") ||
+		(has("msg") || has("message")) && !has("unit") && !has("value") && !has("reading") && !has("sensor")
 }
 
 // mongoLevel reads the severity of MongoDB 4.4+'s structured log

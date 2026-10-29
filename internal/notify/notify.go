@@ -42,15 +42,23 @@ type Message struct {
 	Reason     Reason
 	Suppressed int       // repeats since the previous alert, reported with this one
 	Since      time.Time // the previous alert on this channel for this problem
-	Link       string    // link to the event (or digest) in the Lissandra UI, when a public URL is set
-	Test       bool
+	// SinceDigest is the digest that reported the earlier repeats of the
+	// alert at Since: Suppressed counts from it (zero: none did).
+	SinceDigest time.Time
+	LastRepeat  time.Time // the newest of the Suppressed repeats (zero: not known)
+	Link        string    // link to the event (or digest) in the Lissandra UI, when a public URL is set
+	Test        bool
 
 	// For the completion hook (dispatcher.completed) and texts.
 	at        time.Time // when it was decided: "today" for clock texts
 	nid, fp   string
 	seq       uint64
+	prevSeq   uint64   // the alert state's Seq before this alert: a failure restores it
+	prev      *Message // the alert before, when it was still in flight: if it failed too, a failure restores its window
+	failed    bool     // delivered and failed retryably (amu)
 	prevSent  time.Time
 	prevSev   model.Severity
+	prevWhy   string        // the previous alert's reason code
 	digestMin int           // alerts: the interval undelivered events are batched at; 0 = counted instead
 	buf       *digestBuffer // digests: the buffer it was made from, for a merge back
 }

@@ -32,6 +32,24 @@ type patternState struct {
 	MaxSev    model.Severity `json:"max_sev,omitempty"`
 	MaxSevAt  time.Time      `json:"max_sev_at,omitzero"`
 	SpikeAt   time.Time      `json:"spike_at,omitzero"`
+	// A burst's peak: the most events in 5 minutes since the pattern was
+	// last quiet for 5 minutes, and the last burst's of spikeMin or more,
+	// so a burst at the same time every day (a nightly job) stops being a
+	// spike.
+	Peak       int       `json:"peak,omitempty"`
+	PeakAt     time.Time `json:"peak_at,omitzero"`
+	LastPeak   int       `json:"last_peak,omitempty"`
+	LastPeakAt time.Time `json:"last_peak_at,omitzero"`
+}
+
+// burstState counts one source's events of one burst category at warning
+// and up, across patterns: many failed logins are an attack even when
+// each one is a warning. The key is source ID + "|" + category.
+type burstState struct {
+	Minute int64     `json:"minute"` // unix minute of Recent[0]
+	Recent [5]int    `json:"recent"` // per-minute counts, newest first; backlog events excluded
+	Last   time.Time `json:"last"`
+	At     time.Time `json:"at,omitzero"` // the last burst told (sent or held)
 }
 
 // signal is what observe learned about one event.
@@ -42,6 +60,12 @@ type signal struct {
 	PrevMax                        model.Severity // for "worse" texts
 	LastSeen                       time.Time      // before this event (zero: unknown); for "back after" texts
 	FirstSeen                      time.Time
+	Watched                        time.Time // when Lissandra first saw the source (its warm-up anchor); for "new" and "worse" texts
+	// Burst: the event takes its source's events of its category (auth,
+	// security) at warning and up to burstMin in 5 minutes, and no burst
+	// was told for them in the last hour. BurstN counts them.
+	Burst  bool
+	BurstN int
 }
 
 // sawSource records that a source sent an event; its first one starts its
@@ -64,6 +88,9 @@ func (a *alerting) observe(ev *model.Event, now time.Time, warmup time.Duration)
 	s := &signal{}
 	src := a.sources[ev.SourceID]
 	s.Warm = warmup < 0 || (src != nil && now.Sub(src.First) >= warmup)
+	if src != nil {
+		s.Watched = src.First
+	}
 	p := a.patterns[ev.Fingerprint]
 	known := p != nil && now.Sub(p.Last) <= newAfter
 	if p != nil {
@@ -77,6 +104,12 @@ func (a *alerting) observe(ev *model.Event, now time.Time, warmup time.Duration)
 	p.roll(now)
 	backlog := !ev.Timestamp.IsZero() && now.Sub(ev.Timestamp) > backlogAge
 	if !backlog {
+		if p.Recent == [5]int{} { // quiet for 5 minutes: the last burst is over
+			if p.Peak >= spikeMin {
+				p.LastPeak, p.LastPeakAt = p.Peak, p.PeakAt
+			}
+			p.Peak = 0
+		}
 		p.Recent[0]++
 	}
 	p.Total++
@@ -92,11 +125,14 @@ func (a *alerting) observe(ev *model.Event, now time.Time, warmup time.Duration)
 	s.Worse = s.Warm && known && s.PrevMax != "" && ev.Severity.Rank() > s.PrevMax.Rank()
 	if !backlog && now.Sub(p.SpikeAt) >= spikeEvery {
 		if now.Sub(p.First) >= baselineAge {
-			s.Spike = float64(s.C5) >= math.Max(spikeMin, spikeFactor*s.Usual/12)
+			s.Spike = float64(s.C5) >= math.Max(spikeMin, spikeFactor*s.Usual/12) && !p.routine(s.C5, now)
 		} else {
 			s.Spike = s.C5 >= floodMin
 			s.Flood = s.Spike
 		}
+	}
+	if s.C5 > p.Peak && !backlog {
+		p.Peak, p.PeakAt = s.C5, now
 	}
 	p.Last = now
 	if s.PrevMax == "" || ev.Severity.Rank() >= p.MaxSev.Rank() {
@@ -105,7 +141,51 @@ func (a *alerting) observe(ev *model.Event, now time.Time, warmup time.Duration)
 	if len(a.patterns) > maxPatterns {
 		a.evictPatterns()
 	}
+	if !backlog && burstCategories[ev.Category] && ev.Severity.AtLeast(model.SeverityWarning) {
+		a.countBurst(ev, now, s)
+	}
 	return s
+}
+
+func burstKey(ev *model.Event) string { return ev.SourceID + "|" + ev.Category }
+
+// countBurst counts ev toward its source's burst and sets s.Burst when the
+// burst is due: burstMin or more in 5 minutes and none told in the last
+// hour. The first event that finds it due tells it (Handle sets At), so
+// it is the one that makes it unless no route wanted that one.
+func (a *alerting) countBurst(ev *model.Event, now time.Time, s *signal) {
+	k := burstKey(ev)
+	b := a.bursts[k]
+	if b == nil {
+		b = &burstState{Minute: now.Unix() / 60}
+		a.bursts[k] = b
+	}
+	if cur := now.Unix() / 60; cur > b.Minute {
+		shift := int(min(cur-b.Minute, int64(len(b.Recent))))
+		copy(b.Recent[shift:], b.Recent[:len(b.Recent)-shift])
+		clear(b.Recent[:shift])
+		b.Minute = cur
+	}
+	b.Recent[0]++
+	b.Last = now
+	for _, c := range b.Recent {
+		s.BurstN += c
+	}
+	s.Burst = s.BurstN >= burstMin && now.Sub(b.At) >= burstEvery
+}
+
+// routine reports whether c5 events in 5 minutes is what the pattern's
+// last burst reached at about this time of day (within an hour) on an
+// earlier day of the last week, or less than half as many again: a job
+// that runs every night. The hourly average forgets such a burst over the
+// quiet hours between.
+func (p *patternState) routine(c5 int, now time.Time) bool {
+	ago := now.Sub(p.LastPeakAt)
+	if p.LastPeak == 0 || ago < 23*time.Hour || ago > newAfter {
+		return false
+	}
+	off := ago % (24 * time.Hour)
+	return (off <= time.Hour || off >= 23*time.Hour) && float64(c5) < routineFactor*float64(p.LastPeak)
 }
 
 // roll moves the hour and minute counters up to now.
@@ -146,17 +226,28 @@ func (p *patternState) usual(now time.Time) float64 {
 	return p.Baseline
 }
 
-// evictPatterns drops the 10% of patterns seen longest ago.
+// evictPatterns drops the 10% of patterns seen longest ago, those that
+// never reached an error first: many distinct warnings must not make
+// known errors new again.
 func (a *alerting) evictPatterns() {
 	type kv struct {
-		fp   string
-		last time.Time
+		fp     string
+		last   time.Time
+		lesser bool
 	}
 	all := make([]kv, 0, len(a.patterns))
 	for fp, p := range a.patterns {
-		all = append(all, kv{fp, p.Last})
+		all = append(all, kv{fp, p.Last, p.MaxSev.Rank() < promoteFloor.Rank()})
 	}
-	slices.SortFunc(all, func(x, y kv) int { return x.last.Compare(y.last) })
+	slices.SortFunc(all, func(x, y kv) int {
+		if x.lesser != y.lesser {
+			if x.lesser {
+				return -1
+			}
+			return 1
+		}
+		return x.last.Compare(y.last)
+	})
 	for _, e := range all[:max(len(all)/10, len(all)-maxPatterns)] {
 		delete(a.patterns, e.fp)
 	}
@@ -173,6 +264,11 @@ func (a *alerting) prunePatterns(now time.Time) {
 	for id, s := range a.sources {
 		if now.Sub(s.Last) > patternTTL {
 			delete(a.sources, id)
+		}
+	}
+	for k, b := range a.bursts {
+		if now.Sub(b.Last) >= spikeWindow && now.Sub(b.At) >= burstEvery {
+			delete(a.bursts, k) // nothing counted and nothing to remember
 		}
 	}
 }

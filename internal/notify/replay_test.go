@@ -180,7 +180,7 @@ func TestCountConservation(t *testing.T) {
 			t.Errorf("%s: %d decisions", k, n)
 		}
 	}
-	if e.d.Decided[indexOf(Actions, ActionHeld)].Load()+d2.Decided[indexOf(Actions, ActionHeld)].Load() == 0 {
+	if e.d.Decided[indexOf(Actions[:], ActionHeld)].Load()+d2.Decided[indexOf(Actions[:], ActionHeld)].Load() == 0 {
 		t.Error("nothing was held: flood protection wasn't exercised")
 	}
 }
@@ -273,7 +273,7 @@ func TestIncidentReplay(t *testing.T) {
 		events := incident(e)
 		decs, _ := e.replay(t0, events, 35*time.Minute)
 		alerts, digests := e.sinks["slack"].alerts(), e.sinks["slack"].digests()
-		var crit, flood int
+		var crit, flood, burst int
 		var floodAt time.Time
 		for _, m := range alerts {
 			switch {
@@ -282,10 +282,12 @@ func TestIncidentReplay(t *testing.T) {
 			case m.Reason.Code == ReasonSpike && strings.HasPrefix(m.Reason.Text, "Flood: 50 in the last 5 minutes"):
 				flood++
 				floodAt = m.at
+			case m.Reason.Code == ReasonBurst && m.Reason.Text == "Burst: 20 security warnings or worse from bastion in the last 5 minutes.":
+				burst++ // the 20th SSH failure, 95 s into them
 			}
 		}
-		if crit != 10 || flood != 1 || len(alerts) != 11 || len(digests) != 1 || !digests[0].at.Equal(t0.Add(30*time.Minute)) {
-			t.Fatalf("slack: %d critical, %d flood, %d alerts, %d digests", crit, flood, len(alerts), len(digests))
+		if crit != 10 || flood != 1 || burst != 1 || len(alerts) != 12 || len(digests) != 1 || !digests[0].at.Equal(t0.Add(30*time.Minute)) {
+			t.Fatalf("slack: %d critical, %d flood, %d burst, %d alerts, %d digests", crit, flood, burst, len(alerts), len(digests))
 		}
 		if want := t0.Add(49 * 300 * time.Millisecond); !floodAt.Equal(want) {
 			t.Errorf("flood at %v, want the 50th DB event at %v", floodAt, want)
@@ -448,9 +450,9 @@ func TestMemoryBounds(t *testing.T) {
 	var ids []string
 	for i := 0; i <= digestLogSize; i++ {
 		e.d.Handle(model.Event{ID: fmt.Sprint("d", i), SourceID: "s", Fingerprint: "fp", Severity: model.SeverityError})
-		id, ok := e.d.FlushDigest("slack")
-		if !ok {
-			t.Fatal("nothing to flush")
+		id, err := e.d.FlushDigest("slack")
+		if err != nil {
+			t.Fatal(err)
 		}
 		ids = append(ids, id)
 		e.pump()

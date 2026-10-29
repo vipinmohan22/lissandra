@@ -18,7 +18,7 @@
 {"line": "10.244.0.1 - - [11/Oct/2026:10:00:23 +0000] \"GET /api/v1/errors?page=2 HTTP/2.0\" 200 1834 \"https://admin.example.com/errors\" \"Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0\" 512 0.034 [shop-api-8080] [] 10.244.2.15:8080 1834 0.034 200 b7e2c9d1a0f34e5b8c6d7e8f9a0b1c2d", "severity": "info", "category": "", "why": "v1 raised: common:10"}
 {"line": "2026-10-11T10:00:16.789012345Z stdout F 10.244.0.1 - - [11/Oct/2026:10:00:16 +0000] \"GET /api/v1/alerts?severity=critical HTTP/1.1\" 200 1834 \"https://admin.example.com/alerts\" \"Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0\" 512 0.034 [shop-api-8080] [] 10.244.2.15:8080 1834 0.034 200 b7e2c9d1a0f34e5b8c6d7e8f9a0b1c2d", "severity": "info", "category": "", "why": "v1 raised: common:59"}
 {"line": "2026-10-11 10:00:00 10.0.0.5 GET /docs/fatal-exceptions.html - 443 - 203.0.113.5 Mozilla/5.0+(Windows+NT+10.0;+Win64;+x64)+AppleWebKit/537.36+(KHTML,+like+Gecko)+Chrome/129.0.0.0+Safari/537.36 https://www.example.com/docs/ 200 0 0 15", "severity": "info", "category": "", "why": "v1 raised: web-proxy:95"}
-{"line": "INFO:     10.0.0.5:52346 - \"GET /api/report HTTP/1.1\" 500 Internal Server Error", "severity": "info", "category": "http", "why": "v1 raised: common-2:181"}
+{"line": "INFO:     10.0.0.5:52346 - \"GET /api/report HTTP/1.1\" 500 Internal Server Error", "severity": "error", "category": "http", "why": "v1 raised: common-2:181; a 5xx is a server error whatever level the access logger writes it at"}
 {"line": "2026-10-11 11:33:12.233  WARN 1 --- [nio-8080-exec-9] o.h.engine.jdbc.spi.SqlExceptionHelper   : SQL Error: 0, SQLState: 23505", "severity": "warning", "category": "database", "why": "v1 raised: common-2:153"}
 {"line": "2026-10-11 10:00:00.123  WARN 4321 --- [nio-8080-exec-2] .w.s.m.s.DefaultHandlerExceptionResolver : Resolved [org.springframework.web.HttpRequestMethodNotSupportedException: Request method 'POST' not supported]", "severity": "warning", "category": "application", "why": "v1 raised: jvm-dotnet:11"}
 {"line": "warn: Microsoft.EntityFrameworkCore.Model.Validation[10400]\n      Sensitive data logging is enabled. Log entries and exception messages may include sensitive application data; this mode should only be enabled during development.", "severity": "warning", "category": "application", "why": "v1 raised: adversarial:307"}
@@ -73,3 +73,46 @@
 {"line": "shutting the payment service down for maintenance", "severity": "info", "category": "", "why": "control: planned"}
 {"line": "scaled api down to 0 replicas", "severity": "info", "category": "", "why": "control: planned"}
 {"line": "java.lang.OutOfMemoryError: Java heap space", "severity": "error", "category": "resource", "why": "unstated JVM OOM"}
+{"line": "Exception in thread \"main\" java.lang.IllegalStateException: ledger closed\n\tat com.shop.App.main(App.java:10)", "level": "6", "severity": "error", "category": "application", "why": "review: journald PRIORITY 6 is the stream's default: keep_stated rules still apply"}
+{"line": "java.lang.OutOfMemoryError: Java heap space", "level": "6", "severity": "error", "category": "resource", "why": "review: journald PRIORITY 6 is the stream's default"}
+{"line": "10.0.0.1 - - [29/Oct/2026:10:00:00 +0000] \"GET /api/orders HTTP/1.1\" 502 157 \"-\" \"curl/8.5.0\"", "level": "6", "severity": "error", "category": "http", "why": "review: GELF level 6 is the stream's default"}
+{"line": "<190>Oct 29 10:00:00 web1 nginx: 10.0.0.1 - - [29/Oct/2026:10:00:00 +0000] \"GET /api/orders HTTP/1.1\" 502 157 \"-\" \"curl/8.5.0\"", "severity": "error", "category": "http", "why": "review: a syslog PRI of info is the stream's default"}
+{"line": "<38>Oct 29 10:00:00 bastion sshd[1234]: Failed password for root from 203.0.113.9 port 52211 ssh2", "severity": "warning", "category": "auth", "why": "review: a syslog PRI of info is the stream's default"}
+{"line": "Failed password for invalid user admin from 203.0.113.9 port 52212 ssh2", "level": "6", "severity": "warning", "category": "auth", "why": "review: journald PRIORITY 6 is the stream's default"}
+{"line": "2026-10-29 10:00:00 INFO Exception mapper registered: com.shop.ErrMapper", "level": "6", "severity": "info", "category": "application", "why": "review: a level the text states is kept under a stream's default"}
+{"line": "Rule: 5712 (level 10) -> 'sshd: brute force trying to get access to the system. Authentication failed.'", "severity": "error", "category": "security", "why": "review: Login failures runs before the attack rules: they raise what it lowers"}
+{"line": "brute force attack detected: 25 failed password attempts for root from 203.0.113.9", "severity": "error", "category": "security", "why": "review: Login failures runs before the attack rules"}
+{"line": "LDAP authentication failed: backend unreachable", "severity": "critical", "category": "auth", "why": "review: Login failures runs before Service down"}
+{"line": "2026/10/11 10:00:00 failed to connect to `host=db user=app database=shop`: failed SASL auth (FATAL: password authentication failed for user \"app\" (SQLSTATE 28P01))", "severity": "critical", "category": "database", "why": "review: a client that can't connect is not a routine login failure"}
+{"line": "[2026-10-29 10:00:00] alertmanager.INFO: [RESOLVED] payments api is down", "severity": "info", "category": "", "why": "review: Service down: a resolved alert"}
+{"line": "2026-10-29 02:00:00,000 INFO backup: Starting database offline backup (pg_basebackup)", "severity": "info", "category": "", "why": "review: Service down: an offline backup"}
+{"line": "2026-10-29T10:00:00Z INFO maintenance mode enabled: site is offline until 11:00", "severity": "info", "category": "", "why": "review: Service down: maintenance mode"}
+{"line": "2026-10-29 10:00:00 INFO deploy: draining traffic; service is now offline on this node", "severity": "info", "category": "application", "why": "review: Service down keeps a stated info"}
+{"line": "2026-10-29 10:00:00 INFO autoscaler: cluster down-scaling: removing 2 idle nodes", "severity": "info", "category": "", "why": "review: Service down: down-scaling"}
+{"line": "2026-10-29 10:00:00 ERROR checkout: payments api is down", "severity": "critical", "category": "application", "why": "review: Service down raises a stated error"}
+{"line": "payments api is down", "severity": "critical", "category": "application", "why": "review: Service down"}
+{"line": "INFO:     10.0.0.7:51234 - \"POST /api/orders HTTP/1.1\" 503 Service Unavailable", "severity": "error", "category": "http", "why": "review: a 5xx is a server error whatever level the access logger writes"}
+{"line": "INFO:werkzeug:127.0.0.1 - - [29/Oct/2026 10:00:00] \"GET /checkout HTTP/1.1\" 500 -", "severity": "error", "category": "http", "why": "review: a 5xx is a server error whatever level the access logger writes"}
+{"line": "2026-10-29 10:00:00 UTC | CORE | INFO | (pkg/collector/worker/check_logger.go:59 in CheckStarted) | check:oom_kill | Running check...", "severity": "info", "category": "", "why": "review: oom_kill is a check name, not an OOM kill"}
+{"line": "memory.events: low 0 high 0 max 0 oom 0 oom_kill 0", "severity": "info", "category": "", "why": "review: oom_kill is a counter"}
+{"line": "vm.oom_kill_allocating_task = 0", "severity": "info", "category": "", "why": "review: oom_kill is a sysctl"}
+{"line": "Container web in pod web-7d9f-x2k4p was OOMKilled", "severity": "critical", "category": "resource", "why": "review: OOMKilled"}
+{"line": "[12345.678] oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,task=java,pid=1234,uid=1000", "severity": "critical", "category": "resource", "why": "review: the kernel's oom-kill"}
+{"line": "java.lang.StackOverflowError\n\tat com.shop.tax.TaxService.compute(TaxService.java:87)\n\tat com.shop.tax.TaxService.compute(TaxService.java:91)", "severity": "error", "category": "application", "why": "review: a Java Error's stack frames"}
+{"line": "java.lang.NoClassDefFoundError: com/shop/tax/Rates\n\tat com.shop.tax.TaxService.compute(TaxService.java:87)", "severity": "error", "category": "application", "why": "review: a Java Error's stack frames"}
+{"line": "circuit breaker 'payments' changed state from OPEN to CLOSED", "severity": "info", "category": "", "why": "review: a circuit breaker closing"}
+{"line": "CircuitBreaker 'backendA' changed state from OPEN to HALF_OPEN", "severity": "info", "category": "", "why": "review: a circuit breaker half-opening"}
+{"line": "CircuitBreaker 'backendA' changed state from CLOSED to OPEN", "severity": "warning", "category": "network", "why": "review: a circuit breaker opening"}
+{"line": "circuit breaker opened for payments-api after 5 failures", "severity": "warning", "category": "network", "why": "review: a circuit breaker opening"}
+{"line": "Re-enabling server 10.0.0.2:3306 with replication lag of 0 seconds", "severity": "info", "category": "database", "why": "review: no replication lag"}
+{"line": "replication lag is 0.2s (threshold 30s)", "severity": "info", "category": "", "why": "review: replication lag under a second"}
+{"line": "replication lag is 45s (threshold 30s)", "severity": "warning", "category": "database", "why": "review: replication lag"}
+{"line": "disk usage 61% of 500G, alert at 90%", "severity": "info", "category": "", "why": "review: disk usage below the threshold it names"}
+{"line": "disk usage 91% exceeds threshold 85%", "severity": "warning", "category": "resource", "why": "review: disk usage above 85%"}
+{"line": "Started worker pool: queue size 10000", "severity": "info", "category": "", "why": "review: a queue's capacity"}
+{"line": "Declared queue tasks (0 messages, 0 consumers)", "severity": "info", "category": "", "why": "review: a queue just declared"}
+{"line": "queue depth 25000 on tasks", "severity": "warning", "category": "performance", "why": "review: a queue backlog"}
+{"line": "queue 'tasks' has 0 consumers", "severity": "warning", "category": "performance", "why": "review: a queue nothing consumes"}
+{"line": "Certificate renewed for example.com; old certificate has expired and was removed", "severity": "info", "category": "", "why": "review: an expired certificate replaced"}
+{"line": "2026-10-29 10:00:00 INFO Certificate renewed for example.com; old certificate has expired and was removed", "severity": "info", "category": "", "why": "review: an expired certificate replaced"}
+{"line": "x509: certificate has expired or is not yet valid", "severity": "error", "category": "network", "why": "review: an expired certificate"}

@@ -8,6 +8,7 @@ package learn
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -182,10 +183,13 @@ func newRule(ev *model.Event, pattern string) config.Rule {
 // classify.Pattern up to date, in c: a rule that still holds the pattern
 // of its example gets the example's pattern now; any other gets its
 // pattern renormalized. Learned rules that then share a source and a
-// pattern are merged into one: an approved rule wins over a rejected one,
-// which wins over one awaiting review, the earliest on a tie; it takes the
-// place of the first of them. It returns how many rules were rewritten and
-// how many removed. Running it again changes nothing.
+// pattern, and do the same to the events they match (category, severity,
+// tags, drop, stop, enabled…), are merged into one: an approved rule wins
+// over a rejected one, which wins over one awaiting review, the earliest
+// on a tie; it takes the place of the first of them. Rules that do
+// something else are kept, as they all applied before. It returns how
+// many rules were rewritten and how many removed. Running it again
+// changes nothing.
 func MigratePatterns(c *config.Config) (rewritten, removed int) {
 	for i := range c.Rules {
 		r := &c.Rules[i]
@@ -217,6 +221,7 @@ func MigratePatterns(c *config.Config) (rewritten, removed int) {
 	}
 	type group struct{ first, keep, n int }
 	groups := map[string]*group{}
+	keys := make([]string, len(c.Rules)) // "" for rules that aren't learned
 	var order []string
 	for i := range c.Rules {
 		r := &c.Rules[i]
@@ -224,7 +229,9 @@ func MigratePatterns(c *config.Config) (rewritten, removed int) {
 		if p == "" {
 			continue
 		}
-		k := strings.Join(r.SourceIDs, ",") + "\x00" + key(r.Learned.SourceID, p)
+		// Only rules that do the same merge: the others all applied before.
+		k := strings.Join(r.SourceIDs, ",") + "\x00" + key(r.Learned.SourceID, p) + "\x00" + action(*r)
+		keys[i] = k
 		g := groups[k]
 		if g == nil {
 			groups[k] = &group{first: i, keep: i, n: 1}
@@ -248,7 +255,7 @@ func MigratePatterns(c *config.Config) (rewritten, removed int) {
 		}
 		c.Rules[g.first] = keep
 		for i := range c.Rules {
-			if i != g.first && patternOf(&c.Rules[i]) != "" && strings.Join(c.Rules[i].SourceIDs, ",")+"\x00"+key(c.Rules[i].Learned.SourceID, patternOf(&c.Rules[i])) == k {
+			if i != g.first && keys[i] == k {
 				drop[i] = true
 			}
 		}
@@ -264,6 +271,15 @@ func MigratePatterns(c *config.Config) (rewritten, removed int) {
 		removed = len(drop)
 	}
 	return rewritten, removed
+}
+
+// action is what rule r does to the events it matches, what makes it a
+// rule (name, review status, learned details) aside: rules with the same
+// action and pattern can be merged.
+func action(r config.Rule) string {
+	r.ID, r.Name, r.Description, r.Status, r.Learned = "", "", "", "", nil
+	b, _ := json.Marshal(r)
+	return string(b)
 }
 
 // ruleName is the name a rule learned for pattern gets.
